@@ -49,6 +49,10 @@ CREATE TABLE IF NOT EXISTS clients (
     barbershop_id UUID NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     phone VARCHAR(20) NOT NULL,
+    email VARCHAR(255),
+    birth_date DATE,
+    address TEXT,
+    notes TEXT,
     last_visit DATE,
     total_spent DECIMAL(10, 2) DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

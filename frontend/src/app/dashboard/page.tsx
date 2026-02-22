@@ -3,15 +3,26 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Calendar, DollarSign, TrendingUp, Users, LogOut, Menu } from 'lucide-react';
+import { Navbar } from '@/components/Navbar';
+import { DashboardCards } from '@/components/DashboardCards';
+import { ProfitBar } from '@/components/ProfitBar';
+import { WeeklyChart } from '@/components/WeeklyChart';
+import { LoadingSkeleton } from '@/components/LoadingSkeleton';
+import { AppointmentModule } from '@/components/AppointmentModule';
+import { ClientModule } from '@/components/ClientModule';
+import { ServiceBarberModule } from '@/components/ServiceBarberModule';
+import { FinanceModule } from '@/components/FinanceModule';
+import { WhatsAppModule } from '@/components/WhatsAppModule';
+import { useToast } from '@/components/Toast';
+import { Settings, CreditCard, Clock, Wallet, UserCheck, Scissors } from 'lucide-react';
+import type { DashboardData, TabId } from '@/types';
 
 export default function DashboardPage() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const router = useRouter();
+  const { showToast } = useToast();
 
   useEffect(() => {
     loadDashboard();
@@ -22,8 +33,8 @@ export default function DashboardPage() {
       const response = await api.get('/dashboard');
       setData(response.data);
     } catch (error) {
-      console.error('Erro ao carregar dashboard:', error);
-      router.push('/');
+      showToast('Erro ao carregar dashboard. Redirecionando...', 'error');
+      setTimeout(() => router.push('/'), 2000);
     } finally {
       setLoading(false);
     }
@@ -36,234 +47,122 @@ export default function DashboardPage() {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-black">
-        <div className="text-2xl text-primary">Carregando...</div>
-      </div>
-    );
+    return <LoadingSkeleton />;
   }
 
   return (
     <div className="min-h-screen bg-black">
-      <nav className="bg-dark-light border-b border-primary/20 p-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setMenuOpen(!menuOpen)}
-              className="lg:hidden text-primary"
-            >
-              <Menu size={24} />
-            </button>
-            <h1 className="text-2xl font-bold text-primary">💈 BarberPro</h1>
-          </div>
-          
-          <div className="hidden lg:flex gap-4">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`px-4 py-2 rounded-lg transition-all ${
-                activeTab === 'dashboard' 
-                  ? 'bg-primary text-black' 
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Dashboard
-            </button>
-            <button
-              onClick={() => setActiveTab('agendamentos')}
-              className={`px-4 py-2 rounded-lg transition-all ${
-                activeTab === 'agendamentos' 
-                  ? 'bg-primary text-black' 
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Agendamentos
-            </button>
-            <button
-              onClick={() => setActiveTab('financeiro')}
-              className={`px-4 py-2 rounded-lg transition-all ${
-                activeTab === 'financeiro' 
-                  ? 'bg-primary text-black' 
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Financeiro
-            </button>
-            <button
-              onClick={() => setActiveTab('clientes')}
-              className={`px-4 py-2 rounded-lg transition-all ${
-                activeTab === 'clientes' 
-                  ? 'bg-primary text-black' 
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Clientes
-            </button>
-            <button
-              onClick={() => setActiveTab('servicos')}
-              className={`px-4 py-2 rounded-lg transition-all ${
-                activeTab === 'servicos' 
-                  ? 'bg-primary text-black' 
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Serviços
-            </button>
-              <button
-              onClick={() => setActiveTab('configuracoes')}
-              className={`px-4 py-2 rounded-lg transition-all ${
-                activeTab === 'configuracoes' 
-                  ? 'bg-primary text-black' 
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Configurações
-            </button>
-          </div>
-
-          <button
-            onClick={handleLogout}
-            className="text-gray-400 hover:text-primary transition-all"
-          >
-            <LogOut size={24} />
-          </button>
-        </div>
-      </nav>
+      <Navbar
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onLogout={handleLogout}
+      />
 
       <main className="max-w-7xl mx-auto p-4 lg:p-8">
-        {activeTab === 'dashboard' && (
+        {activeTab === 'dashboard' && data && (
           <>
             <h2 className="text-3xl font-bold text-white mb-8">Dashboard</h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              <div className="bg-dark-light border border-primary/20 rounded-xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <Calendar className="text-primary" size={32} />
-                  <span className="text-3xl font-bold text-primary">
-                    {data.appointmentsToday}
-                  </span>
-                </div>
-                <p className="text-gray-400">Agendamentos Hoje</p>
-              </div>
-
-              <div className="bg-dark-light border border-green-500/20 rounded-xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <DollarSign className="text-green-500" size={32} />
-                  <span className="text-3xl font-bold text-green-500">
-                    R$ {data.earningsToday.toFixed(2)}
-                  </span>
-                </div>
-                <p className="text-gray-400">Ganhos do Dia</p>
-              </div>
-
-              <div className="bg-dark-light border border-red-500/20 rounded-xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <TrendingUp className="text-red-500" size={32} />
-                  <span className="text-3xl font-bold text-red-500">
-                    R$ {data.expensesToday.toFixed(2)}
-                  </span>
-                </div>
-                <p className="text-gray-400">Gastos do Dia</p>
-              </div>
-
-              <div className="bg-dark-light border border-blue-500/20 rounded-xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <Users className="text-blue-500" size={32} />
-                  <span className="text-3xl font-bold text-blue-500">
-                    {data.totalClients}
-                  </span>
-                </div>
-                <p className="text-gray-400">Total de Clientes</p>
-              </div>
-            </div>
-
-            <div className="bg-dark-light border border-primary/20 rounded-xl p-8 mb-8">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-2xl font-bold text-white">Lucro do Dia</h3>
-                <span className={`text-3xl font-bold ${
-                  data.profitToday >= 0 ? 'text-green-500' : 'text-red-500'
-                }`}>
-                  R$ {data.profitToday.toFixed(2)}
-                </span>
-              </div>
-              <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-primary rounded-full transition-all duration-500"
-                  style={{ 
-                    width: data.earningsToday > 0 
-                      ? `${(data.profitToday / data.earningsToday) * 100}%` 
-                      : '0%' 
-                  }}
-                />
-              </div>
-            </div>
-
-            <div className="bg-dark-light border border-primary/20 rounded-xl p-8">
-              <h3 className="text-2xl font-bold text-white mb-6">Faturamento Semanal</h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={data.weeklyEarnings}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                  <XAxis 
-                    dataKey="date" 
-                    stroke="#999"
-                    tickFormatter={(date) => new Date(date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
-                  />
-                  <YAxis stroke="#999" />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: '#1a1a1a', 
-                      border: '1px solid #FF7A00',
-                      borderRadius: '8px'
-                    }}
-                    labelFormatter={(date) => new Date(date).toLocaleDateString('pt-BR')}
-                    formatter={(value: any) => [`R$ ${value}`, 'Faturamento']}
-                  />
-                  <Bar dataKey="total" fill="#FF7A00" radius={[8, 8, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            <DashboardCards data={data} />
+            <ProfitBar data={data} />
+            <WeeklyChart data={data.weeklyEarnings} />
           </>
         )}
 
-        {activeTab === 'agendamentos' && (
-          <div>
-            <h2 className="text-3xl font-bold text-white mb-8">Agendamentos</h2>
-            <div className="bg-dark-light border border-primary/20 rounded-xl p-8">
-              <p className="text-gray-400 text-center">
-                Módulo de agendamentos em desenvolvimento...
-              </p>
-            </div>
+        {activeTab === 'dashboard' && !data && (
+          <div className="bg-dark-light border border-red-500/20 rounded-xl p-8 text-center">
+            <p className="text-gray-400">Não foi possível carregar os dados do dashboard.</p>
+            <button
+              onClick={loadDashboard}
+              className="mt-4 px-6 py-2 bg-primary hover:bg-orange-600 text-black font-bold rounded-lg transition-all"
+            >
+              Tentar Novamente
+            </button>
           </div>
+        )}
+
+        {activeTab === 'agendamentos' && (
+          <AppointmentModule />
         )}
 
         {activeTab === 'financeiro' && (
-          <div>
-            <h2 className="text-3xl font-bold text-white mb-8">Financeiro</h2>
-            <div className="bg-dark-light border border-primary/20 rounded-xl p-8">
-              <p className="text-gray-400 text-center">
-                Módulo financeiro em desenvolvimento...
-              </p>
-            </div>
-          </div>
+          <FinanceModule />
         )}
 
         {activeTab === 'clientes' && (
+          <ClientModule />
+        )}
+
+        {activeTab === 'whatsapp' && (
+          <WhatsAppModule />
+        )}
+
+        {activeTab === 'servicos' && (
+          <ServiceBarberModule />
+        )}
+
+        {activeTab === 'planos' && (
           <div>
-            <h2 className="text-3xl font-bold text-white mb-8">Clientes</h2>
-            <div className="bg-dark-light border border-primary/20 rounded-xl p-8">
-              <p className="text-gray-400 text-center">
-                Módulo de clientes em desenvolvimento...
-              </p>
+            <h2 className="text-3xl font-bold text-white mb-8">Planos</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-dark-light border border-gray-700 rounded-xl p-8">
+                <div className="text-center mb-6">
+                  <h3 className="text-xl font-bold text-white mb-2">Básico</h3>
+                  <p className="text-4xl font-bold text-primary">R$ 49<span className="text-sm text-gray-400">/mês</span></p>
+                </div>
+                <ul className="space-y-3 text-gray-400 text-sm">
+                  <li className="flex items-center gap-2">✅ 1 barbeiro</li>
+                  <li className="flex items-center gap-2">✅ Agendamentos ilimitados</li>
+                  <li className="flex items-center gap-2">✅ Controle financeiro básico</li>
+                  <li className="flex items-center gap-2">❌ Relatórios mensais</li>
+                  <li className="flex items-center gap-2">✅ Bot WhatsApp</li>
+                </ul>
+              </div>
+
+              <div className="bg-dark-light border-2 border-primary rounded-xl p-8 relative">
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-primary text-black text-xs font-bold px-4 py-1 rounded-full">
+                  POPULAR
+                </div>
+                <div className="text-center mb-6">
+                  <h3 className="text-xl font-bold text-white mb-2">Profissional</h3>
+                  <p className="text-4xl font-bold text-primary">R$ 99<span className="text-sm text-gray-400">/mês</span></p>
+                </div>
+                <ul className="space-y-3 text-gray-400 text-sm">
+                  <li className="flex items-center gap-2">✅ Até 5 barbeiros</li>
+                  <li className="flex items-center gap-2">✅ Agendamentos ilimitados</li>
+                  <li className="flex items-center gap-2">✅ Controle financeiro completo</li>
+                  <li className="flex items-center gap-2">✅ Relatórios mensais</li>
+                  <li className="flex items-center gap-2">✅ Bot WhatsApp</li>
+                </ul>
+              </div>
+
+              <div className="bg-dark-light border border-gray-700 rounded-xl p-8">
+                <div className="text-center mb-6">
+                  <h3 className="text-xl font-bold text-white mb-2">Premium</h3>
+                  <p className="text-4xl font-bold text-primary">R$ 199<span className="text-sm text-gray-400">/mês</span></p>
+                </div>
+                <ul className="space-y-3 text-gray-400 text-sm">
+                  <li className="flex items-center gap-2">✅ Barbeiros ilimitados</li>
+                  <li className="flex items-center gap-2">✅ Agendamentos ilimitados</li>
+                  <li className="flex items-center gap-2">✅ Controle financeiro completo</li>
+                  <li className="flex items-center gap-2">✅ Relatórios mensais</li>
+                  <li className="flex items-center gap-2">✅ Bot WhatsApp</li>
+                </ul>
+              </div>
             </div>
           </div>
         )}
 
-        {activeTab === 'servicos' && (
+        {activeTab === 'configuracoes' && (
           <div>
-            <h2 className="text-3xl font-bold text-white mb-8">Serviços e Barbeiros</h2>
+            <h2 className="text-3xl font-bold text-white mb-8">Configurações</h2>
             <div className="bg-dark-light border border-primary/20 rounded-xl p-8">
-              <p className="text-gray-400 text-center">
-                Módulo de serviços em desenvolvimento...
-              </p>
+              <div className="flex flex-col items-center justify-center py-12">
+                <Settings className="text-gray-400 mb-4" size={48} />
+                <h3 className="text-xl font-semibold text-white mb-2">Configurações</h3>
+                <p className="text-gray-400 text-center max-w-md">
+                  Configure dados da barbearia, horário de funcionamento, notificações e integrações.
+                </p>
+              </div>
             </div>
           </div>
         )}

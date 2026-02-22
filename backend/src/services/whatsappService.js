@@ -31,31 +31,42 @@ export const handleWebhook = async (req, res) => {
     const { phone, message, barbershopId } = req.body;
 
     const normalizedPhone = phone.replace(/\D/g, '');
+    let finalBarbershopId = barbershopId;
+
+    if (barbershopId === 'local-test') {
+      const firstBarbershop = await pool.query('SELECT id FROM barbershops LIMIT 1');
+      finalBarbershopId = firstBarbershop.rows[0].id;
+    }
 
     let session = await pool.query(
       'SELECT * FROM whatsapp_sessions WHERE phone = $1 AND barbershop_id = $2 ORDER BY updated_at DESC LIMIT 1',
-      [normalizedPhone, barbershopId]
+      [normalizedPhone, finalBarbershopId]
     );
 
-    if (session.rows.length === 0 || 
-        (new Date() - new Date(session.rows[0].updated_at)) > 1800000) {
-      
+    if (session.rows.length === 0 ||
+      (new Date() - new Date(session.rows[0].updated_at)) > 1800000) {
+
       await pool.query(
         `INSERT INTO whatsapp_sessions (phone, barbershop_id, step, data)
          VALUES ($1, $2, 'menu', '{}')`,
-        [normalizedPhone, barbershopId]
+        [normalizedPhone, finalBarbershopId]
       );
 
       const barbershop = await pool.query(
         'SELECT name FROM barbershops WHERE id = $1',
-        [barbershopId]
+        [finalBarbershopId]
       );
 
-      const welcomeMessage = `Olá 👋 Bem-vindo à ${barbershop.rows[0].name}\n\n` +
-        `Escolha uma opção:\n` +
-        `1️⃣ Agendar horário\n` +
-        `2️⃣ Ver serviços\n` +
-        `3️⃣ Falar com atendente`;
+      const welcomeMessage = `Olá 👋 Bem-vindo à ${barbershop.rows[0].name}!\n\n` +
+        `Me chame de *BarberBot* 🤖 e estou aqui para agilizar seu atendimento.\n\n` +
+        `Como posso ajudar hoje?\n\n` +
+        `1️⃣ *Agendar um horário*\n` +
+        `2️⃣ Ver nossos serviços\n` +
+        `3️⃣ Falar com um humano 👨‍💼`;
+
+      if (barbershopId === 'local-test') {
+        return res.json({ success: true, botResponse: welcomeMessage });
+      }
 
       await sendWhatsAppMessage(normalizedPhone, welcomeMessage);
       return res.json({ success: true });
@@ -63,10 +74,13 @@ export const handleWebhook = async (req, res) => {
 
     session = session.rows[0];
 
-    const response = await processMessage(normalizedPhone, message, session, barbershopId);
-    
-    await sendWhatsAppMessage(normalizedPhone, response.message);
+    const response = await processMessage(normalizedPhone, message, session, finalBarbershopId);
 
+    if (barbershopId === 'local-test') {
+      return res.json({ success: true, botResponse: response.message });
+    }
+
+    await sendWhatsAppMessage(normalizedPhone, response.message);
     res.json({ success: true });
 
   } catch (error) {
@@ -85,6 +99,9 @@ const processMessage = async (phone, message, session, barbershopId) => {
 
     case 'choose_service':
       return await handleServiceChoice(phone, message, barbershopId, data);
+
+    case 'ask_name':
+      return await handleNameCapture(phone, message, barbershopId, data);
 
     case 'choose_barber':
       return await handleBarberChoice(phone, message, barbershopId, data);
@@ -155,15 +172,41 @@ const handleServiceChoice = async (phone, choice, barbershopId, data) => {
   data.serviceId = selectedService.id;
   data.serviceName = selectedService.name;
   data.servicePrice = selectedService.price;
+  data.serviceDuration = selectedService.duration_minutes;
 
+  // Verificar se o cliente já existe
+  const client = await pool.query(
+    'SELECT name FROM clients WHERE barbershop_id = $1 AND phone = $2',
+    [barbershopId, phone]
+  );
+
+  if (client.rows.length > 0) {
+    data.clientName = client.rows[0].name;
+    await updateSession(phone, barbershopId, 'choose_barber', data);
+    return await listBarbers(barbershopId);
+  } else {
+    await updateSession(phone, barbershopId, 'ask_name', data);
+    return { message: 'Vejo que é sua primeira vez aqui! 😊\n\nQual o seu *nome completo*?' };
+  }
+};
+
+const handleNameCapture = async (phone, name, barbershopId, data) => {
+  if (name.length < 3) {
+    return { message: 'Por favor, digite seu nome completo para continuarmos.' };
+  }
+
+  data.clientName = name;
   await updateSession(phone, barbershopId, 'choose_barber', data);
+  return await listBarbers(barbershopId);
+};
 
+const listBarbers = async (barbershopId) => {
   const barbers = await pool.query(
     'SELECT * FROM barbers WHERE barbershop_id = $1 AND active = true ORDER BY name',
     [barbershopId]
   );
 
-  let message = '👨‍🦱 Escolha o barbeiro:\n\n';
+  let message = '👨‍🦱 *Escolha o barbeiro:*\n\n';
   barbers.rows.forEach((barber, index) => {
     message += `${index + 1}️⃣ ${barber.name}\n`;
   });
@@ -191,7 +234,7 @@ const handleBarberChoice = async (phone, choice, barbershopId, data) => {
 
   const today = new Date();
   const dates = [];
-  
+
   for (let i = 0; i < 7; i++) {
     const date = new Date(today);
     date.setDate(date.getDate() + i);
@@ -230,16 +273,32 @@ const handleDateChoice = async (phone, choice, barbershopId, data) => {
   const bookedTimes = bookedSlots.rows.map(row => row.time);
 
   const slots = [];
+  const duration = data.serviceDuration || 30;
+
+  // Lógica de slots inteligentes (respeitando duração)
   for (let hour = 9; hour < 19; hour++) {
-    for (let minute = 0; minute < 60; minute += 60) {
+    for (let minute = 0; minute < 60; minute += 30) {
       const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+
+      // Verifica se o slot está livre
       if (!bookedTimes.includes(time)) {
+        // Verifica se há tempo suficiente para o serviço (simplificado: próximo slot também livre se duration > 30)
+        if (duration > 30) {
+          const nextMinute = minute + 30;
+          const nextHour = nextMinute >= 60 ? hour + 1 : hour;
+          const nextTime = `${String(nextHour).padStart(2, '0')}:${String(nextMinute % 60).padStart(2, '0')}:00`;
+          if (bookedTimes.includes(nextTime)) continue;
+        }
         slots.push(time.substring(0, 5));
       }
     }
   }
 
-  let message = '⏰ Escolha o horário:\n\n';
+  if (slots.length === 0) {
+    return { message: 'Infelizmente não há horários disponíveis com este barbeiro nesta data. Escolha outra data ou barbeiro.' };
+  }
+
+  let message = '⏰ *Escolha o melhor horário:*\n\n';
   slots.forEach((slot, index) => {
     message += `${index + 1}️⃣ ${slot}\n`;
   });
@@ -269,7 +328,7 @@ const handleTimeChoice = async (phone, choice, barbershopId, data) => {
       `INSERT INTO clients (barbershop_id, phone, name)
        VALUES ($1, $2, $3)
        RETURNING id`,
-      [barbershopId, phone, 'Cliente WhatsApp']
+      [barbershopId, phone, data.clientName || 'Cliente WhatsApp']
     );
   }
 

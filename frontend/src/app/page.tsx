@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
+import { useToast } from '@/components/Toast';
+import { AxiosError } from 'axios';
 
 export default function LoginPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -16,6 +18,7 @@ export default function LoginPage() {
     plan: 'basico'
   });
   const router = useRouter();
+  const { showToast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,9 +30,10 @@ export default function LoginPage() {
           email: formData.email,
           password: formData.password
         });
-        
+
         localStorage.setItem('token', response.data.token);
         localStorage.setItem('user', JSON.stringify(response.data.user));
+        showToast('Login realizado com sucesso!', 'success');
         router.push('/dashboard');
       } else {
         const response = await api.post('/auth/register', {
@@ -43,10 +47,18 @@ export default function LoginPage() {
 
         localStorage.setItem('token', response.data.token);
         localStorage.setItem('user', JSON.stringify(response.data.barbershop));
+        showToast('Barbearia cadastrada com sucesso!', 'success');
         router.push('/dashboard');
       }
-    } catch (error: any) {
-      alert(error.response?.data?.error || 'Erro ao processar solicitação');
+    } catch (error: unknown) {
+      if (error instanceof AxiosError) {
+        const message = error.response?.data?.error
+          || error.response?.data?.details?.join(', ')
+          || 'Erro ao processar solicitação';
+        showToast(message, 'error');
+      } else {
+        showToast('Erro inesperado. Tente novamente.', 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -66,21 +78,19 @@ export default function LoginPage() {
 
         <div className="flex mb-8">
           <button
-            className={`flex-1 py-3 font-semibold transition-all ${
-              isLogin 
-                ? 'bg-primary text-black rounded-lg' 
+            className={`flex-1 py-3 font-semibold transition-all ${isLogin
+                ? 'bg-primary text-black rounded-lg'
                 : 'text-gray-400 hover:text-white'
-            }`}
+              }`}
             onClick={() => setIsLogin(true)}
           >
             Login
           </button>
           <button
-            className={`flex-1 py-3 font-semibold transition-all ${
-              !isLogin 
-                ? 'bg-primary text-black rounded-lg' 
+            className={`flex-1 py-3 font-semibold transition-all ${!isLogin
+                ? 'bg-primary text-black rounded-lg'
                 : 'text-gray-400 hover:text-white'
-            }`}
+              }`}
             onClick={() => setIsLogin(false)}
           >
             Cadastre-se
@@ -160,9 +170,12 @@ export default function LoginPage() {
 
         {isLogin && (
           <div className="mt-4 text-center">
-            <a href="#" className="text-primary hover:text-orange-400 text-sm">
+            <button
+              onClick={() => showToast('Funcionalidade em desenvolvimento', 'info')}
+              className="text-primary hover:text-orange-400 text-sm"
+            >
               Esqueci minha senha
-            </a>
+            </button>
           </div>
         )}
       </div>

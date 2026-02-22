@@ -1,20 +1,36 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import pool from '../config/database.js';
+import { z } from 'zod';
+
+// Schemas de validação
+export const registerSchema = z.object({
+  barbershopName: z.string().min(2, 'Nome da barbearia deve ter pelo menos 2 caracteres'),
+  ownerName: z.string().min(2, 'Nome do responsável deve ter pelo menos 2 caracteres'),
+  email: z.string().email('Email inválido'),
+  whatsapp: z.string().min(10, 'WhatsApp inválido'),
+  password: z.string().min(6, 'Senha deve ter pelo menos 6 caracteres'),
+  plan: z.enum(['basico', 'profissional', 'premium']).default('basico')
+});
+
+export const loginSchema = z.object({
+  email: z.string().email('Email inválido'),
+  password: z.string().min(1, 'Senha é obrigatória')
+});
 
 export const register = async (req, res) => {
   const client = await pool.connect();
-  
+
   try {
     await client.query('BEGIN');
 
-    const { 
-      barbershopName, 
-      ownerName, 
-      email, 
-      whatsapp, 
-      password, 
-      plan = 'basico' 
+    const {
+      barbershopName,
+      ownerName,
+      email,
+      whatsapp,
+      password,
+      plan = 'basico'
     } = req.body;
 
     const userExists = await client.query(
@@ -46,11 +62,11 @@ export const register = async (req, res) => {
     await client.query('COMMIT');
 
     const token = jwt.sign(
-      { 
-        barbershopId, 
-        email, 
+      {
+        barbershopId,
+        email,
         plan,
-        role: 'admin' 
+        role: 'admin'
       },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }

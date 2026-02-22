@@ -1,9 +1,17 @@
 import pool from '../config/database.js';
 
+// Helper para obter data local (evita problema de timezone com toISOString)
+const getLocalDate = () => {
+  const now = new Date();
+  const offset = now.getTimezoneOffset();
+  const local = new Date(now.getTime() - offset * 60000);
+  return local.toISOString().split('T')[0];
+};
+
 export const getDashboard = async (req, res) => {
   try {
     const { barbershopId } = req.user;
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDate();
 
     const [
       appointmentsToday,

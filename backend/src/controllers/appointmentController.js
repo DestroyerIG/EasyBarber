@@ -1,9 +1,33 @@
 import pool from '../config/database.js';
+import { z } from 'zod';
+
+// Helper para obter data local
+const getLocalDate = () => {
+  const now = new Date();
+  const offset = now.getTimezoneOffset();
+  const local = new Date(now.getTime() - offset * 60000);
+  return local.toISOString().split('T')[0];
+};
+
+// Schemas de validação
+export const createAppointmentSchema = z.object({
+  clientId: z.string().uuid('ID do cliente inválido'),
+  barberId: z.string().uuid('ID do barbeiro inválido'),
+  serviceId: z.string().uuid('ID do serviço inválido'),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data deve estar no formato YYYY-MM-DD'),
+  time: z.string().regex(/^\d{2}:\d{2}$/, 'Hora deve estar no formato HH:MM')
+});
+
+export const updateStatusSchema = z.object({
+  status: z.enum(['confirmado', 'concluido', 'cancelado'], {
+    errorMap: () => ({ message: 'Status deve ser: confirmado, concluido ou cancelado' })
+  })
+});
 
 export const getAppointments = async (req, res) => {
   try {
     const { barbershopId } = req.user;
-    const { date, status, view = 'day' } = req.query;
+    const { date, status, view = 'day', barberId } = req.query;
 
     let query = `
       SELECT 
@@ -22,6 +46,12 @@ export const getAppointments = async (req, res) => {
 
     const params = [barbershopId];
     let paramIndex = 2;
+
+    if (barberId) {
+      query += ` AND a.barber_id = $${paramIndex}`;
+      params.push(barberId);
+      paramIndex++;
+    }
 
     if (date) {
       if (view === 'day') {
@@ -65,7 +95,7 @@ export const createAppointment = async (req, res) => {
       `SELECT id FROM appointments 
        WHERE barbershop_id = $1 AND barber_id = $2 
        AND date = $3 AND time = $4 AND status != 'cancelado'`,
-      [barbershopId, barberId, date, time]
+      [barbershopId, barberId, date, time + ':00']
     );
 
     if (conflict.rows.length > 0) {
@@ -77,7 +107,7 @@ export const createAppointment = async (req, res) => {
        (barbershop_id, client_id, barber_id, service_id, date, time, status)
        VALUES ($1, $2, $3, $4, $5, $6, 'confirmado')
        RETURNING *`,
-      [barbershopId, clientId, barberId, serviceId, date, time]
+      [barbershopId, clientId, barberId, serviceId, date, time + ':00']
     );
 
     res.status(201).json(result.rows[0]);
@@ -90,7 +120,7 @@ export const createAppointment = async (req, res) => {
 
 export const updateAppointmentStatus = async (req, res) => {
   const client = await pool.connect();
-  
+
   try {
     await client.query('BEGIN');
 
@@ -113,25 +143,27 @@ export const updateAppointmentStatus = async (req, res) => {
 
     if (status === 'concluido') {
       const appointment = result.rows[0];
-      
+
       const service = await client.query(
         'SELECT price FROM services WHERE id = $1',
         [appointment.service_id]
       );
 
-      await client.query(
-        `INSERT INTO earnings (barbershop_id, appointment_id, amount, date)
-         VALUES ($1, $2, $3, $4)`,
-        [barbershopId, id, service.rows[0].price, appointment.date]
-      );
+      if (service.rows.length > 0) {
+        await client.query(
+          `INSERT INTO earnings (barbershop_id, appointment_id, amount, date)
+           VALUES ($1, $2, $3, $4)`,
+          [barbershopId, id, service.rows[0].price, appointment.date]
+        );
 
-      await client.query(
-        `UPDATE clients 
-         SET last_visit = $1, 
-             total_spent = total_spent + $2
-         WHERE id = $3`,
-        [appointment.date, service.rows[0].price, appointment.client_id]
-      );
+        await client.query(
+          `UPDATE clients 
+           SET last_visit = $1, 
+               total_spent = total_spent + $2
+           WHERE id = $3`,
+          [appointment.date, service.rows[0].price, appointment.client_id]
+        );
+      }
     }
 
     await client.query('COMMIT');
@@ -150,16 +182,24 @@ export const updateAppointmentStatus = async (req, res) => {
 export const getAvailableSlots = async (req, res) => {
   try {
     const { barbershopId } = req.user;
-    const { barberId, date } = req.query;
+    const { barberId, date, serviceId } = req.query;
 
-    const service = await pool.query(
-      `SELECT duration_minutes FROM services 
-       WHERE barbershop_id = $1 
-       LIMIT 1`,
-      [barbershopId]
-    );
+    if (!barberId || !date) {
+      return res.status(400).json({ error: 'barberId e date são obrigatórios' });
+    }
 
-    const duration = service.rows[0]?.duration_minutes || 60;
+    // Buscar duração do serviço específico (ou padrão 60 min)
+    let duration = 60;
+    if (serviceId) {
+      const service = await pool.query(
+        `SELECT duration_minutes FROM services 
+         WHERE id = $1 AND barbershop_id = $2`,
+        [serviceId, barbershopId]
+      );
+      if (service.rows.length > 0) {
+        duration = service.rows[0].duration_minutes;
+      }
+    }
 
     const bookedSlots = await pool.query(
       `SELECT time FROM appointments 
@@ -188,5 +228,76 @@ export const getAvailableSlots = async (req, res) => {
   } catch (error) {
     console.error('Erro ao buscar horários:', error);
     res.status(500).json({ error: 'Erro ao buscar horários disponíveis' });
+  }
+};
+
+// Schema de validação para edição
+export const updateAppointmentSchema = z.object({
+  clientId: z.string().uuid('ID do cliente inválido'),
+  barberId: z.string().uuid('ID do barbeiro inválido'),
+  serviceId: z.string().uuid('ID do serviço inválido'),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data deve estar no formato YYYY-MM-DD'),
+  time: z.string().regex(/^\d{2}:\d{2}$/, 'Hora deve estar no formato HH:MM')
+});
+
+export const updateAppointment = async (req, res) => {
+  try {
+    const { barbershopId } = req.user;
+    const { id } = req.params;
+    const { clientId, barberId, serviceId, date, time } = req.body;
+
+    // Verificar conflito de horário (excluindo o próprio agendamento)
+    const conflict = await pool.query(
+      `SELECT id FROM appointments 
+       WHERE barbershop_id = $1 AND barber_id = $2 
+       AND date = $3 AND time = $4 AND status != 'cancelado' AND id != $5`,
+      [barbershopId, barberId, date, time + ':00', id]
+    );
+
+    if (conflict.rows.length > 0) {
+      return res.status(400).json({ error: 'Horário já ocupado' });
+    }
+
+    const result = await pool.query(
+      `UPDATE appointments 
+       SET client_id = $1, barber_id = $2, service_id = $3, date = $4, time = $5
+       WHERE id = $6 AND barbershop_id = $7 AND status = 'confirmado'
+       RETURNING *`,
+      [clientId, barberId, serviceId, date, time + ':00', id, barbershopId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Agendamento não encontrado ou não pode ser editado' });
+    }
+
+    res.json(result.rows[0]);
+
+  } catch (error) {
+    console.error('Erro ao atualizar agendamento:', error);
+    res.status(500).json({ error: 'Erro ao atualizar agendamento' });
+  }
+};
+
+export const deleteAppointment = async (req, res) => {
+  try {
+    const { barbershopId } = req.user;
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `DELETE FROM appointments 
+       WHERE id = $1 AND barbershop_id = $2
+       RETURNING *`,
+      [id, barbershopId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Agendamento não encontrado' });
+    }
+
+    res.json({ message: 'Agendamento excluído com sucesso' });
+
+  } catch (error) {
+    console.error('Erro ao excluir agendamento:', error);
+    res.status(500).json({ error: 'Erro ao excluir agendamento' });
   }
 };

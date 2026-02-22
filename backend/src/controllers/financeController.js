@@ -1,9 +1,33 @@
 import pool from '../config/database.js';
+import { z } from 'zod';
+
+// Helper para obter data local
+const getLocalDate = () => {
+  const now = new Date();
+  const offset = now.getTimezoneOffset();
+  const local = new Date(now.getTime() - offset * 60000);
+  return local.toISOString().split('T')[0];
+};
+
+// Schemas de validação
+export const addExpenseSchema = z.object({
+  description: z.string().min(2, 'Descrição deve ter pelo menos 2 caracteres'),
+  category: z.string().min(1, 'Categoria é obrigatória'),
+  amount: z.number().positive('Valor deve ser positivo'),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data deve estar no formato YYYY-MM-DD')
+});
+
+export const updateExpenseSchema = z.object({
+  description: z.string().min(2, 'Descrição deve ter pelo menos 2 caracteres').optional(),
+  category: z.string().min(1, 'Categoria é obrigatória').optional(),
+  amount: z.number().positive('Valor deve ser positivo').optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data deve estar no formato YYYY-MM-DD').optional()
+});
 
 export const getFinanceSummary = async (req, res) => {
   try {
     const { barbershopId } = req.user;
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDate();
 
     const result = await pool.query(
       `SELECT 
@@ -39,6 +63,10 @@ export const getMonthlyReport = async (req, res) => {
   try {
     const { barbershopId } = req.user;
     const { month, year } = req.query;
+
+    if (!month || !year) {
+      return res.status(400).json({ error: 'month e year são obrigatórios' });
+    }
 
     const result = await pool.query(
       `SELECT 
@@ -86,6 +114,57 @@ export const addExpense = async (req, res) => {
   } catch (error) {
     console.error('Erro ao adicionar gasto:', error);
     res.status(500).json({ error: 'Erro ao adicionar gasto' });
+  }
+};
+
+export const updateExpense = async (req, res) => {
+  try {
+    const { barbershopId } = req.user;
+    const { id } = req.params;
+    const { description, category, amount, date } = req.body;
+
+    const result = await pool.query(
+      `UPDATE expenses 
+       SET description = COALESCE($1, description),
+           category = COALESCE($2, category),
+           amount = COALESCE($3, amount),
+           date = COALESCE($4, date)
+       WHERE id = $5 AND barbershop_id = $6
+       RETURNING *`,
+      [description, category, amount, date, id, barbershopId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Gasto não encontrado' });
+    }
+
+    res.json(result.rows[0]);
+
+  } catch (error) {
+    console.error('Erro ao atualizar gasto:', error);
+    res.status(500).json({ error: 'Erro ao atualizar gasto' });
+  }
+};
+
+export const deleteExpense = async (req, res) => {
+  try {
+    const { barbershopId } = req.user;
+    const { id } = req.params;
+
+    const result = await pool.query(
+      'DELETE FROM expenses WHERE id = $1 AND barbershop_id = $2 RETURNING *',
+      [id, barbershopId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Gasto não encontrado' });
+    }
+
+    res.json({ message: 'Gasto excluído com sucesso' });
+
+  } catch (error) {
+    console.error('Erro ao excluir gasto:', error);
+    res.status(500).json({ error: 'Erro ao excluir gasto' });
   }
 };
 
