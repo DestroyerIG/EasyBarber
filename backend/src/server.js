@@ -12,6 +12,7 @@ import financeRoutes from './routes/finance.js';
 import barbershopRoutes from './routes/barbershop.js';
 import whatsappRoutes from './routes/whatsapp.js';
 import { startReminderCron } from './services/cronService.js';
+import { initWhatsApp } from './services/whatsappClient.js';
 
 dotenv.config();
 
@@ -75,6 +76,9 @@ const start = async () => {
     console.log('✅ Conexão com banco de dados verificada');
 
     startReminderCron();
+
+    // Inicializar bot WhatsApp (whatsapp-web.js)
+    initWhatsApp();
 
     app.listen(PORT, () => {
       console.log(`🚀 Servidor rodando na porta ${PORT}`);

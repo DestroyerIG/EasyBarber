@@ -104,6 +104,50 @@ CREATE TABLE IF NOT EXISTS whatsapp_sessions (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Tabela de configuração do bot WhatsApp (mensagens personalizáveis)
+CREATE TABLE IF NOT EXISTS whatsapp_bot_config (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    barbershop_id UUID NOT NULL UNIQUE REFERENCES barbershops(id) ON DELETE CASCADE,
+    welcome_message TEXT DEFAULT 'Olá 👋 Bem-vindo à {nome_barbearia}!
+
+Me chame de *BarberBot* 🤖 e estou aqui para agilizar seu atendimento.
+
+Como posso ajudar hoje?
+
+1️⃣ *Agendar um horário*
+2️⃣ Ver nossos serviços
+3️⃣ Falar com um humano 👨‍💼',
+    ask_name_message TEXT DEFAULT 'Vejo que é sua primeira vez aqui! 😊
+
+Qual o seu *nome completo*?',
+    attendant_message TEXT DEFAULT 'Um atendente entrará em contato em breve! 👨‍💼',
+    confirmation_message TEXT DEFAULT '✅ Seu horário foi agendado com sucesso! 💈
+
+📋 Serviço: {servico}
+👨‍🦱 Barbeiro: {barbeiro}
+📅 Data: {data}
+⏰ Horário: {horario}
+💰 Valor: R$ {valor}
+
+Até lá! 👋',
+    reminder_message TEXT DEFAULT '⏰ Lembrete!
+
+Olá {nome_cliente}!
+
+Seu horário é daqui a 2 horas:
+📋 {servico}
+👨‍🦱 Barbeiro: {barbeiro}
+⏰ {horario}
+
+Te esperamos! 💈',
+    invalid_option_message TEXT DEFAULT 'Opção inválida. Por favor, escolha um número da lista.',
+    session_expired_message TEXT DEFAULT '⏰ Sua sessão expirou por inatividade.
+
+Digite qualquer coisa para começar novamente.',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Índices para melhorar performance
 CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(date);
 CREATE INDEX IF NOT EXISTS idx_appointments_barbershop ON appointments(barbershop_id);

@@ -34,13 +34,23 @@ export const startReminderCron = () => {
       );
 
       for (const appointment of appointments.rows) {
-        const message = `⏰ Lembrete!\n\n` +
-          `Olá ${appointment.client_name}!\n\n` +
-          `Seu horário é daqui a 2 horas:\n` +
-          `📋 ${appointment.service_name}\n` +
-          `👨‍🦱 Barbeiro: ${appointment.barber_name}\n` +
-          `⏰ ${appointment.time.substring(0, 5)}\n\n` +
-          `Te esperamos! 💈`;
+        // Buscar configuração de mensagens da barbearia
+        const configResult = await pool.query(
+          'SELECT reminder_message FROM whatsapp_bot_config WHERE barbershop_id = $1',
+          [appointment.barbershop_id]
+        );
+
+        let template = '⏰ Lembrete!\n\nOlá {nome_cliente}!\n\nSeu horário é daqui a 2 horas:\n📋 {servico}\n👨‍🦱 Barbeiro: {barbeiro}\n⏰ {horario}\n\nTe esperamos! 💈';
+
+        if (configResult.rows.length > 0 && configResult.rows[0].reminder_message) {
+          template = configResult.rows[0].reminder_message;
+        }
+
+        const message = template
+          .replace(/{nome_cliente}/g, appointment.client_name)
+          .replace(/{servico}/g, appointment.service_name)
+          .replace(/{barbeiro}/g, appointment.barber_name)
+          .replace(/{horario}/g, appointment.time.substring(0, 5));
 
         const sent = await sendWhatsAppMessage(appointment.phone, message);
 
