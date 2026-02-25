@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS barbershops (
     email VARCHAR(255) UNIQUE NOT NULL,
     whatsapp VARCHAR(20) NOT NULL,
     plan VARCHAR(50) NOT NULL DEFAULT 'basico',
+    instagram_handle VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     active BOOLEAN DEFAULT true
 );
@@ -116,7 +117,13 @@ Como posso ajudar hoje?
 
 1️⃣ *Agendar um horário*
 2️⃣ Ver nossos serviços
-3️⃣ Falar com um humano 👨‍💼',
+3️⃣ Cancelar agendamento via bot
+4️⃣ Reagendamento via bot
+5️⃣ Avaliação pós-atendimento
+6️⃣ Promoções automáticas
+7️⃣ Integração com Instagram
+8️⃣ Falar com um humano 👨‍💼
+9️⃣ Encerrar atendimento',
     ask_name_message TEXT DEFAULT 'Vejo que é sua primeira vez aqui! 😊
 
 Qual o seu *nome completo*?',
@@ -148,10 +155,21 @@ Digite qualquer coisa para começar novamente.',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Tabela de avaliações pós-atendimento via WhatsApp
+CREATE TABLE IF NOT EXISTS whatsapp_ratings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    barbershop_id UUID NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
+    appointment_id UUID NOT NULL UNIQUE REFERENCES appointments(id) ON DELETE CASCADE,
+    rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 4),
+    comment TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Índices para melhorar performance
 CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(date);
 CREATE INDEX IF NOT EXISTS idx_appointments_barbershop ON appointments(barbershop_id);
 CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_sessions_phone ON whatsapp_sessions(phone);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_ratings_barbershop ON whatsapp_ratings(barbershop_id);
 CREATE INDEX IF NOT EXISTS idx_earnings_date ON earnings(date);
 CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);

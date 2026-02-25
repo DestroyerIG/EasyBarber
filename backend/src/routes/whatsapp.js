@@ -63,6 +63,11 @@ router.get('/config', authMiddleware, async (req, res) => {
             [barbershopId]
         );
 
+        if (!config || !config.rows) {
+            console.error('❌ GET /config - Invalid query result from SELECT', { config });
+            return res.status(500).json({ error: 'Erro ao buscar configuração - resultado inválido' });
+        }
+
         if (config.rows.length === 0) {
             // Criar configuração padrão
             config = await pool.query(
@@ -71,11 +76,21 @@ router.get('/config', authMiddleware, async (req, res) => {
                  RETURNING *`,
                 [barbershopId]
             );
+
+            if (!config || !config.rows || config.rows.length === 0) {
+                console.error('❌ GET /config - INSERT failed, no rows returned', { config });
+                return res.status(500).json({ error: 'Erro ao criar configuração padrão' });
+            }
+        }
+
+        if (!config.rows[0]) {
+            console.error('❌ GET /config - config.rows[0] is undefined', { config });
+            return res.status(500).json({ error: 'Erro ao recuperar configuração do bot' });
         }
 
         res.json(config.rows[0]);
     } catch (error) {
-        console.error('Erro ao buscar config do bot:', error);
+        console.error('❌ Erro ao buscar config do bot:', error);
         res.status(500).json({ error: 'Erro ao buscar configuração' });
     }
 });
@@ -117,6 +132,16 @@ router.put('/config', authMiddleware, async (req, res) => {
                 session_expired_message]
         );
 
+        if (!result || !result.rows || result.rows.length === 0) {
+            console.error('❌ PUT /config - UPSERT failed, no rows returned', { result });
+            return res.status(500).json({ error: 'Erro ao atualizar configuração - resultado inválido' });
+        }
+
+        if (!result.rows[0]) {
+            console.error('❌ PUT /config - result.rows[0] is undefined', { result });
+            return res.status(500).json({ error: 'Erro ao recuperar configuração atualizada' });
+        }
+
         res.json(result.rows[0]);
     } catch (error) {
         console.error('Erro ao atualizar config do bot:', error);
@@ -141,6 +166,16 @@ router.post('/config/reset', authMiddleware, async (req, res) => {
              RETURNING *`,
             [barbershopId]
         );
+
+        if (!result || !result.rows || result.rows.length === 0) {
+            console.error('❌ POST /config/reset - INSERT failed, no rows returned', { result });
+            return res.status(500).json({ error: 'Erro ao criar configuração padrão' });
+        }
+
+        if (!result.rows[0]) {
+            console.error('❌ POST /config/reset - result.rows[0] is undefined', { result });
+            return res.status(500).json({ error: 'Erro ao recuperar configuração' });
+        }
 
         res.json(result.rows[0]);
     } catch (error) {
