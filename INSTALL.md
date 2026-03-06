@@ -1,185 +1,184 @@
-# ⚡ INSTALAÇÃO RÁPIDA - BarberPro SaaS
+# ⚡ INSTALAÇÃO - BarberPro SaaS
 
-## 🎯 RESUMO DE 3 PASSOS
+## 🎯 Resumo
 
-### 1️⃣ INSTALAR POSTGRESQL
+1. Instalar PostgreSQL
+2. Configurar banco de dados e variáveis de ambiente
+3. Instalar dependências e iniciar
+
+---
+
+## 1️⃣ INSTALAR POSTGRESQL
 
 **Baixar:** https://www.postgresql.org/download/windows/
 
-**Durante instalação:**
-- ✅ Marcar todos os componentes
-- ⚠️ **ANOTAR A SENHA** que você definir
-- Porta: 5432 (padrão)
+Durante a instalação:
+- ✅ Marcar todos os componentes (Server, pgAdmin, Command Line Tools)
+- ⚠️ **ANOTAR A SENHA** do superusuário `postgres`
+- Porta: **5432** (padrão)
+
+Após instalar, verifique se o `psql` está no PATH:
+```powershell
+psql --version
+```
+
+Se não for reconhecido:
+```powershell
+$env:Path += ";C:\Program Files\PostgreSQL\16\bin"
+```
+
+> Guia detalhado: `POSTGRESQL_SETUP.md`
 
 ---
 
-### 2️⃣ EXECUTAR SCRIPT DE CONFIGURAÇÃO
+## 2️⃣ CONFIGURAR O PROJETO
 
-Após instalar o PostgreSQL, execute:
+### Opção A: Script Automático (Recomendado)
 
 ```powershell
+# Habilitar execução de scripts (uma vez)
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+# Executar setup
 .\setup.ps1
 ```
 
-**O que o script faz:**
-- ✅ Testa conexão PostgreSQL
-- ✅ Cria banco `barberpro`
-- ✅ Cria todas as 9 tabelas
-- ✅ Configura arquivo `.env` do backend
-- ✅ Configura arquivo `.env.local` do frontend
+O script cria banco, tabelas e arquivos `.env` automaticamente.
+
+### Opção B: Manual
+
+**Criar banco de dados:**
+```powershell
+psql -U postgres -c "CREATE DATABASE barberpro;"
+psql -U postgres -d barberpro -f backend\src\config\database.sql
+```
+
+**Criar `backend\.env`:**
+```env
+PORT=5000
+DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5432/barberpro
+JWT_SECRET=gere_uma_chave_aleatoria_aqui
+NODE_ENV=development
+```
+
+**Criar `frontend\.env.local`:**
+```env
+NEXT_PUBLIC_API_URL=http://localhost:5000/api
+```
+
+### Opção C: Docker
+
+```powershell
+$env:JWT_SECRET = "sua_chave_secreta"
+docker compose up -d
+```
+
+Sobe PostgreSQL + Backend + Frontend automaticamente. Pule para a seção "Acessar".
 
 ---
 
-### 3️⃣ RODAR O PROJETO
+## 3️⃣ INSTALAR E INICIAR
 
-**Backend (Terminal 1):**
+**Terminal 1 — Backend:**
 ```powershell
 cd backend
 npm install
 npm run dev
 ```
 
-Aguarde: `✅ Servidor rodando na porta 5000`
-
-**Frontend (Terminal 2 - nova janela):**
+**Terminal 2 — Frontend:**
 ```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-Aguarde: `✅ Ready on http://localhost:3000`
+---
 
-**Acessar:** http://localhost:3000
+## 4️⃣ ACESSAR
+
+- **Sistema:** http://localhost:3000
+- **API:** http://localhost:5000
+- **Health Check:** http://localhost:5000/health
+
+### Primeira vez
+1. Clique em **"Cadastre-se"**
+2. Preencha nome da barbearia, responsável, WhatsApp, email e senha
+3. Senha deve ter: mínimo 8 caracteres, 1 maiúscula, 1 número
+4. Clique em **"Criar Conta"**
 
 ---
 
-## 🆘 PROBLEMAS?
+## 🔧 Executar Migrations (se necessário)
 
-### ❌ "psql não é reconhecido"
-**Solução:** Adicione ao PATH:
+Se o banco já existia de uma versão anterior, execute as migrations:
+
 ```powershell
-$env:Path += ";C:\Program Files\PostgreSQL\16\bin"
+psql -U postgres -d barberpro -f backend\src\config\migration_v2.sql
+psql -U postgres -d barberpro -f backend\src\config\migration_v3.sql
+psql -U postgres -d barberpro -f backend\src\config\migration_v4.sql
 ```
-Feche e reabra o terminal.
-
----
-
-### ❌ "password authentication failed"
-**Solução:** Senha incorreta no arquivo `.env`
-1. Abra `backend\.env`
-2. Corrija a senha na linha `DATABASE_URL`
-
----
-
-### ❌ "ECONNREFUSED 127.0.0.1:5432"
-**Solução:** PostgreSQL não está rodando
-```powershell
-# Verificar serviço
-Get-Service postgresql*
-
-# Iniciar se necessário
-Start-Service "postgresql-x64-16"
-```
-
----
-
-### ❌ Script setup.ps1 não executa
-**Solução:** Habilitar execução de scripts:
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-
----
-
-## 📚 DOCUMENTAÇÃO COMPLETA
-
-- **START_HERE.md** - Visão geral do projeto
-- **QUICK_START.md** - Guia detalhado
-- **POSTGRESQL_SETUP.md** - Instalação manual do PostgreSQL
-- **API_DOCS.md** - Documentação da API (19 endpoints)
-- **README.md** - Documentação principal
-- **PLANOS.md** - Detalhes dos planos
-- **WHATSAPP_BOT.md** - Configuração do bot
-- **PROJECT_STRUCTURE.md** - Estrutura do código
-- **DEPLOY.md** - Deploy em produção
 
 ---
 
 ## ✅ CHECKLIST
 
-Antes de usar, verifique:
-
-- [ ] PostgreSQL instalado
-- [ ] Senha anotada
-- [ ] Script `setup.ps1` executado com sucesso
-- [ ] Backend iniciado (`npm run dev`)
-- [ ] Frontend iniciado (`npm run dev`)
-- [ ] Navegador em `http://localhost:3000`
-
----
-
-## 🎉 PRONTO!
-
-Agora você pode:
-
-1. **Criar sua conta** - Clique em "Cadastre-se"
-2. **Fazer login** - Use email e senha
-3. **Explorar o dashboard** - Ver métricas
-4. **Adicionar barbeiros** - Menu "Serviços"
-5. **Cadastrar serviços** - Corte, barba, etc
-6. **Criar agendamentos** - Testar o sistema
+- [ ] PostgreSQL instalado e rodando
+- [ ] Banco `barberpro` criado com tabelas
+- [ ] Arquivo `backend\.env` com DATABASE_URL e JWT_SECRET
+- [ ] Arquivo `frontend\.env.local` com NEXT_PUBLIC_API_URL
+- [ ] Backend rodando na porta 5000
+- [ ] Frontend rodando na porta 3000
+- [ ] Consegue acessar http://localhost:3000
+- [ ] Consegue criar conta e fazer login
 
 ---
 
-## 🤖 OPCIONAL: Configurar WhatsApp
+## 🆘 PROBLEMAS COMUNS
 
-Para ativar o bot de agendamentos:
+### ❌ `psql não é reconhecido`
+```powershell
+$env:Path += ";C:\Program Files\PostgreSQL\16\bin"
+```
 
-1. Crie conta em: https://z-api.io
-2. Conecte seu WhatsApp
-3. Copie a URL e Token
-4. Edite `backend\.env`:
-   ```env
-   WHATSAPP_API_URL=sua_url_aqui
-   WHATSAPP_API_KEY=seu_token_aqui
-   ```
-5. Reinicie o backend
+### ❌ `password authentication failed`
+Corrija a senha em `backend\.env` ou execute:
+```powershell
+.\fix-env.ps1
+```
 
-**Guia completo:** Leia `WHATSAPP_BOT.md`
+### ❌ `ECONNREFUSED 127.0.0.1:5432`
+PostgreSQL não está rodando:
+```powershell
+Get-Service postgresql*
+Start-Service "postgresql-x64-16"
+```
 
----
+### ❌ `database "barberpro" does not exist`
+```powershell
+psql -U postgres -c "CREATE DATABASE barberpro;"
+psql -U postgres -d barberpro -f backend\src\config\database.sql
+```
 
-## 🚀 DEPLOY (Opcional)
+### ❌ `relation "barbershops" does not exist`
+```powershell
+psql -U postgres -d barberpro -f backend\src\config\database.sql
+```
 
-Quando estiver pronto para lançar:
+### ❌ Frontend não conecta com backend
+Verifique `frontend\.env.local`:
+```env
+NEXT_PUBLIC_API_URL=http://localhost:5000/api
+```
+Reinicie o frontend após alterar.
 
-1. **Backend:** Railway, Render ou Heroku
-2. **Frontend:** Vercel ou Netlify
-3. **Banco:** Railway, Supabase ou Heroku Postgres
-
-**Guia completo:** Leia `DEPLOY.md`
-
----
-
-## 💡 DICAS
-
-- Use **pgAdmin** para visualizar o banco (interface gráfica)
-- Use **Postman** para testar a API
-- Leia **API_DOCS.md** para ver todos os endpoints
-- Configure **backup automático** do banco
-
----
-
-## 📞 SUPORTE
-
-**Dúvidas?** Consulte a documentação:
-
-1. Problema com PostgreSQL → `POSTGRESQL_SETUP.md`
-2. Problema com a API → `API_DOCS.md`
-3. Entender o projeto → `PROJECT_STRUCTURE.md`
-4. Deploy → `DEPLOY.md`
+> Guia completo: `TROUBLESHOOTING.md`
 
 ---
 
-**💈 Bom trabalho com o BarberPro SaaS!**
+## 📚 PRÓXIMOS PASSOS
+
+- **Configurar WhatsApp:** Leia `WHATSAPP_BOT.md`
+- **Ver a API:** Leia `API_DOCS.md`
+- **Entender o código:** Leia `PROJECT_STRUCTURE.md`
+- **Fazer deploy:** Leia `DEPLOY.md`

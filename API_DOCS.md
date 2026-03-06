@@ -1,12 +1,93 @@
-# DOCUMENTAÇÃO DA API - BarberPro SaaS
+# 📘 DOCUMENTAÇÃO DA API - BarberPro SaaS
 
-Base URL: `http://localhost:5000/api`
+**Base URL:** `http://localhost:5000/api/v1`
+
+> **Nota:** Rotas legadas em `/api/*` são redirecionadas automaticamente para `/api/v1/*` (301).
+
+## Autenticação
+
+O sistema usa **JWT** com **access token** (curta duração) e **refresh token** (longa duração).
+
+Os tokens são enviados via **httpOnly cookies** (mais seguro) ou via header `Authorization: Bearer <token>` (compatibilidade com mobile/Postman).
+
+### Respostas padronizadas
+
+**Sucesso:**
+```json
+{
+  "success": true,
+  "data": { ... },
+  "message": "Operação realizada com sucesso"
+}
+```
+
+**Sucesso paginado:**
+```json
+{
+  "success": true,
+  "data": [ ... ],
+  "meta": { "page": 1, "limit": 20, "total": 100, "totalPages": 5 }
+}
+```
+
+**Erro:**
+```json
+{
+  "success": false,
+  "message": "Dados inválidos",
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Dados inválidos",
+    "details": ["campo: mensagem de erro"]
+  }
+}
+```
+
+### Códigos de erro comuns
+
+| Código HTTP | Code | Descrição |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Dados inválidos (Zod) |
+| 401 | `UNAUTHORIZED` | Token ausente, inválido ou expirado |
+| 403 | `PLAN_LIMIT` | Plano insuficiente |
+| 404 | `NOT_FOUND` | Recurso não encontrado |
+| 409 | `CONFLICT` | Conflito de dados |
+| 429 | `RATE_LIMIT` | Muitas requisições |
+| 500 | `INTERNAL_ERROR` | Erro interno |
 
 ---
 
-## AUTENTICAÇÃO
+## ROTAS PÚBLICAS
 
-### 1. Registrar Nova Barbearia
+### Health Check
+
+**GET** `/health`
+
+```json
+{
+  "status": "ok",
+  "db": "connected",
+  "uptime": 123.45
+}
+```
+
+### Info da API
+
+**GET** `/`
+
+```json
+{
+  "message": "💈 BarberPro SaaS API",
+  "version": "1.0.0",
+  "status": "online"
+}
+```
+
+---
+
+## AUTENTICAÇÃO (`/api/auth`)
+
+### 1. Registrar Barbearia
 
 **POST** `/auth/register`
 
@@ -16,23 +97,33 @@ Base URL: `http://localhost:5000/api`
   "ownerName": "Carlos Silva",
   "email": "carlos@elite.com",
   "whatsapp": "11987654321",
-  "password": "senha123",
-  "plan": "profissional"
+  "password": "MinhaSenh4"
 }
 ```
 
-**Resposta:**
+**Validação da senha:**
+- Mínimo 8 caracteres
+- Pelo menos 1 letra maiúscula
+- Pelo menos 1 número
+- Não pode ser senha comum (ex: "Password1")
+
+**Resposta (201):**
 ```json
 {
-  "message": "Barbearia cadastrada com sucesso",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "barbershop": {
-    "id": "uuid",
-    "name": "Barbearia Elite",
-    "plan": "profissional"
+  "success": true,
+  "data": {
+    "message": "Barbearia cadastrada com sucesso",
+    "token": "eyJhbGci...",
+    "barbershop": {
+      "id": "uuid",
+      "name": "Barbearia Elite",
+      "plan": "basico"
+    }
   }
 }
 ```
+
+> Cookies `access_token` e `refresh_token` são definidos automaticamente.
 
 ---
 
@@ -43,128 +134,192 @@ Base URL: `http://localhost:5000/api`
 ```json
 {
   "email": "carlos@elite.com",
-  "password": "senha123"
+  "password": "MinhaSenh4"
 }
 ```
 
-**Resposta:**
+**Resposta (200):**
 ```json
 {
-  "message": "Login realizado com sucesso",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "user": {
-    "email": "carlos@elite.com",
-    "role": "admin",
-    "barbershopName": "Barbearia Elite",
-    "plan": "profissional"
+  "success": true,
+  "data": {
+    "message": "Login realizado com sucesso",
+    "token": "eyJhbGci...",
+    "user": {
+      "email": "carlos@elite.com",
+      "role": "admin",
+      "barbershopName": "Barbearia Elite",
+      "plan": "basico"
+    }
   }
 }
 ```
 
-**⚠️ IMPORTANTE:** Use o token nas próximas requisições no header:
-```
-Authorization: Bearer SEU_TOKEN
+---
+
+### 3. Refresh Token
+
+**POST** `/auth/refresh`
+
+Renova o access token usando o refresh token (enviado via cookie).
+
+**Resposta (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Token renovado"
+  }
+}
 ```
 
 ---
 
-## DASHBOARD
+### 4. Logout
 
-### 3. Obter Dados do Dashboard
+**POST** `/auth/logout`
 
-**GET** `/dashboard`
+Invalida o refresh token e limpa os cookies.
 
-**Headers:**
-```
-Authorization: Bearer SEU_TOKEN
-```
+---
+
+### 5. Dados do Usuário Atual
+
+**GET** `/auth/me` 🔒
 
 **Resposta:**
 ```json
 {
-  "appointmentsToday": 8,
-  "earningsToday": 450.00,
-  "expensesToday": 120.00,
-  "profitToday": 330.00,
-  "totalClients": 156,
-  "weeklyEarnings": [
-    { "date": "2024-02-05", "total": 380 },
-    { "date": "2024-02-06", "total": 420 },
-    { "date": "2024-02-07", "total": 450 }
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "email": "carlos@elite.com",
+    "role": "admin",
+    "barbershopId": "uuid",
+    "barbershopName": "Barbearia Elite",
+    "plan": "basico"
+  }
+}
+```
+
+---
+
+## DASHBOARD (`/api/dashboard`)
+
+### 6. Dados do Dashboard
+
+**GET** `/dashboard` 🔒
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "data": {
+    "appointmentsToday": 8,
+    "earningsToday": 450.00,
+    "expensesToday": 120.00,
+    "profitToday": 330.00,
+    "totalClients": 156,
+    "weeklyEarnings": [
+      { "date": "2026-03-01", "total": 380 },
+      { "date": "2026-03-02", "total": 420 }
+    ]
+  }
+}
+```
+
+---
+
+## AGENDAMENTOS (`/api/appointments`)
+
+### 7. Listar Agendamentos
+
+**GET** `/appointments` 🔒
+
+**Query Parameters:**
+| Parâmetro | Tipo | Descrição |
+|---|---|---|
+| `date` | string | Data (YYYY-MM-DD) |
+| `view` | string | `day` ou `week` |
+| `status` | string | `confirmado`, `cancelado`, `concluido` |
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "date": "2026-03-06",
+      "time": "14:00:00",
+      "status": "confirmado",
+      "client_name": "João Pedro",
+      "client_phone": "11999887766",
+      "barber_name": "Roberto",
+      "service_name": "Corte + Barba",
+      "service_price": 60.00
+    }
   ]
 }
 ```
 
 ---
 
-## AGENDAMENTOS
+### 8. Horários Disponíveis
 
-### 4. Listar Agendamentos
-
-**GET** `/appointments?date=2024-02-12&view=day&status=confirmado`
+**GET** `/appointments/available-slots` 🔒
 
 **Query Parameters:**
-- `date` (opcional): Data no formato YYYY-MM-DD
-- `view` (opcional): `day` ou `week`
-- `status` (opcional): `confirmado`, `cancelado`, `concluido`
-
-**Headers:**
-```
-Authorization: Bearer SEU_TOKEN
-```
+| Parâmetro | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| `barberId` | uuid | Sim | ID do barbeiro |
+| `date` | string | Sim | Data (YYYY-MM-DD) |
 
 **Resposta:**
 ```json
-[
-  {
-    "id": "uuid",
-    "date": "2024-02-12",
-    "time": "14:00:00",
-    "status": "confirmado",
-    "client_name": "João Pedro",
-    "client_phone": "11999887766",
-    "barber_name": "Roberto",
-    "service_name": "Corte + Barba",
-    "service_price": 60.00
-  }
-]
+{
+  "success": true,
+  "data": ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"]
+}
 ```
 
 ---
 
-### 5. Criar Agendamento
+### 9. Criar Agendamento
 
-**POST** `/appointments`
+**POST** `/appointments` 🔒
 
 ```json
 {
   "clientId": "uuid-do-cliente",
   "barberId": "uuid-do-barbeiro",
   "serviceId": "uuid-do-servico",
-  "date": "2024-02-15",
+  "date": "2026-03-15",
   "time": "15:00"
-}
-```
-
-**Resposta:**
-```json
-{
-  "id": "uuid",
-  "barbershop_id": "uuid",
-  "client_id": "uuid",
-  "barber_id": "uuid",
-  "service_id": "uuid",
-  "date": "2024-02-15",
-  "time": "15:00:00",
-  "status": "confirmado"
 }
 ```
 
 ---
 
-### 6. Atualizar Status do Agendamento
+### 10. Atualizar Agendamento
 
-**PUT** `/appointments/:id/status`
+**PUT** `/appointments/:id` 🔒
+
+```json
+{
+  "clientId": "uuid-do-cliente",
+  "barberId": "uuid-do-barbeiro",
+  "serviceId": "uuid-do-servico",
+  "date": "2026-03-16",
+  "time": "16:00"
+}
+```
+
+---
+
+### 11. Atualizar Status
+
+**PUT** `/appointments/:id/status` 🔒
 
 ```json
 {
@@ -174,210 +329,211 @@ Authorization: Bearer SEU_TOKEN
 
 **Status disponíveis:** `confirmado`, `cancelado`, `concluido`
 
-**⚠️ IMPORTANTE:** Quando o status é `concluido`, o sistema:
-- Registra automaticamente o ganho
-- Atualiza o histórico do cliente
-- Incrementa o total gasto pelo cliente
+> Quando status é `concluido`, o sistema registra automaticamente o ganho na tabela `earnings`.
 
 ---
 
-### 7. Horários Disponíveis
+### 12. Excluir Agendamento
 
-**GET** `/appointments/available-slots?barberId=uuid&date=2024-02-15`
+**DELETE** `/appointments/:id` 🔒
+
+---
+
+## CLIENTES (`/api/clients`)
+
+### 13. Listar Clientes
+
+**GET** `/clients` 🔒
 
 **Resposta:**
 ```json
-[
-  "09:00",
-  "10:00",
-  "11:00",
-  "14:00",
-  "15:00",
-  "16:00",
-  "17:00",
-  "18:00"
-]
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "name": "João Pedro",
+      "phone": "11999887766",
+      "email": "joao@email.com",
+      "last_visit": "2026-03-01",
+      "total_spent": 180.00,
+      "created_at": "2026-01-15T10:00:00Z"
+    }
+  ]
+}
 ```
 
 ---
 
-## CLIENTES
+### 14. Cadastrar Cliente
 
-### 8. Listar Clientes
-
-**GET** `/clients`
-
-**Resposta:**
-```json
-[
-  {
-    "id": "uuid",
-    "name": "João Pedro",
-    "phone": "11999887766",
-    "last_visit": "2024-02-10",
-    "total_spent": 180.00,
-    "created_at": "2024-01-15T10:00:00Z"
-  }
-]
-```
-
----
-
-### 9. Cadastrar Cliente
-
-**POST** `/clients`
+**POST** `/clients` 🔒
 
 ```json
 {
   "name": "Maria Santos",
-  "phone": "11988776655"
+  "phone": "11988776655",
+  "email": "maria@email.com",
+  "birthDate": "1990-05-15",
+  "address": "Rua Exemplo, 123",
+  "notes": "Cliente VIP"
 }
 ```
 
----
-
-### 10. Histórico do Cliente
-
-**GET** `/clients/:id/history`
-
-**Resposta:**
-```json
-[
-  {
-    "id": "uuid",
-    "date": "2024-02-10",
-    "time": "14:00:00",
-    "status": "concluido",
-    "barber_name": "Roberto",
-    "service_name": "Corte Masculino",
-    "service_price": 45.00
-  }
-]
-```
+> Campos opcionais: `email`, `birthDate`, `address`, `notes`
 
 ---
 
-## FINANCEIRO
+### 15. Atualizar Cliente
 
-### 11. Resumo Financeiro
+**PUT** `/clients/:id` 🔒
 
-**GET** `/finance/summary`
+Aceita todos os campos de criação (todos opcionais no update).
+
+---
+
+### 16. Histórico do Cliente
+
+**GET** `/clients/:id/history` 🔒
 
 **Resposta:**
 ```json
 {
-  "today": {
-    "earnings": 450.00,
-    "expenses": 120.00,
-    "profit": 330.00
-  },
-  "month": {
-    "earnings": 8500.00,
-    "expenses": 2300.00,
-    "profit": 6200.00
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "date": "2026-03-01",
+      "time": "14:00:00",
+      "status": "concluido",
+      "barber_name": "Roberto",
+      "service_name": "Corte Masculino",
+      "service_price": 45.00
+    }
+  ]
+}
+```
+
+---
+
+## FINANCEIRO (`/api/finance`)
+
+### 17. Resumo Financeiro
+
+**GET** `/finance/summary` 🔒
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "data": {
+    "today": {
+      "earnings": 450.00,
+      "expenses": 120.00,
+      "profit": 330.00
+    },
+    "month": {
+      "earnings": 8500.00,
+      "expenses": 2300.00,
+      "profit": 6200.00
+    }
   }
 }
 ```
 
 ---
 
-### 12. Relatório Mensal
+### 18. Relatório Mensal
 
-**GET** `/finance/monthly?month=2&year=2024`
+**GET** `/finance/monthly` 🔒 **Requer: Plano Profissional+**
 
-**⚠️ REQUER PLANO:** Profissional ou Premium
+**Query Parameters:**
+| Parâmetro | Tipo | Descrição |
+|---|---|---|
+| `month` | number | Mês (1-12) |
+| `year` | number | Ano (ex: 2026) |
 
 **Resposta:**
 ```json
-[
-  {
-    "date": "2024-02-01",
-    "earnings": 380.00,
-    "expenses": 150.00,
-    "profit": 230.00
-  },
-  {
-    "date": "2024-02-02",
-    "earnings": 420.00,
-    "expenses": 80.00,
-    "profit": 340.00
-  }
-]
+{
+  "success": true,
+  "data": [
+    { "date": "2026-03-01", "earnings": 380.00, "expenses": 150.00, "profit": 230.00 },
+    { "date": "2026-03-02", "earnings": 420.00, "expenses": 80.00, "profit": 340.00 }
+  ]
+}
 ```
 
 ---
 
-### 13. Adicionar Gasto
+### 19. Adicionar Gasto
 
-**POST** `/finance/expenses`
+**POST** `/finance/expenses` 🔒
 
 ```json
 {
   "description": "Aluguel do mês",
   "category": "aluguel",
   "amount": 1500.00,
-  "date": "2024-02-01"
+  "date": "2026-03-01"
 }
 ```
 
-**Categorias disponíveis:**
-- `produto`
-- `aluguel`
-- `contas`
-- `outros`
+---
+
+### 20. Atualizar Gasto
+
+**PUT** `/finance/expenses/:id` 🔒
+
+Aceita todos os campos de criação (todos opcionais no update).
 
 ---
 
-### 14. Listar Gastos
+### 21. Excluir Gasto
 
-**GET** `/finance/expenses?startDate=2024-02-01&endDate=2024-02-28`
+**DELETE** `/finance/expenses/:id` 🔒
+
+---
+
+### 22. Listar Gastos
+
+**GET** `/finance/expenses` 🔒
+
+**Query Parameters:**
+| Parâmetro | Tipo | Descrição |
+|---|---|---|
+| `startDate` | string | Data inicial (YYYY-MM-DD) |
+| `endDate` | string | Data final (YYYY-MM-DD) |
+
+---
+
+## SERVIÇOS E BARBEIROS (`/api/barbershop`)
+
+### 23. Listar Serviços
+
+**GET** `/barbershop/services` 🔒
 
 **Resposta:**
 ```json
-[
-  {
-    "id": "uuid",
-    "description": "Aluguel do mês",
-    "category": "aluguel",
-    "amount": 1500.00,
-    "date": "2024-02-01"
-  }
-]
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "name": "Corte Masculino",
+      "price": 45.00,
+      "duration_minutes": 30,
+      "active": true
+    }
+  ]
+}
 ```
 
 ---
 
-## SERVIÇOS E BARBEIROS
+### 24. Criar Serviço
 
-### 15. Listar Serviços
-
-**GET** `/barbershop/services`
-
-**Resposta:**
-```json
-[
-  {
-    "id": "uuid",
-    "name": "Corte Masculino",
-    "price": 45.00,
-    "duration_minutes": 30,
-    "active": true
-  },
-  {
-    "id": "uuid",
-    "name": "Corte + Barba",
-    "price": 60.00,
-    "duration_minutes": 45,
-    "active": true
-  }
-]
-```
-
----
-
-### 16. Criar Serviço
-
-**POST** `/barbershop/services`
+**POST** `/barbershop/services` 🔒
 
 ```json
 {
@@ -387,29 +543,49 @@ Authorization: Bearer SEU_TOKEN
 }
 ```
 
+**Validação:**
+- `name`: mín. 2 caracteres
+- `price`: positivo, máx. 2 casas decimais
+- `duration_minutes`: entre 10 e 300
+
 ---
 
-### 17. Listar Barbeiros
+### 25. Atualizar Serviço
 
-**GET** `/barbershop/barbers`
+**PUT** `/barbershop/services/:id` 🔒
+
+---
+
+### 26. Excluir Serviço
+
+**DELETE** `/barbershop/services/:id` 🔒
+
+---
+
+### 27. Listar Barbeiros
+
+**GET** `/barbershop/barbers` 🔒
 
 **Resposta:**
 ```json
-[
-  {
-    "id": "uuid",
-    "name": "Roberto Silva",
-    "photo": "https://exemplo.com/foto.jpg",
-    "active": true
-  }
-]
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "name": "Roberto Silva",
+      "photo": "https://exemplo.com/foto.jpg",
+      "active": true
+    }
+  ]
+}
 ```
 
 ---
 
-### 18. Criar Barbeiro
+### 28. Criar Barbeiro
 
-**POST** `/barbershop/barbers`
+**POST** `/barbershop/barbers` 🔒
 
 ```json
 {
@@ -418,158 +594,247 @@ Authorization: Bearer SEU_TOKEN
 }
 ```
 
-**⚠️ LIMITES POR PLANO:**
+> `photo` é opcional.
+
+**Limites por plano:**
 - Básico: 1 barbeiro
 - Profissional: 5 barbeiros
 - Premium: Ilimitado
 
 ---
 
-## WHATSAPP
+### 29. Atualizar Barbeiro
 
-### 19. Webhook do WhatsApp
-
-**POST** `/whatsapp/webhook`
-
-```json
-{
-  "phone": "5511999887766",
-  "message": "oi",
-  "barbershopId": "uuid-da-barbearia"
-}
-```
-
-**⚠️ NOTA:** Esta rota é chamada automaticamente pela API do WhatsApp.
-
-**Fluxo do Bot:**
-1. Cliente envia "oi"
-2. Bot responde com menu
-3. Cliente escolhe opção (1, 2 ou 3)
-4. Bot guia pelo processo de agendamento
-5. Confirmação automática
+**PUT** `/barbershop/barbers/:id` 🔒
 
 ---
 
-##  CÓDIGOS DE ERRO
+### 30. Excluir Barbeiro
 
-### 400 - Bad Request
-```json
-{
-  "error": "Email já cadastrado"
-}
-```
-
-### 401 - Unauthorized
-```json
-{
-  "error": "Token não fornecido"
-}
-```
-
-### 403 - Forbidden
-```json
-{
-  "error": "Plano insuficiente",
-  "message": "Esta funcionalidade requer o plano profissional ou superior"
-}
-```
-
-### 404 - Not Found
-```json
-{
-  "error": "Agendamento não encontrado"
-}
-```
-
-### 500 - Internal Server Error
-```json
-{
-  "error": "Erro ao processar solicitação"
-}
-```
+**DELETE** `/barbershop/barbers/:id` 🔒
 
 ---
 
-## TESTANDO COM CURL
+## WHATSAPP (`/api/whatsapp`)
 
-### Registrar
-```bash
-curl -X POST http://localhost:5000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "barbershopName": "Teste",
-    "ownerName": "Teste",
-    "email": "teste@teste.com",
-    "whatsapp": "11999999999",
-    "password": "123456",
-    "plan": "basico"
-  }'
+### Conexão
+
+#### 31. Status da Conexão
+
+**GET** `/whatsapp/status` 🔒
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "data": {
+    "status": "connected",
+    "qrCode": null,
+    "error": null,
+    "connectedNumber": "5511999999999",
+    "connectedName": "Barbearia Elite"
+  }
+}
 ```
 
-### Login
-```bash
-curl -X POST http://localhost:5000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "teste@teste.com",
-    "password": "123456"
-  }'
-```
-
-### Dashboard (com token)
-```bash
-curl http://localhost:5000/api/dashboard \
-  -H "Authorization: Bearer SEU_TOKEN"
-```
+**Status possíveis:** `disconnected`, `connecting`, `qr`, `connected`
 
 ---
 
-## COLLECTION POSTMAN
+#### 32. QR Code para Conectar
 
-Importe esta collection no Postman para testar todas as rotas:
+**GET** `/whatsapp/qr` 🔒
 
-1. Abra o Postman
-2. Import > Raw text
-3. Cole o JSON abaixo
+Retorna o QR Code como imagem Data URL para escanear com o WhatsApp.
+
+---
+
+#### 33. Desconectar WhatsApp
+
+**POST** `/whatsapp/logout` 🔒
+
+---
+
+#### 34. Reiniciar Conexão
+
+**POST** `/whatsapp/restart` 🔒
+
+---
+
+### Configuração de Mensagens
+
+#### 35. Obter Configurações
+
+**GET** `/whatsapp/config` 🔒
+
+Retorna as 21 mensagens configuráveis do bot.
+
+---
+
+#### 36. Atualizar Mensagens
+
+**PUT** `/whatsapp/config` 🔒
 
 ```json
 {
-  "info": {
-    "name": "BarberPro SaaS API",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-  },
-  "item": [
-    {
-      "name": "Auth",
-      "item": [
-        {
-          "name": "Register",
-          "request": {
-            "method": "POST",
-            "url": "http://localhost:5000/api/auth/register",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"barbershopName\": \"Teste\",\n  \"ownerName\": \"Teste\",\n  \"email\": \"teste@teste.com\",\n  \"whatsapp\": \"11999999999\",\n  \"password\": \"123456\",\n  \"plan\": \"basico\"\n}"
-            }
-          }
-        },
-        {
-          "name": "Login",
-          "request": {
-            "method": "POST",
-            "url": "http://localhost:5000/api/auth/login",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"teste@teste.com\",\n  \"password\": \"123456\"\n}"
-            }
-          }
-        }
-      ]
-    }
+  "welcome_header": "Olá! Bem-vindo à {nome_barbearia}! 💈",
+  "confirmation_message": "✅ Agendamento confirmado!",
+  "reminder_message": "⏰ Lembrete: seu horário é daqui a pouco!"
+}
+```
+
+**Campos configuráveis:**
+- `welcome_header`, `ask_name_message`, `attendant_message`
+- `confirmation_message`, `reminder_message`
+- `invalid_option_message`, `session_expired_message`, `end_session_message`
+- `name_validation_message`, `no_slots_message`
+- `cancel_no_appointments_message`, `cancel_list_message`, `cancel_success_message`
+- `reschedule_no_appointments_message`, `reschedule_list_message`
+- `no_previous_appointments_message`
+- `rating_question_message`, `rating_confirmation_message`
+- `promotions_message`, `instagram_message`
+
+---
+
+#### 37. Resetar Mensagens
+
+**POST** `/whatsapp/config/reset` 🔒
+
+Restaura todas as mensagens para os valores padrão.
+
+---
+
+### Menu do Bot
+
+#### 38. Obter Opções do Menu
+
+**GET** `/whatsapp/config/menu` 🔒
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "data": [
+    { "id": "uuid", "option_order": 1, "label": "Agendar um horário", "emoji": "💈", "type": "system", "active": true },
+    { "id": "uuid", "option_order": 2, "label": "Ver nossos serviços", "emoji": "📋", "type": "system", "active": true }
   ]
 }
 ```
 
+**9 opções padrão do sistema:**
+1. 💈 Agendar um horário
+2. 📋 Ver nossos serviços
+3. ❌ Cancelar agendamento
+4. 🔄 Reagendamento
+5. ⭐ Avaliação pós-atendimento
+6. 🎉 Promoções
+7. 📱 Instagram
+8. 👨‍💼 Falar com um humano
+9. 🚪 Encerrar atendimento
+
 ---
 
-**🚀 Pronto para começar a integrar!**
+#### 39. Criar Opção de Menu
+
+**POST** `/whatsapp/config/menu` 🔒
+
+```json
+{
+  "label": "Horário de funcionamento",
+  "emoji": "🕐",
+  "response_message": "Funcionamos de seg a sáb, das 9h às 20h!"
+}
+```
+
+> Máximo de 15 opções no total.
+
+---
+
+#### 40. Atualizar Opção de Menu
+
+**PUT** `/whatsapp/config/menu/:id` 🔒
+
+---
+
+#### 41. Excluir Opção de Menu
+
+**DELETE** `/whatsapp/config/menu/:id` 🔒
+
+> Opções do tipo `system` não podem ser excluídas.
+
+---
+
+#### 42. Reordenar Menu
+
+**PUT** `/whatsapp/config/menu-reorder` 🔒
+
+```json
+{
+  "order": ["uuid-1", "uuid-2", "uuid-3"]
+}
+```
+
+---
+
+#### 43. Resetar Menu
+
+**POST** `/whatsapp/config/menu/reset` 🔒
+
+Restaura as 9 opções padrão.
+
+---
+
+### Webhook
+
+#### 44. Receber Mensagem (Webhook Local)
+
+**POST** `/whatsapp/webhook` (Sem autenticação)
+
+Rota usada internamente pelo `whatsapp-web.js` para processar mensagens recebidas.
+
+---
+
+## 🔒 Legenda
+
+- 🔒 = Requer autenticação (token JWT via cookie ou header `Authorization: Bearer <token>`)
+- **Plano Profissional+** = Requer plano profissional ou premium
+
+---
+
+## TESTANDO COM POWERSHELL
+
+### Registrar
+
+```powershell
+$body = @{
+  barbershopName = "Teste"
+  ownerName = "João"
+  email = "joao@teste.com"
+  whatsapp = "11999999999"
+  password = "MinhaSenh4"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://localhost:5000/api/auth/register" -Method POST -ContentType "application/json" -Body $body
+```
+
+### Login e usar token
+
+```powershell
+$login = @{ email = "joao@teste.com"; password = "MinhaSenh4" } | ConvertTo-Json
+$response = Invoke-RestMethod -Uri "http://localhost:5000/api/auth/login" -Method POST -ContentType "application/json" -Body $login
+
+$token = $response.data.token
+$headers = @{ Authorization = "Bearer $token" }
+
+# Dashboard
+Invoke-RestMethod -Uri "http://localhost:5000/api/dashboard" -Headers $headers
+
+# Listar serviços
+Invoke-RestMethod -Uri "http://localhost:5000/api/barbershop/services" -Headers $headers
+```
+
+### Health Check
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:5000/health"
+```

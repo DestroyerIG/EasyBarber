@@ -1,11 +1,12 @@
 import cron from 'node-cron';
 import pool from '../config/database.js';
-import { sendWhatsAppMessage } from '../services/whatsappService.js';
+import { sendWhatsAppMessage } from './whatsapp/index.js';
+import logger from '../utils/logger.js';
 
 export const startReminderCron = () => {
   cron.schedule('*/10 * * * *', async () => {
     try {
-      console.log('⏰ Verificando lembretes...');
+      logger.debug('Verificando lembretes...');
 
       const twoHoursFromNow = new Date();
       twoHoursFromNow.setHours(twoHoursFromNow.getHours() + 2);
@@ -34,7 +35,6 @@ export const startReminderCron = () => {
       );
 
       for (const appointment of appointments.rows) {
-        // Buscar configuração de mensagens da barbearia
         const configResult = await pool.query(
           'SELECT reminder_message FROM whatsapp_bot_config WHERE barbershop_id = $1',
           [appointment.barbershop_id]
@@ -59,14 +59,14 @@ export const startReminderCron = () => {
             'UPDATE appointments SET reminder_sent = true WHERE id = $1',
             [appointment.id]
           );
-          console.log(`✅ Lembrete enviado para ${appointment.phone}`);
+          logger.info({ phone: appointment.phone }, 'Lembrete enviado');
         }
       }
 
     } catch (error) {
-      console.error('❌ Erro ao enviar lembretes:', error);
+      logger.error({ err: error }, 'Erro ao enviar lembretes');
     }
   });
 
-  console.log('✅ Cron de lembretes iniciado');
+  logger.info('Cron de lembretes iniciado');
 };

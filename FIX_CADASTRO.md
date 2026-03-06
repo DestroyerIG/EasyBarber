@@ -4,7 +4,6 @@
 
 Na tela você vê:
 ```
-localhost:3000 diz
 Erro ao processar solicitação
 ```
 
@@ -14,164 +13,82 @@ E o botão fica em **"Processando..."** infinitamente.
 
 ---
 
-## ✅ SOLUÇÃO EM 6 PASSOS
+## ✅ SOLUÇÃO RÁPIDA
 
-### Passo 1: Abrir o arquivo
-
-Abra o arquivo: **`backend\.env`**
-
-Use qualquer editor:
-- Bloco de Notas (Notepad)
-- Notepad++
-- Visual Studio Code
-- Sublime Text
-
----
-
-### Passo 2: Encontrar a linha
-
-Procure a linha que começa com:
-```
-DATABASE_URL=
-```
-
----
-
-### Passo 3: Identificar o erro
-
-A linha deve estar assim (ERRADO):
-```
-DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5433/barberpro
-                                                         ^^^^
-                                                         ERRADO!
-```
-
-O número **5433** está incorreto!
-
----
-
-### Passo 4: Corrigir
-
-Mude **5433** para **5432**:
-
-**ANTES (errado):**
-```
-postgresql://postgres:SUA_SENHA@localhost:5433/barberpro
-```
-
-**DEPOIS (correto):**
-```
-postgresql://postgres:SUA_SENHA@localhost:5432/barberpro
-```
-
----
-
-### Passo 5: Salvar
-
-Salve o arquivo:
-- **Ctrl+S** no teclado
-- Ou clique em "Arquivo" > "Salvar"
-
----
-
-### Passo 6: Reiniciar o Backend
-
-No terminal onde o backend está rodando:
-
-1. Pressione **Ctrl+C** (para parar)
-2. Digite:
-   ```powershell
-   npm run dev
-   ```
-3. Pressione **Enter**
-
-Aguarde aparecer:
-```
-✅ Conectado ao banco de dados PostgreSQL
-```
-
----
-
-## 🎯 TESTE NOVAMENTE
-
-1. Volte ao navegador: http://localhost:3000
-2. Clique em **"Cadastre-se"**
-3. Preencha os dados:
-   - Nome da barbearia
-   - Seu nome
-   - WhatsApp
-   - Email
-   - Senha
-   - Plano
-4. Clique em **"Criar Conta"**
-5. ✅ Sucesso! Você será redirecionado ao dashboard
-
----
-
-## 🤖 ALTERNATIVA: Script Automático
-
-Se preferir não fazer manualmente, execute:
-
+Execute o script de correção:
 ```powershell
 .\fix-env.ps1
 ```
 
-Este script vai:
-1. Pedir a senha do PostgreSQL
-2. Corrigir automaticamente o arquivo .env
-3. O backend vai reiniciar sozinho
+Ele corrige automaticamente o arquivo `backend\.env` com a porta e senha corretas.
 
 ---
 
-## 🆘 SE AINDA NÃO FUNCIONAR
+## ✅ SOLUÇÃO MANUAL
 
-1. Verifique se o PostgreSQL está rodando:
-   ```powershell
-   Get-Service postgresql*
-   ```
+### 1. Abra o arquivo `backend\.env`
 
-2. Veja se apareceu algum erro no terminal do backend
+### 2. Verifique a linha `DATABASE_URL`:
 
-3. Consulte o arquivo: **TROUBLESHOOTING.md**
+**ERRADO (porta 5433):**
+```
+DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5433/barberpro
+```
+
+**CORRETO (porta 5432):**
+```
+DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5432/barberpro
+```
+
+### 3. Verifique se a senha está correta
+
+A senha deve ser a mesma que você definiu na instalação do PostgreSQL.
+
+### 4. Salve o arquivo
+
+### 5. Reinicie o backend
+
+Se estiver usando `npm run dev` com nodemon, ele reinicia automaticamente.
+
+Caso contrário:
+```powershell
+# Parar (Ctrl+C)
+cd backend
+npm run dev
+```
+
+### 6. Aguarde aparecer:
+```
+Servidor rodando na porta 5000
+Conexão com banco de dados verificada
+```
 
 ---
 
-## 📝 EXEMPLO VISUAL
+## 🧪 TESTAR
 
-### ❌ ERRADO (porta 5433)
-```
-DATABASE_URL=postgresql://postgres:minha_senha@localhost:5433/barberpro
-PORT=5000
-JWT_SECRET=abc123
-```
-
-### ✅ CORRETO (porta 5432)
-```
-DATABASE_URL=postgresql://postgres:minha_senha@localhost:5432/barberpro
-PORT=5000
-JWT_SECRET=abc123
-```
-
-**Só mude o número 5433 para 5432!**
+1. Acesse http://localhost:3000
+2. Cadastre uma barbearia
+3. Senha deve ter: mínimo 8 caracteres, 1 maiúscula, 1 número
 
 ---
 
-## 🎉 RESULTADO ESPERADO
+## ❓ AINDA COM ERRO?
 
-Após a correção:
-
-**Backend (terminal):**
-```
-🚀 Servidor rodando na porta 5000
-✅ Conectado ao banco de dados PostgreSQL
-✅ Cron de lembretes iniciado
+Verifique se o PostgreSQL está rodando:
+```powershell
+Get-Service postgresql*
 ```
 
-**Frontend (navegador):**
-- Cadastro funciona ✅
-- Redirecionamento para dashboard ✅
-- Dashboard carrega ✅
+Verifique se o banco existe:
+```powershell
+psql -U postgres -c "\l" | findstr barberpro
+```
 
----
+Se não existir:
+```powershell
+psql -U postgres -c "CREATE DATABASE barberpro;"
+psql -U postgres -d barberpro -f backend\src\config\database.sql
+```
 
-**💡 DICA:** Depois de salvar o .env, o backend reinicia automaticamente (nodemon detecta a mudança)!
+> Guia completo: `TROUBLESHOOTING.md`

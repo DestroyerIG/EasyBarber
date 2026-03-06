@@ -1,8 +1,7 @@
-import { ZodError } from 'zod';
-
 /**
  * Middleware de validação genérico usando Zod.
  * Aceita um objeto com schemas para body, query e params.
+ * Erros de validação são encaminhados para o errorHandler global.
  */
 export const validate = (schemas) => {
     return (req, res, next) => {
@@ -18,13 +17,7 @@ export const validate = (schemas) => {
             }
             next();
         } catch (error) {
-            if (error instanceof ZodError) {
-                const messages = error.errors.map(e => `${e.path.join('.')}: ${e.message}`);
-                return res.status(400).json({
-                    error: 'Dados inválidos',
-                    details: messages
-                });
-            }
+            // ZodError é tratado pelo errorHandler global
             next(error);
         }
     };

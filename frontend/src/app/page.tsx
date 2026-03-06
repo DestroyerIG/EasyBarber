@@ -1,8 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import api from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
 import { AxiosError } from 'axios';
 
@@ -15,9 +14,8 @@ export default function LoginPage() {
     barbershopName: '',
     ownerName: '',
     whatsapp: '',
-    plan: 'basico'
   });
-  const router = useRouter();
+  const { login, register } = useAuth();
   const { showToast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -26,35 +24,25 @@ export default function LoginPage() {
 
     try {
       if (isLogin) {
-        const response = await api.post('/auth/login', {
-          email: formData.email,
-          password: formData.password
-        });
-
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('user', JSON.stringify(response.data.user));
+        await login(formData.email, formData.password);
         showToast('Login realizado com sucesso!', 'success');
-        router.push('/dashboard');
       } else {
-        const response = await api.post('/auth/register', {
+        await register({
           barbershopName: formData.barbershopName,
           ownerName: formData.ownerName,
           email: formData.email,
           whatsapp: formData.whatsapp,
           password: formData.password,
-          plan: formData.plan
         });
-
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('user', JSON.stringify(response.data.barbershop));
         showToast('Barbearia cadastrada com sucesso!', 'success');
-        router.push('/dashboard');
       }
     } catch (error: unknown) {
       if (error instanceof AxiosError) {
-        const message = error.response?.data?.error
-          || error.response?.data?.details?.join(', ')
-          || 'Erro ao processar solicitação';
+        const resData = error.response?.data;
+        const message =
+          resData?.details?.join(' | ') ||
+          (typeof resData?.error === 'string' ? resData.error : resData?.error?.message) ||
+          'Erro ao processar solicitação';
         showToast(message, 'error');
       } else {
         showToast('Erro inesperado. Tente novamente.', 'error');
@@ -64,7 +52,7 @@ export default function LoginPage() {
     }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
@@ -97,72 +85,83 @@ export default function LoginPage() {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" aria-label={isLogin ? 'Formulário de login' : 'Formulário de cadastro'}>
           {!isLogin && (
             <>
-              <input
-                type="text"
-                name="barbershopName"
-                placeholder="Nome da Barbearia"
-                value={formData.barbershopName}
-                onChange={handleChange}
-                required={!isLogin}
-                className="w-full px-4 py-3 bg-black/50 border border-gray-700 rounded-lg text-white focus:border-primary focus:outline-none transition-all"
-              />
-              <input
-                type="text"
-                name="ownerName"
-                placeholder="Nome do Responsável"
-                value={formData.ownerName}
-                onChange={handleChange}
-                required={!isLogin}
-                className="w-full px-4 py-3 bg-black/50 border border-gray-700 rounded-lg text-white focus:border-primary focus:outline-none transition-all"
-              />
-              <input
-                type="tel"
-                name="whatsapp"
-                placeholder="WhatsApp"
-                value={formData.whatsapp}
-                onChange={handleChange}
-                required={!isLogin}
-                className="w-full px-4 py-3 bg-black/50 border border-gray-700 rounded-lg text-white focus:border-primary focus:outline-none transition-all"
-              />
-              <select
-                name="plan"
-                value={formData.plan}
-                onChange={handleChange}
-                className="w-full px-4 py-3 bg-black/50 border border-gray-700 rounded-lg text-white focus:border-primary focus:outline-none transition-all"
-              >
-                <option value="basico">Plano Básico</option>
-                <option value="profissional">Plano Profissional</option>
-                <option value="premium">Plano Premium</option>
-              </select>
+              <div>
+                <label htmlFor="barbershopName" className="sr-only">Nome da Barbearia</label>
+                <input
+                  id="barbershopName"
+                  type="text"
+                  name="barbershopName"
+                  placeholder="Nome da Barbearia"
+                  value={formData.barbershopName}
+                  onChange={handleChange}
+                  required={!isLogin}
+                  className="input"
+                />
+              </div>
+              <div>
+                <label htmlFor="ownerName" className="sr-only">Nome do Responsável</label>
+                <input
+                  id="ownerName"
+                  type="text"
+                  name="ownerName"
+                  placeholder="Nome do Responsável"
+                  value={formData.ownerName}
+                  onChange={handleChange}
+                  required={!isLogin}
+                  className="input"
+                />
+              </div>
+              <div>
+                <label htmlFor="whatsapp" className="sr-only">WhatsApp</label>
+                <input
+                  id="whatsapp"
+                  type="tel"
+                  name="whatsapp"
+                  placeholder="WhatsApp"
+                  value={formData.whatsapp}
+                  onChange={handleChange}
+                  required={!isLogin}
+                  className="input"
+                />
+              </div>
             </>
           )}
 
-          <input
-            type="email"
-            name="email"
-            placeholder="Email"
-            value={formData.email}
-            onChange={handleChange}
-            required
-            className="w-full px-4 py-3 bg-black/50 border border-gray-700 rounded-lg text-white focus:border-primary focus:outline-none transition-all"
-          />
-          <input
-            type="password"
-            name="password"
-            placeholder="Senha"
-            value={formData.password}
-            onChange={handleChange}
-            required
-            className="w-full px-4 py-3 bg-black/50 border border-gray-700 rounded-lg text-white focus:border-primary focus:outline-none transition-all"
-          />
+          <div>
+            <label htmlFor="email" className="sr-only">Email</label>
+            <input
+              id="email"
+              type="email"
+              name="email"
+              placeholder="Email"
+              value={formData.email}
+              onChange={handleChange}
+              required
+              className="input"
+            />
+          </div>
+          <div>
+            <label htmlFor="password" className="sr-only">Senha</label>
+            <input
+              id="password"
+              type="password"
+              name="password"
+              placeholder={isLogin ? 'Senha' : 'Senha (mín 8 chars, maiúscula + número)'}
+              value={formData.password}
+              onChange={handleChange}
+              required
+              minLength={isLogin ? 1 : 8}
+              className="input"
+            />
+          </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-4 bg-primary hover:bg-orange-600 text-black font-bold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed text-lg"
+            className="w-full py-4 btn-primary text-lg disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Processando...' : isLogin ? 'Entrar' : 'Criar Conta'}
           </button>

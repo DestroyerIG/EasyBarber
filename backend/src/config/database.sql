@@ -7,9 +7,11 @@ CREATE TABLE IF NOT EXISTS barbershops (
     owner_name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     whatsapp VARCHAR(20) NOT NULL,
-    plan VARCHAR(50) NOT NULL DEFAULT 'basico',
+    plan VARCHAR(50) NOT NULL DEFAULT 'basico'
+        CHECK (plan IN ('basico', 'profissional', 'premium')),
     instagram_handle VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     active BOOLEAN DEFAULT true
 );
 
@@ -18,8 +20,20 @@ CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     barbershop_id UUID NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
     email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    role VARCHAR(20) NOT NULL DEFAULT 'admin',
+    password_hash CHAR(60) NOT NULL,
+    role VARCHAR(20) NOT NULL DEFAULT 'admin'
+        CHECK (role IN ('admin', 'barber')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Tabela de refresh tokens (rotação segura)
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash CHAR(64) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    revoked_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -30,7 +44,8 @@ CREATE TABLE IF NOT EXISTS barbers (
     name VARCHAR(255) NOT NULL,
     photo TEXT,
     active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Tabela de serviços
@@ -38,10 +53,11 @@ CREATE TABLE IF NOT EXISTS services (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     barbershop_id UUID NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
-    price DECIMAL(10, 2) NOT NULL,
-    duration_minutes INTEGER NOT NULL,
+    price DECIMAL(10, 2) NOT NULL CHECK (price > 0),
+    duration_minutes INTEGER NOT NULL CHECK (duration_minutes >= 10 AND duration_minutes <= 300),
     active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Tabela de clientes
@@ -56,7 +72,9 @@ CREATE TABLE IF NOT EXISTS clients (
     notes TEXT,
     last_visit DATE,
     total_spent DECIMAL(10, 2) DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (barbershop_id, phone)
 );
 
 -- Tabela de agendamentos
@@ -68,17 +86,19 @@ CREATE TABLE IF NOT EXISTS appointments (
     service_id UUID NOT NULL REFERENCES services(id) ON DELETE CASCADE,
     date DATE NOT NULL,
     time TIME NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'confirmado',
+    status VARCHAR(20) NOT NULL DEFAULT 'confirmado'
+        CHECK (status IN ('confirmado', 'concluido', 'cancelado')),
     reminder_sent BOOLEAN DEFAULT false,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Tabela de ganhos
 CREATE TABLE IF NOT EXISTS earnings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     barbershop_id UUID NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
-    appointment_id UUID REFERENCES appointments(id) ON DELETE SET NULL,
-    amount DECIMAL(10, 2) NOT NULL,
+    appointment_id UUID UNIQUE REFERENCES appointments(id) ON DELETE SET NULL,
+    amount DECIMAL(10, 2) NOT NULL CHECK (amount > 0),
     date DATE NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -89,9 +109,10 @@ CREATE TABLE IF NOT EXISTS expenses (
     barbershop_id UUID NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
     description VARCHAR(255) NOT NULL,
     category VARCHAR(50) NOT NULL,
-    amount DECIMAL(10, 2) NOT NULL,
+    amount DECIMAL(10, 2) NOT NULL CHECK (amount > 0),
     date DATE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Tabela para controlar sessões do bot WhatsApp
@@ -166,10 +187,55 @@ CREATE TABLE IF NOT EXISTS whatsapp_ratings (
 );
 
 -- Índices para melhorar performance
-CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(date);
-CREATE INDEX IF NOT EXISTS idx_appointments_barbershop ON appointments(barbershop_id);
+
+-- Appointments: busca por barbearia + data (query mais frequente)
+CREATE INDEX IF NOT EXISTS idx_appointments_barbershop_date ON appointments(barbershop_id, date);
+CREATE INDEX IF NOT EXISTS idx_appointments_barber_date ON appointments(barber_id, date);
+CREATE INDEX IF NOT EXISTS idx_appointments_status ON appointments(status) WHERE status = 'confirmado';
+
+-- Clients: busca por telefone dentro da barbearia
+CREATE INDEX IF NOT EXISTS idx_clients_barbershop ON clients(barbershop_id);
 CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone);
+
+-- Earnings/Expenses: relatórios financeiros por período
+CREATE INDEX IF NOT EXISTS idx_earnings_barbershop_date ON earnings(barbershop_id, date);
+CREATE INDEX IF NOT EXISTS idx_expenses_barbershop_date ON expenses(barbershop_id, date);
+
+-- Refresh tokens: busca por hash e limpeza de expirados
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token_hash ON refresh_tokens(token_hash) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
+
+-- WhatsApp
 CREATE INDEX IF NOT EXISTS idx_whatsapp_sessions_phone ON whatsapp_sessions(phone);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_ratings_barbershop ON whatsapp_ratings(barbershop_id);
-CREATE INDEX IF NOT EXISTS idx_earnings_date ON earnings(date);
-CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
+
+-- Barbers/Services: filtros ativos
+CREATE INDEX IF NOT EXISTS idx_barbers_barbershop_active ON barbers(barbershop_id) WHERE active = true;
+CREATE INDEX IF NOT EXISTS idx_services_barbershop_active ON services(barbershop_id) WHERE active = true;
+
+-- Função para atualizar updated_at automaticamente
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Triggers de updated_at
+DO $$
+DECLARE
+    t TEXT;
+BEGIN
+    FOR t IN SELECT unnest(ARRAY['barbershops','users','barbers','services','clients','appointments','expenses','whatsapp_sessions','whatsapp_bot_config'])
+    LOOP
+        EXECUTE format('
+            DROP TRIGGER IF EXISTS trigger_updated_at ON %I;
+            CREATE TRIGGER trigger_updated_at
+                BEFORE UPDATE ON %I
+                FOR EACH ROW
+                EXECUTE FUNCTION update_updated_at_column();
+        ', t, t);
+    END LOOP;
+END;
+$$;

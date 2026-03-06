@@ -2,8 +2,11 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import pool from './config/database.js';
+import logger from './utils/logger.js';
+import { errorHandler } from './middleware/errorHandler.js';
 import authRoutes from './routes/auth.js';
 import dashboardRoutes from './routes/dashboard.js';
 import appointmentRoutes from './routes/appointments.js';
@@ -20,7 +23,7 @@ dotenv.config();
 const requiredEnvVars = ['JWT_SECRET', 'DATABASE_URL'];
 for (const envVar of requiredEnvVars) {
   if (!process.env[envVar]) {
-    console.error(`❌ Variável de ambiente ${envVar} não definida!`);
+    logger.fatal(`Variável de ambiente ${envVar} não definida!`);
     process.exit(1);
   }
 }
@@ -34,32 +37,74 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true
 }));
-app.use(express.json({ limit: '10mb' }));
+app.use(cookieParser());
+app.use(express.json({ limit: '1mb' }));
+
+// Request ID + logging
+app.use((req, res, next) => {
+  req.id = crypto.randomUUID();
+  res.setHeader('X-Request-Id', req.id);
+
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+    logger[level]({
+      requestId: req.id,
+      method: req.method,
+      url: req.originalUrl,
+      status: res.statusCode,
+      durationMs: duration,
+    }, `${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms`);
+  });
+
+  next();
+});
+
+// Prefixo versionado da API
+const API_V1 = '/api/v1';
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
+  windowMs: 15 * 60 * 1000,
   max: 100,
-  message: { error: 'Muitas requisições. Tente novamente em 15 minutos.' }
+  message: { success: false, error: { code: 'RATE_LIMIT', message: 'Muitas requisições. Tente novamente em 15 minutos.' } }
 });
-app.use('/api', limiter);
+app.use(API_V1, limiter);
 
-// Rate limiting mais restrito para auth
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
-  message: { error: 'Muitas tentativas de login. Tente novamente em 15 minutos.' }
+  message: { success: false, error: { code: 'RATE_LIMIT', message: 'Muitas tentativas de login. Tente novamente em 15 minutos.' } }
 });
-app.use('/api/auth', authLimiter);
+app.use(`${API_V1}/auth`, authLimiter);
 
-// Rotas
-app.use('/api/auth', authRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/appointments', appointmentRoutes);
-app.use('/api/clients', clientRoutes);
-app.use('/api/finance', financeRoutes);
-app.use('/api/barbershop', barbershopRoutes);
-app.use('/api/whatsapp', whatsappRoutes);
+// Health check
+app.get('/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', db: 'connected', uptime: process.uptime() });
+  } catch {
+    res.status(503).json({ status: 'error', db: 'disconnected' });
+  }
+});
+
+// Rotas v1
+app.use(`${API_V1}/auth`, authRoutes);
+app.use(`${API_V1}/dashboard`, dashboardRoutes);
+app.use(`${API_V1}/appointments`, appointmentRoutes);
+app.use(`${API_V1}/clients`, clientRoutes);
+app.use(`${API_V1}/finance`, financeRoutes);
+app.use(`${API_V1}/barbershop`, barbershopRoutes);
+app.use(`${API_V1}/whatsapp`, whatsappRoutes);
+
+// Backward-compat: redireciona /api/<recurso> para /api/v1/<recurso>
+app.use('/api', (req, res, next) => {
+  if (!req.path.startsWith('/v1')) {
+    return res.redirect(301, `${API_V1}${req.path}`);
+  }
+  next();
+});
 
 app.get('/', (req, res) => {
   res.json({
@@ -69,22 +114,63 @@ app.get('/', (req, res) => {
   });
 });
 
-// Iniciar servidor após verificar conexão com banco
+// 404 handler para rotas não encontradas
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: {
+      code: 'NOT_FOUND',
+      message: `Rota ${req.method} ${req.path} não encontrada`,
+    },
+  });
+});
+
+// Error handler global — DEVE ser o último middleware
+app.use(errorHandler);
+
+// Graceful shutdown
+let server;
+
+const gracefulShutdown = async (signal) => {
+  logger.info({ signal }, 'Sinal de shutdown recebido. Encerrando...');
+
+  if (server) {
+    server.close(() => {
+      logger.info('Servidor HTTP encerrado');
+    });
+  }
+
+  try {
+    await pool.end();
+    logger.info('Pool de conexões encerrado');
+  } catch (err) {
+    logger.error({ err }, 'Erro ao encerrar pool');
+  }
+
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('unhandledRejection', (reason) => {
+  logger.fatal({ err: reason }, 'Unhandled Rejection — encerrando processo');
+  process.exit(1);
+});
+
+// Iniciar servidor
 const start = async () => {
   try {
     await pool.query('SELECT 1');
-    console.log('✅ Conexão com banco de dados verificada');
+    logger.info('Conexão com banco de dados verificada');
 
     startReminderCron();
-
-    // Inicializar bot WhatsApp (whatsapp-web.js)
     initWhatsApp();
 
-    app.listen(PORT, () => {
-      console.log(`🚀 Servidor rodando na porta ${PORT}`);
+    server = app.listen(PORT, () => {
+      logger.info(`Servidor rodando na porta ${PORT}`);
     });
   } catch (error) {
-    console.error('❌ Falha ao conectar ao banco de dados:', error.message);
+    logger.fatal({ err: error }, 'Falha ao conectar ao banco de dados');
     process.exit(1);
   }
 };

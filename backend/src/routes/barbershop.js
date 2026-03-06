@@ -1,20 +1,9 @@
 import express from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
-import {
-  getServices,
-  createService,
-  getBarbers,
-  createBarber,
-  updateService,
-  deleteService,
-  updateBarber,
-  deleteBarber,
-  createServiceSchema,
-  updateServiceSchema,
-  createBarberSchema,
-  updateBarberSchema
-} from '../controllers/serviceController.js';
+import { getServices, createService, updateService, deleteService } from '../controllers/serviceController.js';
+import { getBarbers, createBarber, updateBarber, deleteBarber } from '../controllers/barberController.js';
+import { createServiceSchema, updateServiceSchema, createBarberSchema, updateBarberSchema } from '../validators/schemas/index.js';
 
 const router = express.Router();
 

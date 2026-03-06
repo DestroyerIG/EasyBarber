@@ -2,47 +2,95 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  background: #0a0a0a;
-  color: white;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-}
-
-::-webkit-scrollbar {
-  width: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: #1a1a1a;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #FF7A00;
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #ff9533;
-}
-
-/* Toast slide-in animation */
-@keyframes slide-in {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
   }
-  to {
-    transform: translateX(0);
-    opacity: 1;
+
+  body {
+    @apply bg-black text-white antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  }
+
+  /* Focus visible for keyboard navigation (a11y) */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-primary;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-dark-light;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-primary rounded;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-orange-400;
   }
 }
 
-.animate-slide-in {
-  animation: slide-in 0.3s ease-out;
+@layer components {
+  /* Reusable card */
+  .card {
+    @apply bg-dark-light border border-white/5 rounded-xl p-6 transition-all hover:border-primary/20;
+  }
+
+  /* Reusable input */
+  .input {
+    @apply w-full px-4 py-3 bg-black/50 border border-gray-700 rounded-lg text-white
+           placeholder-gray-500 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50
+           transition-all;
+  }
+
+  /* Reusable button primary */
+  .btn-primary {
+    @apply px-6 py-3 bg-primary hover:bg-orange-600 text-black font-bold rounded-xl
+           transition-all hover:scale-[1.02] hover:shadow-lg hover:shadow-primary/20
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
+  }
+
+  /* Reusable button secondary */
+  .btn-secondary {
+    @apply px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white
+           rounded-lg transition-all border border-white/5;
+  }
+
+  /* Skeleton loading */
+  .skeleton {
+    @apply bg-gradient-to-r from-dark-light via-dark-lighter to-dark-light bg-[length:200%_100%]
+           animate-shimmer rounded-lg;
+  }
+
+  /* Badge */
+  .badge {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border;
+  }
+
+  /* Modal backdrop */
+  .modal-backdrop {
+    @apply fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4
+           animate-fade-in;
+  }
+
+  /* Modal content */
+  .modal-content {
+    @apply bg-dark-light border border-white/10 rounded-2xl w-full max-w-lg max-h-[90vh]
+           overflow-y-auto animate-slide-up shadow-2xl;
+  }
+
+  /* Tab button active/inactive */
+  .tab-active {
+    @apply bg-primary text-black font-semibold;
+  }
+  .tab-inactive {
+    @apply text-gray-400 hover:text-white hover:bg-white/5;
+  }
 }

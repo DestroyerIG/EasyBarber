@@ -1,362 +1,278 @@
 # 🔧 TROUBLESHOOTING - Problemas Comuns e Soluções
 
-## 🚨 PROBLEMA: Não consigo cadastrar barbearia
+## 🔍 Diagnóstico Rápido
 
-### ✅ SOLUÇÃO RÁPIDA
-
-**Execute o script de correção:**
-```powershell
-.\fix-env.ps1
-```
-
-Este script vai corrigir automaticamente o arquivo `.env` com a porta correta do PostgreSQL.
-
----
-
-### 🔍 DIAGNÓSTICO COMPLETO
-
-#### 1. Verificar se Backend está rodando
+Antes de mais nada, verifique:
 
 ```powershell
-# Ver processos Node
-Get-Process -Name node
+# 1. Backend rodando?
+Invoke-RestMethod -Uri "http://localhost:5000/health"
 
-# Ver se porta 5000 está em uso
-netstat -ano | findstr ":5000"
-```
-
-**Se não estiver rodando:**
-```powershell
-cd backend
-npm run dev
-```
-
----
-
-#### 2. Verificar se PostgreSQL está rodando
-
-```powershell
-# Ver serviço PostgreSQL
+# 2. PostgreSQL rodando?
 Get-Service postgresql*
 
-# Se não estiver rodando, iniciar:
-Start-Service postgresql-x64-18
+# 3. Frontend rodando?
+# Acesse http://localhost:3000 no navegador
 ```
 
 ---
 
-#### 3. Verificar porta do PostgreSQL
+## 🚨 ERRO: "Erro ao processar solicitação" no cadastro
 
-```powershell
-# Ver se PostgreSQL está na porta 5432
-netstat -ano | findstr ":5432"
-```
+### Causa
+O backend não consegue conectar ao banco de dados.
 
-**Deve exibir:**
-```
-TCP    0.0.0.0:5432    0.0.0.0:0    LISTENING    [PID]
-```
-
----
-
-### ⚠️ ERRO COMUM: ECONNREFUSED
-
-**Sintoma:**
-```
-Error: connect ECONNREFUSED ::1:5433
-```
-
-**Causa:** O arquivo `backend\.env` está com a porta **5433** ao invés de **5432**
-
-**Solução 1 - Automática:**
+### Solução Rápida
 ```powershell
 .\fix-env.ps1
 ```
 
-**Solução 2 - Manual:**
-1. Abra: `backend\.env`
-2. Encontre a linha:
+### Solução Manual
+1. Abra `backend\.env`
+2. Verifique se `DATABASE_URL` está correto:
    ```
-   DATABASE_URL=postgresql://postgres:SENHA@localhost:5433/barberpro
+   DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5432/barberpro
    ```
-3. Mude para:
-   ```
-   DATABASE_URL=postgresql://postgres:SENHA@localhost:5432/barberpro
-   ```
-4. Salve o arquivo
-5. O backend vai reiniciar automaticamente
+3. Corrija a porta (**5432**, não 5433)
+4. Corrija a senha do PostgreSQL
+5. Reinicie o backend (`Ctrl+C` → `npm run dev`)
 
 ---
 
-### ⚠️ ERRO: password authentication failed
+## 🚨 ERRO: `ECONNREFUSED 127.0.0.1:5432`
 
-**Sintoma:**
-```
-password authentication failed for user "postgres"
-```
+### Causa
+PostgreSQL não está rodando.
 
-**Causa:** Senha incorreta no arquivo `.env`
-
-**Solução:**
-1. Execute: `.\fix-env.ps1`
-2. Digite a senha correta do PostgreSQL
-3. O script vai reconfigurar automaticamente
-
----
-
-### ⚠️ ERRO: database "barberpro" does not exist
-
-**Sintoma:**
-```
-database "barberpro" does not exist
-```
-
-**Causa:** Banco de dados não foi criado
-
-**Solução:**
+### Solução
 ```powershell
-# Conectar no PostgreSQL
-psql -U postgres
+# Verificar status
+Get-Service postgresql*
 
-# Criar banco
-CREATE DATABASE barberpro;
+# Iniciar (ajuste a versão se necessário)
+Start-Service "postgresql-x64-16"
+```
 
-# Sair
-\q
+Se o serviço não existir, reinstale o PostgreSQL: `POSTGRESQL_SETUP.md`
 
-# Executar migrations
+---
+
+## 🚨 ERRO: `password authentication failed`
+
+### Causa
+Senha incorreta no `DATABASE_URL`.
+
+### Solução
+1. Execute `.\fix-env.ps1` e digite a senha correta
+2. Ou edite manualmente `backend\.env`:
+   ```
+   DATABASE_URL=postgresql://postgres:SENHA_CORRETA@localhost:5432/barberpro
+   ```
+
+### Resetar senha do PostgreSQL
+Se esqueceu a senha:
+1. Abra `C:\Program Files\PostgreSQL\16\data\pg_hba.conf`
+2. Altere `scram-sha-256` para `trust` na linha do `localhost`
+3. Reinicie o PostgreSQL
+4. Conecte sem senha: `psql -U postgres`
+5. Mude a senha: `ALTER USER postgres PASSWORD 'nova_senha';`
+6. Reverta o `pg_hba.conf` para `scram-sha-256`
+7. Reinicie novamente
+
+---
+
+## 🚨 ERRO: `database "barberpro" does not exist`
+
+### Solução
+```powershell
+psql -U postgres -c "CREATE DATABASE barberpro;"
 psql -U postgres -d barberpro -f backend\src\config\database.sql
 ```
 
 ---
 
-### ⚠️ ERRO: relation "barbershops" does not exist
+## 🚨 ERRO: `relation "barbershops" does not exist`
 
-**Sintoma:**
-```
-relation "barbershops" does not exist
-```
+### Causa
+Tabelas não foram criadas.
 
-**Causa:** Tabelas não foram criadas
-
-**Solução:**
+### Solução
 ```powershell
 psql -U postgres -d barberpro -f backend\src\config\database.sql
 ```
 
+Para aplicar migrations:
+```powershell
+psql -U postgres -d barberpro -f backend\src\config\migration_v2.sql
+psql -U postgres -d barberpro -f backend\src\config\migration_v3.sql
+psql -U postgres -d barberpro -f backend\src\config\migration_v4.sql
+```
+
 ---
 
-## 🌐 PROBLEMA: Frontend não conecta com Backend
+## 🚨 ERRO: `psql não é reconhecido`
 
-### Verificar configuração do Frontend
+### Solução
+Adicione ao PATH:
+```powershell
+$env:Path += ";C:\Program Files\PostgreSQL\16\bin"
+```
 
-1. Verifique se existe: `frontend\.env.local`
-2. Conteúdo deve ser:
+Para permanente (requer admin):
+```powershell
+[Environment]::SetEnvironmentVariable(
+    "Path",
+    "$env:Path;C:\Program Files\PostgreSQL\16\bin",
+    [EnvironmentVariableTarget]::Machine
+)
+```
+Feche e reabra o terminal.
+
+---
+
+## 🚨 ERRO: Script `setup.ps1` não executa
+
+### Solução
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+---
+
+## 🌐 Frontend não conecta com Backend
+
+### Verificar
+1. Backend está rodando na porta 5000?
+2. Arquivo `frontend\.env.local` existe com:
    ```
    NEXT_PUBLIC_API_URL=http://localhost:5000/api
    ```
+3. Reiniciou o frontend após criar/alterar o `.env.local`?
 
-**Se não existir:**
+### Criar se não existir
 ```powershell
-echo "NEXT_PUBLIC_API_URL=http://localhost:5000/api" > frontend\.env.local
+"NEXT_PUBLIC_API_URL=http://localhost:5000/api" | Out-File -FilePath frontend\.env.local -Encoding UTF8
 ```
-
-3. Reinicie o frontend:
-   ```powershell
-   # Parar (Ctrl+C)
-   # Iniciar novamente
-   cd frontend
-   npm run dev
-   ```
 
 ---
 
-## 📱 PROBLEMA: Erro de CORS
+## 🌐 ERRO: CORS
 
-**Sintoma:**
+### Sintoma
 ```
 Access to XMLHttpRequest has been blocked by CORS policy
 ```
 
-**Solução:**
-
-1. Verifique o arquivo `backend\src\server.js`
-2. Certifique-se que tem:
-   ```javascript
-   app.use(cors());
-   ```
-
-3. Se o problema persistir, configure CORS específico:
-   ```javascript
-   app.use(cors({
-     origin: 'http://localhost:3000',
-     credentials: true
-   }));
-   ```
-
----
-
-## 🔑 PROBLEMA: Token inválido ou expirado
-
-**Sintoma:**
-```
-401 Unauthorized
-Token inválido
+### Solução
+Verifique no `backend\.env`:
+```env
+FRONTEND_URL=http://localhost:3000
 ```
 
-**Solução:**
-1. Limpe o localStorage do navegador:
-   - F12 > Console
-   - Digite: `localStorage.clear()`
-   - Pressione Enter
-2. Faça login novamente
+O servidor usa `FRONTEND_URL` para configurar CORS. Se não estiver definido, o padrão é `http://localhost:3000`.
+
+Em produção, configure para a URL real do frontend.
 
 ---
 
-## 🐌 PROBLEMA: Backend muito lento
+## 🔑 Token inválido ou expirado
 
-**Possíveis causas:**
+### Causa
+O access token expira após um tempo. O sistema tenta renovar automaticamente via refresh token.
 
-1. **Muitas consultas ao banco:**
-   - Verifique se as tabelas têm índices
-   - Otimize as queries
-
-2. **Conexões não fechadas:**
-   - Verifique se está usando `pool.query()` corretamente
-
-3. **Muitos logs no console:**
-   - Remova `console.log()` excessivos
+### Solução
+1. Faça logout e login novamente
+2. Se persistir, limpe os cookies do navegador
+3. Verifique se `JWT_SECRET` no `.env` não mudou
 
 ---
 
-## 🔄 PROBLEMA: Nodemon não reinicia automaticamente
+## 📱 WhatsApp não conecta
 
-**Solução:**
+### QR Code não aparece
+1. Verifique se o backend está rodando
+2. Acesse a aba WhatsApp no dashboard
+3. Aguarde o QR Code aparecer (pode levar alguns segundos)
+
+### QR Code aparece mas não conecta
+1. Escaneie rapidamente (o QR expira)
+2. Use o WhatsApp principal do celular (não WhatsApp Business secundário)
+3. Vá em WhatsApp > Aparelhos conectados > Conectar aparelho
+
+### Desconectou inesperadamente
+1. No dashboard, aba WhatsApp, clique em "Reiniciar"
+2. Ou reinicie o backend completo
+
+### Erro com Puppeteer/Chrome
+O `whatsapp-web.js` precisa do Chromium. Se der erro:
 ```powershell
-# Parar o backend (Ctrl+C)
+# No Windows, geralmente funciona automaticamente
+# Se houver problemas, reinstale as dependências:
 cd backend
-npx nodemon src/server.js
-```
-
-Ou edite `backend\package.json`:
-```json
-"scripts": {
-  "dev": "nodemon src/server.js --watch src"
-}
+Remove-Item -Recurse -Force node_modules
+npm install
 ```
 
 ---
 
-## 📊 VERIFICAÇÃO COMPLETA DO SISTEMA
+## 💾 Backup e restauração do banco
 
-Execute estes comandos para verificar tudo:
-
+### Backup
 ```powershell
-# 1. PostgreSQL rodando?
-Get-Service postgresql*
-
-# 2. Porta 5432 ativa?
-netstat -ano | findstr ":5432"
-
-# 3. Backend rodando?
-netstat -ano | findstr ":5000"
-
-# 4. Frontend rodando?
-netstat -ano | findstr ":3000"
-
-# 5. Banco existe?
-psql -U postgres -c "\l" | findstr barberpro
-
-# 6. Tabelas existem?
-psql -U postgres -d barberpro -c "\dt"
-
-# 7. Testar API
-curl http://localhost:5000 -UseBasicParsing
+pg_dump -U postgres -d barberpro > backup.sql
 ```
 
----
-
-## 🆘 RESET COMPLETO (Última Opção)
-
-Se nada funcionar, reset completo:
-
+### Restaurar
 ```powershell
-# 1. Parar tudo (Ctrl+C em todos os terminais)
-
-# 2. Dropar e recriar banco
 psql -U postgres -c "DROP DATABASE IF EXISTS barberpro;"
 psql -U postgres -c "CREATE DATABASE barberpro;"
-psql -U postgres -d barberpro -f backend\src\config\database.sql
-
-# 3. Reconfigurar .env
-.\fix-env.ps1
-
-# 4. Limpar node_modules (opcional)
-Remove-Item backend\node_modules -Recurse -Force
-Remove-Item frontend\node_modules -Recurse -Force
-
-# 5. Reinstalar dependências
-cd backend
-npm install
-cd ..\frontend
-npm install
-
-# 6. Iniciar tudo novamente
-# Terminal 1:
-cd backend
-npm run dev
-
-# Terminal 2:
-cd frontend
-npm run dev
+psql -U postgres -d barberpro < backup.sql
 ```
 
 ---
 
-## 📞 LOGS ÚTEIS
+## 🐳 Problemas com Docker
 
-### Ver logs do Backend
-O backend já mostra logs no terminal onde foi iniciado.
-
-### Ver logs do Frontend
-O frontend mostra logs no terminal e no console do navegador (F12).
-
-### Ver logs do PostgreSQL
+### Containers não sobem
 ```powershell
-# Windows Event Viewer
-eventvwr.msc
-# Aplicações e Serviços > PostgreSQL
+docker compose logs
 ```
 
----
-
-## ✅ CHECKLIST DE FUNCIONAMENTO
-
-Antes de cadastrar barbearia, verifique:
-
-- [ ] PostgreSQL rodando (porta 5432)
-- [ ] Backend rodando (porta 5000)
-- [ ] Frontend rodando (porta 3000)
-- [ ] Banco `barberpro` criado
-- [ ] Tabelas criadas (9 tabelas)
-- [ ] Arquivo `backend\.env` com porta 5432
-- [ ] Arquivo `frontend\.env.local` existe
-- [ ] API respondendo em http://localhost:5000
-
----
-
-## 🎯 TESTE RÁPIDO
-
+### Banco não aceita conexão
+O container `db` precisa estar healthy antes do backend iniciar. Verifique:
 ```powershell
-# Testar se tudo está OK
-curl http://localhost:5000 -UseBasicParsing
-
-# Deve retornar:
-# {"message":"💈 BarberPro SaaS API","version":"1.0.0","status":"online"}
+docker compose ps
 ```
 
-Se retornar isso, está tudo funcionando! ✅
+### Resetar tudo
+```powershell
+docker compose down -v    # Remove volumes (dados do banco)
+docker compose up -d      # Recria tudo
+```
 
 ---
 
-**🔧 Execute `.\fix-env.ps1` para corrigir automaticamente!**
+## ⚡ Performance
+
+### Backend lento
+1. Verifique se as migrations de índices foram aplicadas:
+   ```powershell
+   psql -U postgres -d barberpro -f backend\src\config\migration_v4.sql
+   ```
+2. Ajuste o pool no `.env`:
+   ```env
+   DB_POOL_MIN=2
+   DB_POOL_MAX=20
+   ```
+
+### Frontend lento em dev
+Normal — Next.js em modo desenvolvimento compila as páginas sob demanda. Em produção (`npm run build && npm start`) é muito mais rápido.
+
+---
+
+## 📞 Ainda com problemas?
+
+1. Leia `POSTGRESQL_SETUP.md` para problemas com banco
+2. Leia `API_DOCS.md` para testar endpoints
+3. Verifique os logs do backend no terminal
+4. Use `http://localhost:5000/health` para verificar conexão com o banco

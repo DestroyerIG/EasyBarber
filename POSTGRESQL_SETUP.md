@@ -1,448 +1,208 @@
-# 🐘 GUIA DE INSTALAÇÃO E CONFIGURAÇÃO DO POSTGRESQL
+# 🐘 GUIA DE INSTALAÇÃO DO POSTGRESQL
 
-## 📥 PASSO 1: INSTALAR O POSTGRESQL
+## 📥 PASSO 1: INSTALAR
 
 ### Opção 1: Instalador Oficial (Recomendado)
 
-1. **Baixar o PostgreSQL:**
-   - Acesse: https://www.postgresql.org/download/windows/
-   - Clique em "Download the installer"
-   - Escolha a versão **PostgreSQL 16.x** (mais recente)
-   - Baixe o instalador para Windows x86-64
+1. **Baixar:** https://www.postgresql.org/download/windows/
+2. Clique em "Download the installer"
+3. Escolha **PostgreSQL 16.x** para Windows x86-64
+4. Execute o instalador
 
-2. **Executar o Instalador:**
-   - Execute o arquivo baixado (`postgresql-16.x-windows-x64.exe`)
-   - Clique em "Next" na tela de boas-vindas
+**Durante a instalação:**
+- ✅ Marcar: PostgreSQL Server, pgAdmin 4, Command Line Tools
+- ⚠️ **ANOTE A SENHA** do superusuário `postgres`
+- Porta: **5432** (manter padrão)
+- Locale: Default locale
 
-3. **Escolher Diretório de Instalação:**
-   - Mantenha o padrão: `C:\Program Files\PostgreSQL\16`
-   - Clique em "Next"
-
-4. **Selecionar Componentes:**
-   - ✅ PostgreSQL Server
-   - ✅ pgAdmin 4 (interface gráfica)
-   - ✅ Stack Builder (opcional)
-   - ✅ Command Line Tools
-   - Clique em "Next"
-
-5. **Diretório de Dados:**
-   - Mantenha o padrão: `C:\Program Files\PostgreSQL\16\data`
-   - Clique em "Next"
-
-6. **⚠️ IMPORTANTE - Definir Senha do Superusuário:**
-   - Digite uma senha forte (ex: `postgres123`)
-   - **ANOTE ESTA SENHA!** Você vai precisar dela
-   - Confirme a senha
-   - Clique em "Next"
-
-7. **Porta:**
-   - Mantenha a porta padrão: `5432`
-   - Clique em "Next"
-
-8. **Locale:**
-   - Mantenha "Default locale"
-   - Clique em "Next"
-
-9. **Resumo:**
-   - Revise as configurações
-   - Clique em "Next"
-
-10. **Instalação:**
-    - Aguarde a instalação (pode levar alguns minutos)
-    - Clique em "Finish"
-
----
-
-### Opção 2: Via Winget (Linha de Comando)
+### Opção 2: Winget
 
 ```powershell
-# Instalar via Windows Package Manager
 winget install PostgreSQL.PostgreSQL
-
-# Após instalação, adicionar ao PATH manualmente
-$env:Path += ";C:\Program Files\PostgreSQL\16\bin"
 ```
 
 ---
 
-## ✅ PASSO 2: VERIFICAR A INSTALAÇÃO
+## ✅ PASSO 2: VERIFICAR INSTALAÇÃO
 
-### 1. Adicionar PostgreSQL ao PATH (se necessário)
+### Adicionar ao PATH (se necessário)
 
 ```powershell
-# Abrir PowerShell como Administrador e executar:
+$env:Path += ";C:\Program Files\PostgreSQL\16\bin"
+```
+
+Para tornar permanente (PowerShell como Admin):
+```powershell
 [Environment]::SetEnvironmentVariable(
     "Path",
     "$env:Path;C:\Program Files\PostgreSQL\16\bin",
     [EnvironmentVariableTarget]::Machine
 )
-
-# Fechar e reabrir o terminal
 ```
 
-### 2. Testar a Instalação
+### Testar
 
 ```powershell
-# Verificar versão
 psql --version
-
-# Deve exibir algo como:
 # psql (PostgreSQL) 16.x
 ```
 
 ---
 
-## 🔧 PASSO 3: CONFIGURAR O POSTGRESQL
+## 🔧 PASSO 3: CRIAR BANCO DE DADOS
 
-### 1. Acessar o PostgreSQL
+### Via linha de comando
 
 ```powershell
-# Conectar como superusuário
-psql -U postgres
-
-# Será solicitada a senha que você definiu na instalação
+psql -U postgres -c "CREATE DATABASE barberpro;"
 ```
 
-### 2. Criar o Banco de Dados
+### Via pgAdmin
 
-```sql
--- Criar o banco de dados
-CREATE DATABASE barberpro;
-
--- Verificar se foi criado
-\l
-
--- Sair do psql
-\q
-```
+1. Abra o pgAdmin 4 (menu iniciar)
+2. Conecte ao servidor (localhost, porta 5432, senha do postgres)
+3. Botão direito em "Databases" → "Create" → "Database"
+4. Nome: `barberpro` → Salvar
 
 ---
 
-## 📊 PASSO 4: CRIAR AS TABELAS
+## 📊 PASSO 4: CRIAR TABELAS
 
-### Método 1: Via Linha de Comando (Recomendado)
+### Via linha de comando (Recomendado)
 
 ```powershell
-# Navegar até a pasta do projeto
-cd C:\Users\pc\Documents\verdent-projects\Barberpro-saas
-
-# Executar o script SQL
+# Na pasta raiz do projeto
 psql -U postgres -d barberpro -f backend\src\config\database.sql
-
-# Digite a senha quando solicitado
 ```
 
-### Método 2: Via pgAdmin (Interface Gráfica)
+### Via pgAdmin
 
-1. **Abrir pgAdmin 4**
-   - Busque "pgAdmin" no menu iniciar
-   - Abra o aplicativo
-
-2. **Conectar ao Servidor**
-   - Clique com o botão direito em "Servers"
-   - "Register" > "Server"
-   - Nome: "BarberPro Local"
-   - Aba "Connection":
-     - Host: `localhost`
-     - Port: `5432`
-     - Database: `postgres`
-     - Username: `postgres`
-     - Password: [sua senha]
-   - Salvar
-
-3. **Criar o Banco de Dados**
-   - Expandir "Servers" > "BarberPro Local"
-   - Botão direito em "Databases" > "Create" > "Database"
-   - Database: `barberpro`
-   - Salvar
-
-4. **Executar o Script**
-   - Expandir "Databases" > "barberpro"
-   - Botão direito em "barberpro" > "Query Tool"
-   - Abrir o arquivo `backend/src/config/database.sql`
-   - Copiar todo o conteúdo
-   - Colar na Query Tool
-   - Clicar em "Execute" (F5)
+1. Expanda "Databases" → "barberpro"
+2. Botão direito em "barberpro" → "Query Tool"
+3. Abra e copie o conteúdo de `backend/src/config/database.sql`
+4. Cole e execute (F5)
 
 ---
 
-## ✅ PASSO 5: VERIFICAR SE AS TABELAS FORAM CRIADAS
-
-### Via Linha de Comando:
+## ✅ PASSO 5: VERIFICAR TABELAS
 
 ```powershell
-# Conectar ao banco
-psql -U postgres -d barberpro
-
-# Listar todas as tabelas
-\dt
-
-# Deve exibir:
-#  Schema |       Name         | Type  |  Owner   
-# --------+--------------------+-------+----------
-#  public | barbershops        | table | postgres
-#  public | users              | table | postgres
-#  public | barbers            | table | postgres
-#  public | services           | table | postgres
-#  public | clients            | table | postgres
-#  public | appointments       | table | postgres
-#  public | earnings           | table | postgres
-#  public | expenses           | table | postgres
-#  public | whatsapp_sessions  | table | postgres
-
-# Ver estrutura de uma tabela
-\d barbershops
-
-# Sair
-\q
+psql -U postgres -d barberpro -c "\dt"
 ```
 
-### Via pgAdmin:
+Deve exibir 12 tabelas:
 
-1. Expandir: "Databases" > "barberpro" > "Schemas" > "public" > "Tables"
-2. Você deve ver todas as 9 tabelas criadas
+```
+ Schema |        Name            | Type  |  Owner
+--------+------------------------+-------+----------
+ public | appointments           | table | postgres
+ public | barbershops            | table | postgres
+ public | barbers                | table | postgres
+ public | clients                | table | postgres
+ public | earnings               | table | postgres
+ public | expenses               | table | postgres
+ public | refresh_tokens         | table | postgres
+ public | services               | table | postgres
+ public | users                  | table | postgres
+ public | whatsapp_bot_config    | table | postgres
+ public | whatsapp_ratings       | table | postgres
+ public | whatsapp_sessions      | table | postgres
+```
 
 ---
 
-## 🔐 PASSO 6: CONFIGURAR O ARQUIVO .ENV DO BACKEND
+## 🔧 PASSO 6: APLICAR MIGRATIONS (se necessário)
 
-### 1. Criar o arquivo .env
+Se você já tinha o banco de uma versão anterior:
 
 ```powershell
-# Na pasta do projeto
-cd backend
-
-# Criar arquivo .env
-New-Item -ItemType File -Path .env
+psql -U postgres -d barberpro -f backend\src\config\migration_v2.sql
+psql -U postgres -d barberpro -f backend\src\config\migration_v3.sql
+psql -U postgres -d barberpro -f backend\src\config\migration_v4.sql
 ```
 
-### 2. Editar o arquivo .env
+---
 
-Abra o arquivo `backend/.env` e adicione:
+## 🔐 PASSO 7: CONFIGURAR .ENV
+
+Crie o arquivo `backend\.env`:
 
 ```env
 PORT=5000
-DATABASE_URL=postgresql://postgres:SUA_SENHA_AQUI@localhost:5432/barberpro
-JWT_SECRET=chave_super_secreta_barberpro_2024_xyz
-WHATSAPP_API_KEY=deixar_vazio_por_enquanto
-WHATSAPP_API_URL=https://api.z-api.io/instances/SEU_ID
+DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5432/barberpro
+JWT_SECRET=gere_uma_chave_aleatoria_aqui
 NODE_ENV=development
 ```
 
-**⚠️ IMPORTANTE:** Substitua `SUA_SENHA_AQUI` pela senha que você definiu no PostgreSQL!
+> Substitua `SUA_SENHA` pela senha definida na instalação do PostgreSQL.
 
-**Exemplo:**
-```env
-DATABASE_URL=postgresql://postgres:postgres123@localhost:5432/barberpro
+Ou use o script automático:
+```powershell
+.\setup.ps1
 ```
 
 ---
 
-## 🧪 PASSO 7: TESTAR A CONEXÃO
-
-### 1. Testar conexão direta:
+## 🧪 PASSO 8: TESTAR CONEXÃO
 
 ```powershell
-# Conectar ao banco barberpro
-psql -U postgres -d barberpro
-
-# Se conectar com sucesso, está tudo OK!
-# Digite \q para sair
-```
-
-### 2. Testar com a aplicação:
-
-```powershell
-# Navegar para pasta do backend
-cd C:\Users\pc\Documents\verdent-projects\Barberpro-saas\backend
-
-# Instalar dependências (se ainda não instalou)
+cd backend
 npm install
-
-# Tentar iniciar o servidor
 npm run dev
+```
 
-# Deve exibir:
-# 🚀 Servidor rodando na porta 5000
-# ✅ Conectado ao banco de dados PostgreSQL
-# ✅ Cron de lembretes iniciado
+Deve exibir:
+```
+Servidor rodando na porta 5000
+Conexão com banco de dados verificada
+```
+
+Ou teste via Health Check:
+```powershell
+Invoke-RestMethod -Uri "http://localhost:5000/health"
+# { status: "ok", db: "connected" }
 ```
 
 ---
 
-## 🛠️ TROUBLESHOOTING
+## 🛠️ PROBLEMAS COMUNS
 
-### ❌ Erro: "psql não é reconhecido"
-
-**Solução:** Adicionar ao PATH
-
+### ❌ `psql não é reconhecido`
 ```powershell
-# PowerShell como Administrador
 $env:Path += ";C:\Program Files\PostgreSQL\16\bin"
-
-# Tornar permanente
-[Environment]::SetEnvironmentVariable(
-    "Path",
-    "$env:Path;C:\Program Files\PostgreSQL\16\bin",
-    [EnvironmentVariableTarget]::Machine
-)
-
-# Fechar e reabrir o terminal
 ```
 
----
+### ❌ `password authentication failed`
+Senha incorreta. Verifique em `backend\.env` ou execute `.\fix-env.ps1`.
 
-### ❌ Erro: "password authentication failed"
-
-**Solução:** Senha incorreta
-
-1. Verifique a senha no arquivo `.env`
-2. Tente conectar manualmente: `psql -U postgres`
-3. Se esqueceu a senha, reinstale o PostgreSQL
-
----
-
-### ❌ Erro: "database barberpro does not exist"
-
-**Solução:** Criar o banco
-
+### ❌ `ECONNREFUSED :5432`
+PostgreSQL não está rodando:
 ```powershell
-# Conectar
-psql -U postgres
-
-# Criar banco
-CREATE DATABASE barberpro;
-
-# Sair
-\q
+Start-Service "postgresql-x64-16"
 ```
 
----
-
-### ❌ Erro: "could not connect to server"
-
-**Solução:** PostgreSQL não está rodando
-
+### ❌ Porta 5432 já em uso
+Outra instância do PostgreSQL está rodando. Verifique:
 ```powershell
-# Verificar serviço
-Get-Service -Name postgresql*
-
-# Se não estiver rodando, iniciar
-Start-Service -Name "postgresql-x64-16"
-
-# Configurar para iniciar automaticamente
-Set-Service -Name "postgresql-x64-16" -StartupType Automatic
+netstat -ano | findstr ":5432"
 ```
 
----
-
-### ❌ Erro: "relation barbershops does not exist"
-
-**Solução:** Tabelas não foram criadas
-
-```powershell
-# Executar o script SQL
-cd C:\Users\pc\Documents\verdent-projects\Barberpro-saas
-psql -U postgres -d barberpro -f backend\src\config\database.sql
-```
+### ❌ Esqueceu a senha do postgres
+1. Edite `C:\Program Files\PostgreSQL\16\data\pg_hba.conf`
+2. Mude `scram-sha-256` para `trust` na linha do localhost
+3. Reinicie o PostgreSQL
+4. Conecte: `psql -U postgres`
+5. Mude a senha: `ALTER USER postgres PASSWORD 'nova_senha';`
+6. Reverta `pg_hba.conf` para `scram-sha-256`
+7. Reinicie o PostgreSQL
 
 ---
 
-## 📚 COMANDOS ÚTEIS DO POSTGRESQL
+## 💡 DICAS
 
-### Comandos do psql (dentro do terminal psql):
-
-```sql
-\l                          -- Listar bancos de dados
-\c barberpro                -- Conectar a um banco
-\dt                         -- Listar tabelas
-\d nome_tabela              -- Descrever estrutura da tabela
-\du                         -- Listar usuários
-\q                          -- Sair
-```
-
-### Comandos SQL úteis:
-
-```sql
--- Ver todos os bancos
-SELECT datname FROM pg_database;
-
--- Ver todas as tabelas
-SELECT tablename FROM pg_tables WHERE schemaname = 'public';
-
--- Contar registros em uma tabela
-SELECT COUNT(*) FROM barbershops;
-
--- Ver dados de uma tabela
-SELECT * FROM barbershops;
-
--- Deletar todos os dados de uma tabela
-TRUNCATE TABLE appointments CASCADE;
-
--- Dropar o banco (CUIDADO!)
-DROP DATABASE barberpro;
-```
-
----
-
-## ✅ CHECKLIST FINAL
-
-Antes de prosseguir, verifique:
-
-- [ ] PostgreSQL instalado e rodando
-- [ ] Senha do postgres anotada
-- [ ] Banco `barberpro` criado
-- [ ] 9 tabelas criadas com sucesso
-- [ ] Arquivo `.env` configurado com a senha correta
-- [ ] Conexão testada com `psql -U postgres -d barberpro`
-- [ ] Backend consegue conectar (`npm run dev`)
-
----
-
-## 🎯 PRÓXIMO PASSO
-
-Após configurar o PostgreSQL:
-
-1. ✅ PostgreSQL instalado e configurado
-2. ✅ Banco de dados criado
-3. ✅ Tabelas criadas
-4. ✅ Arquivo .env configurado
-5. ➡️ **Instalar dependências do projeto**
-6. ➡️ **Iniciar o backend**
-7. ➡️ **Iniciar o frontend**
-
----
-
-## 🆘 PRECISA DE AJUDA?
-
-### Opções:
-
-1. **Verificar logs de erro:** Copie a mensagem de erro completa
-2. **Testar conexão manual:** `psql -U postgres -d barberpro`
-3. **Verificar serviço:** `Get-Service postgresql*`
-4. **Reinstalar:** Se nada funcionar, desinstale e reinstale
-
----
-
-## 📱 FERRAMENTAS GRÁFICAS ALTERNATIVAS
-
-Se preferir interface gráfica ao invés de linha de comando:
-
-### 1. pgAdmin 4 (Já vem com PostgreSQL)
-- Interface oficial
-- Completa e poderosa
-- Um pouco complexa
-
-### 2. DBeaver (Recomendado para iniciantes)
-- Download: https://dbeaver.io/download/
-- Interface mais simples
-- Suporta vários bancos de dados
-
-### 3. TablePlus
-- Download: https://tableplus.com/
-- Interface moderna e bonita
-- Versão gratuita limitada
-
----
-
-**🎉 Com o PostgreSQL configurado, você está pronto para rodar o BarberPro SaaS!**
+- Use o **pgAdmin** para visualizar dados (interface gráfica)
+- Use `psql -U postgres -d barberpro` para acesso rápido via terminal
+- Configure backup automático em produção:
+  ```powershell
+  pg_dump -U postgres -d barberpro > backup_$(Get-Date -Format 'yyyy-MM-dd').sql
+  ```

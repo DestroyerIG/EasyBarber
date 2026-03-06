@@ -81,7 +81,7 @@ Write-Host "Tabelas criadas com sucesso!" -ForegroundColor Green
 
 # 6. Criar .env backend
 $envFile = "backend\.env"
-$databaseUrl = "postgresql://postgres:$pgPasswordText@localhost:5433/barberpro"
+$databaseUrl = "postgresql://postgres:$pgPasswordText@localhost:5432/barberpro"
 $jwtSecret = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 32 | ForEach-Object {[char]$_})
 
 @"

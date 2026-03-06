@@ -1,24 +1,22 @@
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import QRCode from 'qrcode';
-import { handleIncomingMessage } from './whatsappService.js';
+import { handleIncomingMessage } from './whatsapp/index.js';
+import logger from '../utils/logger.js';
 
 // Estado global do cliente
 let client = null;
-let connectionStatus = 'disconnected'; // 'disconnected' | 'qr' | 'connecting' | 'connected'
-let qrCodeData = null; // Base64 da imagem do QR Code
-let lastError = null;   // Último erro para debug
+let connectionStatus = 'disconnected';
+let qrCodeData = null;
+let lastError = null;
 
-/**
- * Inicializa o cliente WhatsApp com whatsapp-web.js
- */
 export const initWhatsApp = async () => {
     if (!process.env.WHATSAPP_ENABLED || process.env.WHATSAPP_ENABLED !== 'true') {
-        console.log('⚠️  WhatsApp Bot desativado (WHATSAPP_ENABLED != true)');
+        logger.info('WhatsApp Bot desativado (WHATSAPP_ENABLED != true)');
         return;
     }
 
-    console.log('🤖 Inicializando WhatsApp Bot com whatsapp-web.js...');
+    logger.info('Inicializando WhatsApp Bot...');
     connectionStatus = 'connecting';
     lastError = null;
 
@@ -40,71 +38,57 @@ export const initWhatsApp = async () => {
             }
         });
 
-        // Evento: QR Code gerado (precisa ser escaneado)
         client.on('qr', async (qr) => {
-            console.log('📱 QR Code gerado! Escaneie com seu WhatsApp.');
+            logger.info('QR Code gerado - escaneie com WhatsApp');
             connectionStatus = 'qr';
 
             try {
-                // QR code preto no fundo branco — cores padrão para máxima visibilidade
                 qrCodeData = await QRCode.toDataURL(qr, {
                     width: 300,
                     margin: 2,
-                    color: {
-                        dark: '#000000',
-                        light: '#FFFFFF'
-                    }
+                    color: { dark: '#000000', light: '#FFFFFF' }
                 });
-                console.log('✅ QR Code base64 gerado com sucesso');
             } catch (err) {
-                console.error('❌ Erro ao gerar QR Code imagem:', err);
+                logger.error({ err }, 'Erro ao gerar QR Code imagem');
             }
         });
 
-        // Evento: Conectando
         client.on('loading_screen', (percent) => {
             connectionStatus = 'connecting';
-            console.log(`⏳ Carregando WhatsApp... ${percent}%`);
+            logger.debug({ percent }, 'Carregando WhatsApp');
         });
 
-        // Evento: Autenticado com sucesso
         client.on('authenticated', () => {
-            console.log('🔐 WhatsApp autenticado!');
+            logger.info('WhatsApp autenticado');
             connectionStatus = 'connecting';
         });
 
-        // Evento: Cliente pronto
         client.on('ready', () => {
-            console.log('✅ WhatsApp Bot conectado e pronto!');
+            logger.info('WhatsApp Bot conectado e pronto');
             connectionStatus = 'connected';
             qrCodeData = null;
 
             const info = client.info;
             if (info) {
-                console.log(`📞 Número: ${info.wid.user}`);
-                console.log(`👤 Nome: ${info.pushname}`);
+                logger.info({ number: info.wid.user, name: info.pushname }, 'WhatsApp conectado');
             }
         });
 
-        // Evento: Desconectado
         client.on('disconnected', (reason) => {
-            console.log('❌ WhatsApp desconectado:', reason);
+            logger.warn({ reason }, 'WhatsApp desconectado');
             connectionStatus = 'disconnected';
             qrCodeData = null;
             client = null;
         });
 
-        // Evento: Falha na autenticação
         client.on('auth_failure', (msg) => {
-            console.error('❌ Falha na autenticação do WhatsApp:', msg);
+            logger.error({ msg }, 'Falha na autenticação do WhatsApp');
             connectionStatus = 'disconnected';
             lastError = 'Falha na autenticação: ' + msg;
         });
 
-        // Evento: Mensagem recebida
         client.on('message', async (message) => {
             try {
-                // Ignorar mensagens de grupo e status
                 if (message.from.includes('@g.us') || message.from === 'status@broadcast') {
                     return;
                 }
@@ -112,18 +96,17 @@ export const initWhatsApp = async () => {
                 const phone = message.from.replace('@c.us', '');
                 const text = message.body;
 
-                console.log(`📩 Mensagem recebida de ${phone}: ${text}`);
+                logger.debug({ phone }, 'Mensagem recebida');
 
                 await handleIncomingMessage(phone, text);
             } catch (error) {
-                console.error('❌ Erro ao processar mensagem recebida:', error);
+                logger.error({ err: error }, 'Erro ao processar mensagem recebida');
             }
         });
 
-        // Inicializar o cliente
         await client.initialize();
     } catch (error) {
-        console.error('❌ Erro ao inicializar WhatsApp:', error.message);
+        logger.error({ err: error }, 'Erro ao inicializar WhatsApp');
         lastError = error.message;
         connectionStatus = 'disconnected';
     }
@@ -160,10 +143,10 @@ export const logoutWhatsApp = async () => {
             await client.logout();
             connectionStatus = 'disconnected';
             qrCodeData = null;
-            console.log('👋 WhatsApp desconectado pelo usuário');
+            logger.info('WhatsApp desconectado pelo usuário');
             return true;
         } catch (error) {
-            console.error('❌ Erro ao desconectar WhatsApp:', error);
+            logger.error({ err: error }, 'Erro ao desconectar WhatsApp');
             return false;
         }
     }

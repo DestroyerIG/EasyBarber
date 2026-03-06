@@ -20,7 +20,14 @@ export function ProfitBar({ data }: ProfitBarProps) {
                     R$ {data.profitToday.toFixed(2)}
                 </span>
             </div>
-            <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
+            <div
+                    className="h-1 bg-gray-700 rounded-full overflow-hidden"
+                    role="progressbar"
+                    aria-valuenow={Math.round(profitPercentage)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`Margem de lucro: ${Math.round(profitPercentage)}%`}
+                >
                 <div
                     className="h-full bg-primary rounded-full transition-all duration-500"
                     style={{ width: `${profitPercentage}%` }}

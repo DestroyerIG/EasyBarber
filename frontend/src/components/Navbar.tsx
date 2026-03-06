@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { LogOut, Menu, X } from 'lucide-react';
+import { ThemeToggle } from '@/components/ui';
 import type { TabId, TabItem } from '@/types';
 
 const tabs: TabItem[] = [
@@ -30,12 +31,14 @@ export function Navbar({ activeTab, onTabChange, onLogout }: NavbarProps) {
     };
 
     return (
-        <nav className="bg-dark-light border-b border-primary/20 p-4 relative">
+        <nav className="bg-dark-light border-b border-primary/20 p-4 relative" aria-label="Navegação principal">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
                 <div className="flex items-center gap-4">
                     <button
                         onClick={() => setMenuOpen(!menuOpen)}
                         className="lg:hidden text-primary"
+                        aria-label={menuOpen ? 'Fechar menu' : 'Abrir menu'}
+                        aria-expanded={menuOpen}
                     >
                         {menuOpen ? <X size={24} /> : <Menu size={24} />}
                     </button>
@@ -52,19 +55,24 @@ export function Navbar({ activeTab, onTabChange, onLogout }: NavbarProps) {
                                 ? 'bg-primary text-black'
                                 : 'text-gray-400 hover:text-white hover:bg-white/5'
                                 }`}
+                            aria-current={activeTab === tab.id ? 'page' : undefined}
                         >
                             {tab.label}
                         </button>
                     ))}
                 </div>
 
-                <button
-                    onClick={onLogout}
-                    className="text-gray-400 hover:text-primary transition-all"
-                    title="Sair"
-                >
-                    <LogOut size={24} />
-                </button>
+                <div className="flex items-center gap-2">
+                    <ThemeToggle />
+                    <button
+                        onClick={onLogout}
+                        className="text-gray-400 hover:text-primary transition-all"
+                        title="Sair"
+                        aria-label="Sair da conta"
+                    >
+                        <LogOut size={24} aria-hidden="true" />
+                    </button>
+                </div>
             </div>
 
             {/* Mobile navigation */}

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import { Navbar } from '@/components/Navbar';
 import { DashboardCards } from '@/components/DashboardCards';
 import { ProfitBar } from '@/components/ProfitBar';
@@ -14,7 +15,7 @@ import { ServiceBarberModule } from '@/components/ServiceBarberModule';
 import { FinanceModule } from '@/components/FinanceModule';
 import { WhatsAppModule } from '@/components/WhatsAppModule';
 import { useToast } from '@/components/Toast';
-import { Settings, CreditCard, Clock, Wallet, UserCheck, Scissors } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import type { DashboardData, TabId } from '@/types';
 
 export default function DashboardPage() {
@@ -22,6 +23,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const router = useRouter();
+  const { logout } = useAuth();
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -40,12 +42,6 @@ export default function DashboardPage() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    router.push('/');
-  };
-
   if (loading) {
     return <LoadingSkeleton />;
   }
@@ -55,10 +51,10 @@ export default function DashboardPage() {
       <Navbar
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        onLogout={handleLogout}
+        onLogout={logout}
       />
 
-      <main className="max-w-7xl mx-auto p-4 lg:p-8">
+      <main id="main-content" className="max-w-7xl mx-auto p-4 lg:p-8">
         {activeTab === 'dashboard' && data && (
           <>
             <h2 className="text-3xl font-bold text-white mb-8">Dashboard</h2>
@@ -110,11 +106,11 @@ export default function DashboardPage() {
                   <p className="text-4xl font-bold text-primary">R$ 49<span className="text-sm text-gray-400">/mês</span></p>
                 </div>
                 <ul className="space-y-3 text-gray-400 text-sm">
-                  <li className="flex items-center gap-2">✅ 1 barbeiro</li>
-                  <li className="flex items-center gap-2">✅ Agendamentos ilimitados</li>
-                  <li className="flex items-center gap-2">✅ Controle financeiro básico</li>
-                  <li className="flex items-center gap-2">❌ Relatórios mensais</li>
-                  <li className="flex items-center gap-2">✅ Bot WhatsApp</li>
+                  <li className="flex items-center gap-2"><span className="text-green-500" aria-label="Incluso">✓</span> 1 barbeiro</li>
+                  <li className="flex items-center gap-2"><span className="text-green-500" aria-label="Incluso">✓</span> Agendamentos ilimitados</li>
+                  <li className="flex items-center gap-2"><span className="text-green-500" aria-label="Incluso">✓</span> Controle financeiro básico</li>
+                  <li className="flex items-center gap-2"><span className="text-red-500" aria-label="Não incluso">✗</span> Relatórios mensais</li>
+                  <li className="flex items-center gap-2"><span className="text-green-500" aria-label="Incluso">✓</span> Bot WhatsApp</li>
                 </ul>
               </div>
 
@@ -127,11 +123,11 @@ export default function DashboardPage() {
                   <p className="text-4xl font-bold text-primary">R$ 99<span className="text-sm text-gray-400">/mês</span></p>
                 </div>
                 <ul className="space-y-3 text-gray-400 text-sm">
-                  <li className="flex items-center gap-2">✅ Até 5 barbeiros</li>
-                  <li className="flex items-center gap-2">✅ Agendamentos ilimitados</li>
-                  <li className="flex items-center gap-2">✅ Controle financeiro completo</li>
-                  <li className="flex items-center gap-2">✅ Relatórios mensais</li>
-                  <li className="flex items-center gap-2">✅ Bot WhatsApp</li>
+                  <li className="flex items-center gap-2"><span className="text-green-500" aria-label="Incluso">✓</span> Até 5 barbeiros</li>
+                  <li className="flex items-center gap-2"><span className="text-green-500" aria-label="Incluso">✓</span> Agendamentos ilimitados</li>
+                  <li className="flex items-center gap-2"><span className="text-green-500" aria-label="Incluso">✓</span> Controle financeiro completo</li>
+                  <li className="flex items-center gap-2"><span className="text-green-500" aria-label="Incluso">✓</span> Relatórios mensais</li>
+                  <li className="flex items-center gap-2"><span className="text-green-500" aria-label="Incluso">✓</span> Bot WhatsApp</li>
                 </ul>
               </div>
 
@@ -141,11 +137,11 @@ export default function DashboardPage() {
                   <p className="text-4xl font-bold text-primary">R$ 199<span className="text-sm text-gray-400">/mês</span></p>
                 </div>
                 <ul className="space-y-3 text-gray-400 text-sm">
-                  <li className="flex items-center gap-2">✅ Barbeiros ilimitados</li>
-                  <li className="flex items-center gap-2">✅ Agendamentos ilimitados</li>
-                  <li className="flex items-center gap-2">✅ Controle financeiro completo</li>
-                  <li className="flex items-center gap-2">✅ Relatórios mensais</li>
-                  <li className="flex items-center gap-2">✅ Bot WhatsApp</li>
+                  <li className="flex items-center gap-2"><span className="text-green-500" aria-label="Incluso">✓</span> Barbeiros ilimitados</li>
+                  <li className="flex items-center gap-2"><span className="text-green-500" aria-label="Incluso">✓</span> Agendamentos ilimitados</li>
+                  <li className="flex items-center gap-2"><span className="text-green-500" aria-label="Incluso">✓</span> Controle financeiro completo</li>
+                  <li className="flex items-center gap-2"><span className="text-green-500" aria-label="Incluso">✓</span> Relatórios mensais</li>
+                  <li className="flex items-center gap-2"><span className="text-green-500" aria-label="Incluso">✓</span> Bot WhatsApp</li>
                 </ul>
               </div>
             </div>

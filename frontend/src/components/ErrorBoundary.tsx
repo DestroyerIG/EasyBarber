@@ -34,8 +34,8 @@ export class ErrorBoundary extends Component<Props, State> {
         if (this.state.hasError) {
             return (
                 <div className="min-h-screen flex items-center justify-center bg-black">
-                    <div className="bg-dark-light border border-red-500/20 rounded-2xl p-8 max-w-md text-center">
-                        <AlertCircle className="text-red-500 mx-auto mb-4" size={48} />
+                    <div className="bg-dark-light border border-red-500/20 rounded-2xl p-8 max-w-md text-center" role="alert" aria-live="assertive">
+                        <AlertCircle className="text-red-500 mx-auto mb-4" size={48} aria-hidden="true" />
                         <h2 className="text-2xl font-bold text-white mb-2">
                             Algo deu errado
                         </h2>

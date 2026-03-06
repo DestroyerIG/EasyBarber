@@ -1,188 +1,199 @@
 # 🚀 GUIA DE INICIALIZAÇÃO RÁPIDA - BarberPro SaaS
 
-## ✅ Pré-requisitos Instalados
-- Node.js 18+ ✓
-- PostgreSQL 14+ ✓
-- Git ✓
+## ✅ Pré-requisitos
 
-## 📋 PASSO A PASSO PARA RODAR O PROJETO
+- **Node.js 20+** (ou 18+) — https://nodejs.org
+- **PostgreSQL 14+** — https://www.postgresql.org/download/windows/
+- **Git** — https://git-scm.com
 
-### 1️⃣ Configurar o Banco de Dados PostgreSQL
+---
+
+## 📋 OPÇÃO 1: Setup Automático (Recomendado)
+
+### 1️⃣ Habilitar scripts PowerShell (caso necessário)
 
 ```powershell
-# Abrir o PostgreSQL (psql ou pgAdmin)
-# Criar o banco de dados
-CREATE DATABASE barberpro;
-
-# Executar o script de criação das tabelas
-# Navegue até a pasta do projeto e execute:
-psql -U postgres -d barberpro -f backend/src/config/database.sql
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-**OU** copie todo o conteúdo do arquivo `backend/src/config/database.sql` e execute no pgAdmin.
+### 2️⃣ Executar o script de configuração
 
----
-
-### 2️⃣ Configurar Variáveis de Ambiente do Backend
-
-Crie um arquivo `.env` dentro da pasta `backend/`:
-
-```env
-PORT=5000
-DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5432/barberpro
-JWT_SECRET=chave_secreta_super_segura_123456
-WHATSAPP_API_KEY=sua_chave_whatsapp_aqui
-WHATSAPP_API_URL=https://api.z-api.io/instances/SEU_ID
-NODE_ENV=development
+```powershell
+.\setup.ps1
 ```
 
-**IMPORTANTE:** Substitua:
-- `SUA_SENHA` pela senha do seu PostgreSQL
-- Deixe as configurações do WhatsApp para depois (opcional)
+O script faz tudo automaticamente:
+- ✅ Testa conexão com PostgreSQL
+- ✅ Cria o banco `barberpro`
+- ✅ Cria todas as 12 tabelas
+- ✅ Gera arquivo `backend\.env` (porta 5432, JWT_SECRET aleatório)
+- ✅ Gera arquivo `frontend\.env.local`
 
----
-
-### 3️⃣ Instalar Dependências do Backend
+### 3️⃣ Instalar e iniciar Backend (Terminal 1)
 
 ```powershell
 cd backend
 npm install
-```
-
----
-
-### 4️⃣ Iniciar o Backend
-
-```powershell
 npm run dev
 ```
 
-✅ **Sucesso!** O backend estará rodando em `http://localhost:5000`
+Aguarde a mensagem:
+```
+Servidor rodando na porta 5000
+Conexão com banco de dados verificada
+```
 
-Você deverá ver:
+### 4️⃣ Instalar e iniciar Frontend (Terminal 2 — nova janela)
+
+```powershell
+cd frontend
+npm install
+npm run dev
 ```
-🚀 Servidor rodando na porta 5000
-✅ Conectado ao banco de dados PostgreSQL
-✅ Cron de lembretes iniciado
+
+Aguarde:
 ```
+✓ Ready on http://localhost:3000
+```
+
+### 5️⃣ Acessar o sistema
+
+Abra: **http://localhost:3000**
 
 ---
 
-### 5️⃣ Configurar Variáveis do Frontend (Nova janela do terminal)
+## 📋 OPÇÃO 2: Setup Manual
 
-Crie um arquivo `.env.local` dentro da pasta `frontend/`:
+### 1️⃣ Criar banco de dados PostgreSQL
+
+```powershell
+# Conectar ao PostgreSQL
+psql -U postgres
+
+# Criar banco
+CREATE DATABASE barberpro;
+\q
+
+# Executar script de tabelas
+psql -U postgres -d barberpro -f backend\src\config\database.sql
+```
+
+Ou abra o **pgAdmin**, crie o banco `barberpro` e execute o conteúdo de `backend\src\config\database.sql` na Query Tool.
+
+### 2️⃣ Criar arquivo `backend\.env`
+
+```env
+PORT=5000
+DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5432/barberpro
+JWT_SECRET=gere_uma_chave_aleatoria_longa_aqui
+NODE_ENV=development
+```
+
+> ⚠️ Substitua `SUA_SENHA` pela senha do seu PostgreSQL (definida na instalação).
+
+### 3️⃣ Criar arquivo `frontend\.env.local`
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:5000/api
 ```
 
----
+### 4️⃣ Instalar e iniciar
 
-### 6️⃣ Instalar Dependências do Frontend
-
+**Terminal 1 (Backend):**
 ```powershell
-cd frontend
+cd backend
 npm install
-```
-
----
-
-### 7️⃣ Iniciar o Frontend
-
-```powershell
 npm run dev
 ```
 
-✅ **Sucesso!** O frontend estará rodando em `http://localhost:3000`
+**Terminal 2 (Frontend):**
+```powershell
+cd frontend
+npm install
+npm run dev
+```
 
 ---
 
-## 🎉 PRONTO! Acesse o Sistema
+## 📋 OPÇÃO 3: Docker Compose
 
-Abra seu navegador em: **http://localhost:3000**
+Se você tem Docker instalado, basta executar:
 
-### 🔐 Primeira Vez?
+```powershell
+docker compose up -d
+```
 
-1. Clique em **"Cadastre-se"**
-2. Preencha os dados da sua barbearia:
+Isso sobe automaticamente:
+- **PostgreSQL 16** na porta 5432
+- **Backend** na porta 5000
+- **Frontend** na porta 3000
+
+> Configure a variável `JWT_SECRET` antes:
+> ```powershell
+> $env:JWT_SECRET = "sua_chave_secreta_aqui"
+> docker compose up -d
+> ```
+
+---
+
+## 🎉 Primeiro Acesso
+
+1. Abra **http://localhost:3000**
+2. Clique em **"Cadastre-se"**
+3. Preencha os dados:
    - Nome da Barbearia
    - Nome do Responsável
    - WhatsApp
    - Email
-   - Senha
-   - Escolha o plano (Básico, Profissional ou Premium)
-3. Clique em **"Criar Conta"**
-4. Você será redirecionado para o Dashboard!
+   - Senha (mínimo 8 caracteres, 1 maiúscula, 1 número)
+4. Clique em **"Criar Conta"**
+5. Você será redirecionado para o Dashboard
 
 ---
 
-## 🧪 Testar a API Diretamente
+## 🧪 Testar a API
 
-Você pode testar as rotas da API usando **Postman** ou **Thunder Client**:
+### Cadastrar conta (via terminal)
 
-### Exemplo: Criar uma conta
-```http
-POST http://localhost:5000/api/auth/register
-Content-Type: application/json
-
-{
+```powershell
+Invoke-RestMethod -Uri "http://localhost:5000/api/auth/register" -Method POST -ContentType "application/json" -Body '{
   "barbershopName": "Barbearia Teste",
   "ownerName": "João Silva",
   "email": "joao@teste.com",
   "whatsapp": "11999999999",
-  "password": "123456",
-  "plan": "basico"
-}
+  "password": "Senha123"
+}'
 ```
 
-### Exemplo: Login
-```http
-POST http://localhost:5000/api/auth/login
-Content-Type: application/json
+### Health Check
 
-{
-  "email": "joao@teste.com",
-  "password": "123456"
-}
+```powershell
+Invoke-RestMethod -Uri "http://localhost:5000/health"
 ```
 
-Copie o `token` retornado e use nas próximas requisições:
-
-### Exemplo: Ver Dashboard
-```http
-GET http://localhost:5000/api/dashboard
-Authorization: Bearer SEU_TOKEN_AQUI
-```
+Deve retornar: `{ status: "ok", db: "connected", uptime: ... }`
 
 ---
 
 ## 📱 Configurar WhatsApp (Opcional)
 
-Para ativar o bot de agendamentos via WhatsApp:
+O BarberPro usa **whatsapp-web.js** — conexão local via QR Code:
 
-### Opção 1: Z-API (Mais Fácil)
-1. Acesse: https://z-api.io
-2. Crie uma conta gratuita
-3. Conecte seu WhatsApp
-4. Copie a **URL da instância** e o **Token**
-5. Configure no arquivo `.env` do backend:
-   ```env
-   WHATSAPP_API_URL=https://api.z-api.io/instances/SEU_ID
-   WHATSAPP_API_KEY=seu_token_aqui
-   ```
-6. Configure o webhook na Z-API:
-   - URL: `http://seu-dominio.com/api/whatsapp/webhook`
+1. Inicie o backend (`npm run dev`)
+2. Faça login no sistema
+3. Acesse a aba **WhatsApp** no dashboard
+4. Escaneie o **QR Code** com o app WhatsApp do celular
+5. Pronto! O bot já responde mensagens automaticamente
 
-### Opção 2: Usar Ngrok para Testes Locais
-```powershell
-# Instalar ngrok
-npm install -g ngrok
+> Não é necessário conta em API externa (Z-API, Twilio, etc.). A conexão é direta via WhatsApp Web.
 
-# Expor o backend
-ngrok http 5000
-```
+### Personalizar mensagens do bot
 
-Use a URL gerada pelo ngrok como webhook.
+No painel WhatsApp do dashboard, você pode:
+- Editar 21 mensagens (boas-vindas, confirmação, lembrete, etc.)
+- Adicionar/remover opções de menu (até 15 opções)
+- Reordenar itens do menu
+- Resetar para mensagens padrão
 
 ---
 
@@ -190,94 +201,59 @@ Use a URL gerada pelo ngrok como webhook.
 
 ### Backend
 ```powershell
-npm run dev      # Rodar em modo desenvolvimento
-npm start        # Rodar em produção
+cd backend
+npm run dev       # Desenvolvimento (com nodemon)
+npm start         # Produção
 ```
 
 ### Frontend
 ```powershell
-npm run dev      # Rodar em modo desenvolvimento
-npm run build    # Build para produção
-npm start        # Rodar versão de produção
+cd frontend
+npm run dev       # Desenvolvimento
+npm run build     # Build de produção
+npm start         # Servir build de produção
+```
+
+### Raiz do projeto
+```powershell
+npm run install:all    # Instalar dependências de backend e frontend
+npm run dev:backend    # Iniciar apenas backend
+npm run dev:frontend   # Iniciar apenas frontend
+```
+
+### Docker
+```powershell
+docker compose up -d       # Subir todos os serviços
+docker compose down        # Parar todos os serviços
+docker compose logs -f     # Ver logs em tempo real
 ```
 
 ---
 
-## 🐛 Problemas Comuns
+## 🆘 Problemas?
 
-### ❌ Erro: "Não conectou ao banco de dados"
-- Verifique se o PostgreSQL está rodando
-- Confira a senha no arquivo `.env`
-- Teste a conexão: `psql -U postgres -d barberpro`
+| Problema | Solução |
+|---|---|
+| `psql não é reconhecido` | Adicione ao PATH: `$env:Path += ";C:\Program Files\PostgreSQL\16\bin"` |
+| `password authentication failed` | Corrija a senha em `backend\.env` ou execute `.\fix-env.ps1` |
+| `ECONNREFUSED :5432` | Inicie o PostgreSQL: `Start-Service "postgresql-x64-16"` |
+| `database "barberpro" does not exist` | Crie o banco: `psql -U postgres -c "CREATE DATABASE barberpro;"` |
+| `relation "barbershops" does not exist` | Execute: `psql -U postgres -d barberpro -f backend\src\config\database.sql` |
+| Frontend não conecta com backend | Verifique se `frontend\.env.local` contém `NEXT_PUBLIC_API_URL=http://localhost:5000/api` |
+| Erro de CORS | Verifique se `FRONTEND_URL` no `.env` do backend é `http://localhost:3000` |
+| Script setup.ps1 não executa | Execute: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser` |
 
-### ❌ Erro: "Port 5000 already in use"
-- Mude a porta no `.env`: `PORT=5001`
-- Ou mate o processo: 
-  ```powershell
-  netstat -ano | findstr :5000
-  taskkill /PID <número_do_pid> /F
-  ```
-
-### ❌ Erro: "Module not found"
-- Delete `node_modules` e `package-lock.json`
-- Execute novamente: `npm install`
-
-### ❌ Frontend não carrega dados
-- Verifique se o backend está rodando
-- Confira a URL no `.env.local` do frontend
-- Abra o console do navegador (F12) para ver erros
+> Guia completo de troubleshooting: `TROUBLESHOOTING.md`
 
 ---
 
-## 📚 Estrutura do Projeto
+## 📚 Documentação
 
-```
-Barberpro-saas/
-├── backend/
-│   ├── src/
-│   │   ├── config/          # Configurações e SQL
-│   │   ├── controllers/     # Lógica das rotas
-│   │   ├── middleware/      # Autenticação
-│   │   ├── routes/          # Rotas da API
-│   │   ├── services/        # WhatsApp e Cron
-│   │   └── server.js        # Servidor principal
-│   ├── package.json
-│   └── .env
-│
-├── frontend/
-│   ├── src/
-│   │   ├── app/             # Páginas Next.js
-│   │   ├── components/      # Componentes React
-│   │   ├── lib/             # API client
-│   │   └── styles/          # CSS global
-│   ├── package.json
-│   └── .env.local
-│
-└── README.md
-```
-
----
-
-## 🎯 Próximos Passos Após Rodar
-
-1. ✅ Criar sua conta
-2. ✅ Adicionar barbeiros
-3. ✅ Cadastrar serviços
-4. ✅ Adicionar clientes
-5. ✅ Fazer agendamentos de teste
-6. ✅ Conferir o dashboard
-
----
-
-## 📞 Suporte
-
-Se encontrar problemas:
-1. Verifique os logs do terminal
-2. Confira se todas as dependências foram instaladas
-3. Teste as rotas da API com Postman
-
----
-
-**Desenvolvido com ❤️ para revolucionar a gestão de barbearias**
-
-🚀 Bom desenvolvimento!
+- **INSTALL.md** — Instalação passo a passo
+- **POSTGRESQL_SETUP.md** — Instalação detalhada do PostgreSQL
+- **API_DOCS.md** — Documentação da API (39 endpoints)
+- **PROJECT_STRUCTURE.md** — Estrutura do código
+- **WHATSAPP_BOT.md** — Configuração do bot WhatsApp
+- **PLANOS.md** — Detalhes dos planos de assinatura
+- **DEPLOY.md** — Deploy em produção
+- **TROUBLESHOOTING.md** — Problemas comuns e soluções

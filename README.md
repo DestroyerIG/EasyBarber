@@ -2,305 +2,306 @@
 
 Sistema SaaS completo para gestão de barbearias com agendamento automático via WhatsApp, controle financeiro e painel administrativo profissional.
 
-## 🎨 Características
+## 🎨 Identidade Visual
 
-- **Identidade Visual**: Preto (#000000) e Laranja (#FF7A00)
-- **Design Responsivo**: Funciona perfeitamente em desktop e mobile
-- **Interface Intuitiva**: Botões grandes e navegação simples
+- **Primária:** Laranja (#FF7A00)
+- **Secundária:** Preto (#000000)
+- **Fundo:** Cinza escuro (#0a0a0a)
+- **Design Responsivo:** Desktop, Laptop, Tablet e Mobile
 
 ## 🚀 Funcionalidades
 
-### 🔐 Sistema de Acesso
-- Login com email e senha
-- Cadastro de novas barbearias
-- Recuperação de senha
-- Controle por planos de assinatura
+### 🔐 Autenticação e Segurança
+- Login e cadastro com validação Zod
+- Tokens JWT (access + refresh) via httpOnly cookies
+- Política de senha forte (8+ caracteres, maiúscula, número)
+- Rate limiting por IP (100 req/15min geral, 20 req/15min para auth)
+- Headers de segurança (Helmet, CSP, HSTS)
 
 ### 📊 Dashboard Administrativo
-- Visualização de agendamentos do dia
+- Agendamentos do dia
 - Ganhos, gastos e lucro em tempo real
 - Total de clientes atendidos
 - Gráfico semanal de faturamento
 
-### 🤖 Bot de Agendamento WhatsApp
-- Integração completa com WhatsApp Business
-- Fluxo automático de agendamento:
-  - Escolha de serviço
-  - Seleção de barbeiro
-  - Escolha de data e horário
-  - Confirmação automática
-- Lembretes 2h antes do horário
+### 🤖 Bot WhatsApp (whatsapp-web.js)
+- Conexão local via QR Code (sem API externa)
+- 9 opções de menu padrão + opções customizáveis (até 15)
+- 21 mensagens configuráveis pelo painel
+- Fluxo automático: serviço → barbeiro → data → horário → confirmação
+- Cancelamento e reagendamento pelo bot
+- Avaliação pós-atendimento
+- Lembretes automáticos 2h antes (cron a cada 10 min)
 
 ### 📅 Gestão de Agendamentos
-- Calendário interativo
-- Visualização por dia/semana
+- Calendário interativo com navegação por dia
 - Status: Confirmado, Cancelado, Concluído
-- Histórico completo
+- Detecção de conflitos de horário
+- Registro automático de ganho ao concluir
 
 ### 💰 Módulo Financeiro
-- Registro automático de ganhos
-- Cadastro manual de gastos
-- Relatórios diários e mensais
-- Gráficos de crescimento
+- Registro automático de ganhos (ao concluir agendamento)
+- Cadastro de gastos com categorias
+- Relatórios mensais (plano Profissional+)
 - Exportação em PDF
+- Gráficos de crescimento
 
 ### 👥 Gestão de Clientes
-- Cadastro completo
+- Cadastro completo (nome, telefone, email, endereço, notas)
 - Histórico de atendimentos
-- Total gasto por cliente
-- Último atendimento
+- Total gasto e última visita
+- Busca rápida
 
 ### 💈 Gestão de Serviços e Barbeiros
-- Cadastro de serviços com valor e duração
-- Gestão de barbeiros
+- Serviços com nome, preço e duração
+- Barbeiros com foto
 - Agenda individual por barbeiro
+- Limites por plano de assinatura
 
 ### 💳 Planos de Assinatura
-- **Básico**: 1 barbeiro, funcionalidades essenciais
-- **Profissional**: Até 5 barbeiros, relatórios avançados
-- **Premium**: Barbeiros ilimitados, todas as funcionalidades
+- **Básico** (R$ 49,90/mês): 1 barbeiro, 100 clientes
+- **Profissional** (R$ 99,90/mês): 5 barbeiros, 500 clientes, relatórios
+- **Premium** (R$ 199,90/mês): Ilimitado, todas as funcionalidades
 
-## 🛠️ Tecnologias Utilizadas
+## 🛠️ Stack Tecnológica
 
 ### Backend
-- Node.js + Express
-- PostgreSQL
-- JWT para autenticação
-- Bcrypt para senhas
-- Node-cron para lembretes
-- Axios para WhatsApp API
+| Tecnologia | Uso |
+|---|---|
+| Node.js 20 | Runtime |
+| Express 4 | Framework HTTP |
+| PostgreSQL 16 | Banco de dados |
+| JWT + Refresh Tokens | Autenticação |
+| Bcrypt | Hash de senhas |
+| Zod 4 | Validação de dados |
+| Pino | Logging estruturado |
+| Helmet | Headers de segurança |
+| express-rate-limit | Rate limiting |
+| whatsapp-web.js | Bot WhatsApp (QR Code) |
+| node-cron | Lembretes automáticos |
+| Docker | Containerização |
 
 ### Frontend
-- Next.js 15
-- TypeScript
-- Tailwind CSS
-- Recharts para gráficos
-- Lucide React para ícones
+| Tecnologia | Uso |
+|---|---|
+| Next.js 15 | Framework React (App Router) |
+| React 18 | UI Library |
+| TypeScript | Type Safety |
+| Tailwind CSS 3 | Estilização |
+| Recharts | Gráficos |
+| Lucide React | Ícones |
+| jsPDF | Exportação PDF |
+| date-fns | Manipulação de datas |
+| Axios | Cliente HTTP |
 
-## 📦 Instalação
+### Arquitetura Backend
+```
+Controller → Service → Repository → Database (PostgreSQL)
+```
+- **Controllers**: Lógica de requisição/resposta
+- **Services**: Regras de negócio
+- **Repositories**: Acesso ao banco de dados
+- **Middleware**: Auth (JWT), Validação (Zod), Error Handler
+- **Erro personalizado**: AppError, ValidationError, NotFoundError, etc.
+
+## 📦 Instalação Rápida
+
+> Para guia completo, veja `INSTALL.md` e `QUICK_START.md`
 
 ### Pré-requisitos
-- Node.js 18+
+- Node.js 20+ (ou 18+)
 - PostgreSQL 14+
-- Conta WhatsApp Business API (Z-API, Twilio, 360dialog ou Meta Cloud API)
+- Git
 
-### 1. Clone o repositório
-```bash
+### 1. Clone e instale
+```powershell
 git clone <seu-repositorio>
 cd Barberpro-saas
 ```
 
-### 2. Instalar dependências do Backend
-```bash
+### 2. Execute o script de configuração automática
+```powershell
+.\setup.ps1
+```
+O script cria o banco, tabelas e arquivos `.env` automaticamente.
+
+### 3. Instale as dependências e inicie
+
+**Terminal 1 — Backend:**
+```powershell
 cd backend
 npm install
-```
-
-### 3. Configurar variáveis de ambiente
-Copie o arquivo `.env.example` e renomeie para `.env`:
-```bash
-cp .env.example .env
-```
-
-Edite o arquivo `.env` com suas configurações:
-```env
-PORT=5000
-DATABASE_URL=postgresql://user:password@localhost:5432/barberpro
-JWT_SECRET=seu_secret_super_seguro_aqui
-WHATSAPP_API_KEY=sua_chave_api_whatsapp
-WHATSAPP_API_URL=https://api.z-api.io/instances/SEU_ID
-NODE_ENV=development
-```
-
-### 4. Criar banco de dados
-Execute o script SQL para criar as tabelas:
-```bash
-psql -U seu_usuario -d barberpro -f src/config/database.sql
-```
-
-### 5. Iniciar o Backend
-```bash
 npm run dev
 ```
-O servidor estará rodando em `http://localhost:5000`
 
-### 6. Instalar dependências do Frontend
-```bash
-cd ../frontend
+**Terminal 2 — Frontend:**
+```powershell
+cd frontend
 npm install
-```
-
-### 7. Configurar variáveis de ambiente do Frontend
-Crie um arquivo `.env.local`:
-```env
-NEXT_PUBLIC_API_URL=http://localhost:5000/api
-```
-
-### 8. Iniciar o Frontend
-```bash
 npm run dev
 ```
-O frontend estará rodando em `http://localhost:3000`
 
-## 📱 Configuração do WhatsApp
+### 4. Acesse
+- **Frontend:** http://localhost:3000
+- **Backend API:** http://localhost:5000
+- **Health Check:** http://localhost:5000/health
 
-### Opções de API WhatsApp:
-
-1. **Z-API** (Recomendado para começar)
-   - Site: https://z-api.io
-   - Fácil configuração
-   - Plano gratuito disponível
-
-2. **Twilio**
-   - Site: https://www.twilio.com
-   - Mais robusto
-   - Requer configuração avançada
-
-3. **360dialog**
-   - Site: https://www.360dialog.com
-   - API oficial Meta
-   - Melhor para escala
-
-4. **Meta Cloud API**
-   - Site: https://developers.facebook.com/docs/whatsapp
-   - Gratuito
-   - Configuração mais complexa
-
-### Configurar Webhook
-
-No painel da API WhatsApp escolhida, configure o webhook para:
+### Com Docker
+```powershell
+docker compose up -d
 ```
-POST https://seu-dominio.com/api/whatsapp/webhook
-```
+Sobe PostgreSQL, Backend e Frontend automaticamente.
 
-Corpo esperado:
-```json
-{
-  "phone": "5511999999999",
-  "message": "texto da mensagem",
-  "barbershopId": "uuid-da-barbearia"
-}
-```
+## 🗄️ Banco de Dados
 
-## 🗄️ Estrutura do Banco de Dados
+### 12 Tabelas
+| Tabela | Descrição |
+|---|---|
+| `barbershops` | Dados das barbearias |
+| `users` | Usuários e autenticação |
+| `refresh_tokens` | Tokens de refresh JWT |
+| `barbers` | Barbeiros |
+| `services` | Serviços oferecidos |
+| `clients` | Clientes |
+| `appointments` | Agendamentos |
+| `earnings` | Ganhos (automático) |
+| `expenses` | Gastos |
+| `whatsapp_sessions` | Sessões do bot |
+| `whatsapp_bot_config` | Configurações de mensagens do bot |
+| `whatsapp_ratings` | Avaliações dos clientes |
 
-### Tabelas Principais:
-- `barbershops` - Dados das barbearias
-- `users` - Usuários e autenticação
-- `barbers` - Barbeiros
-- `services` - Serviços oferecidos
-- `clients` - Clientes
-- `appointments` - Agendamentos
-- `earnings` - Ganhos
-- `expenses` - Gastos
-- `whatsapp_sessions` - Sessões do bot
+### Migrations
+- `database.sql` — Schema inicial (12 tabelas)
+- `migration_v2.sql` — Constraints, índices, refresh_tokens, trigger updated_at
+- `migration_v3.sql` — 21 mensagens configuráveis, tabela menu_options, 9 opções padrão
+- `migration_v4.sql` — Índices de performance (conflitos, lookup, dashboard)
 
 ## 🔌 API Endpoints
 
-### Autenticação
-- `POST /api/auth/register` - Cadastrar barbearia
-- `POST /api/auth/login` - Login
+> Documentação completa em `API_DOCS.md`
 
-### Dashboard
-- `GET /api/dashboard` - Dados do dashboard
+### Autenticação (`/api/auth`)
+| Método | Rota | Descrição | Auth |
+|---|---|---|---|
+| POST | `/register` | Cadastrar barbearia | Não |
+| POST | `/login` | Login | Não |
+| POST | `/refresh` | Renovar access token | Não |
+| POST | `/logout` | Logout | Não |
+| GET | `/me` | Dados do usuário atual | Sim |
 
-### Agendamentos
-- `GET /api/appointments` - Listar agendamentos
-- `POST /api/appointments` - Criar agendamento
-- `PUT /api/appointments/:id/status` - Atualizar status
-- `GET /api/appointments/available-slots` - Horários disponíveis
+### Dashboard (`/api/dashboard`)
+| Método | Rota | Descrição | Auth |
+|---|---|---|---|
+| GET | `/` | Métricas do dashboard | Sim |
 
-### Clientes
-- `GET /api/clients` - Listar clientes
-- `POST /api/clients` - Cadastrar cliente
-- `GET /api/clients/:id/history` - Histórico do cliente
+### Agendamentos (`/api/appointments`)
+| Método | Rota | Descrição | Auth |
+|---|---|---|---|
+| GET | `/` | Listar agendamentos | Sim |
+| GET | `/available-slots` | Horários disponíveis | Sim |
+| POST | `/` | Criar agendamento | Sim |
+| PUT | `/:id` | Atualizar agendamento | Sim |
+| PUT | `/:id/status` | Atualizar status | Sim |
+| DELETE | `/:id` | Excluir agendamento | Sim |
 
-### Financeiro
-- `GET /api/finance/summary` - Resumo financeiro
-- `GET /api/finance/monthly` - Relatório mensal
-- `POST /api/finance/expenses` - Adicionar gasto
-- `GET /api/finance/expenses` - Listar gastos
+### Clientes (`/api/clients`)
+| Método | Rota | Descrição | Auth |
+|---|---|---|---|
+| GET | `/` | Listar clientes | Sim |
+| POST | `/` | Cadastrar cliente | Sim |
+| PUT | `/:id` | Atualizar cliente | Sim |
+| GET | `/:id/history` | Histórico do cliente | Sim |
 
-### Serviços e Barbeiros
-- `GET /api/barbershop/services` - Listar serviços
-- `POST /api/barbershop/services` - Criar serviço
-- `GET /api/barbershop/barbers` - Listar barbeiros
-- `POST /api/barbershop/barbers` - Criar barbeiro
+### Financeiro (`/api/finance`)
+| Método | Rota | Descrição | Auth | Plano |
+|---|---|---|---|---|
+| GET | `/summary` | Resumo financeiro | Sim | Todos |
+| GET | `/monthly` | Relatório mensal | Sim | Profissional+ |
+| POST | `/expenses` | Adicionar gasto | Sim | Todos |
+| PUT | `/expenses/:id` | Atualizar gasto | Sim | Todos |
+| DELETE | `/expenses/:id` | Excluir gasto | Sim | Todos |
+| GET | `/expenses` | Listar gastos | Sim | Todos |
 
-### WhatsApp
-- `POST /api/whatsapp/webhook` - Webhook do WhatsApp
+### Serviços e Barbeiros (`/api/barbershop`)
+| Método | Rota | Descrição | Auth |
+|---|---|---|---|
+| GET | `/services` | Listar serviços | Sim |
+| POST | `/services` | Criar serviço | Sim |
+| PUT | `/services/:id` | Atualizar serviço | Sim |
+| DELETE | `/services/:id` | Excluir serviço | Sim |
+| GET | `/barbers` | Listar barbeiros | Sim |
+| POST | `/barbers` | Criar barbeiro | Sim |
+| PUT | `/barbers/:id` | Atualizar barbeiro | Sim |
+| DELETE | `/barbers/:id` | Excluir barbeiro | Sim |
 
-## 🤖 Fluxo do Bot WhatsApp
+### WhatsApp (`/api/whatsapp`)
+| Método | Rota | Descrição | Auth |
+|---|---|---|---|
+| POST | `/webhook` | Receber mensagens | Não |
+| GET | `/status` | Status da conexão | Sim |
+| GET | `/qr` | QR Code para conectar | Sim |
+| POST | `/logout` | Desconectar WhatsApp | Sim |
+| POST | `/restart` | Reiniciar conexão | Sim |
+| GET | `/config` | Configurações do bot | Sim |
+| PUT | `/config` | Atualizar mensagens | Sim |
+| POST | `/config/reset` | Resetar mensagens | Sim |
+| GET | `/config/menu` | Opções do menu | Sim |
+| POST | `/config/menu` | Criar opção de menu | Sim |
+| PUT | `/config/menu/:id` | Atualizar opção | Sim |
+| DELETE | `/config/menu/:id` | Excluir opção | Sim |
+| PUT | `/config/menu-reorder` | Reordenar menu | Sim |
+| POST | `/config/menu/reset` | Resetar menu | Sim |
 
-1. Cliente envia mensagem
-2. Sistema envia menu de opções
-3. Cliente escolhe "Agendar horário"
-4. Bot solicita:
-   - Escolha do serviço
-   - Escolha do barbeiro
-   - Escolha da data
-   - Escolha do horário
-5. Confirmação automática
-6. Lembrete 2h antes
+**Total: 39 endpoints**
 
-## 🔒 Segurança
+## 🔒 Segurança Implementada
 
-- Senhas criptografadas com bcrypt
-- JWT para autenticação
-- Validação de dados em todas as requisições
-- Proteção contra SQL Injection
-- CORS configurado
-- Rate limiting (recomendado adicionar)
+- ✅ Senhas com bcrypt (CHAR(60))
+- ✅ JWT com access + refresh tokens
+- ✅ Cookies httpOnly (não acessíveis via JavaScript)
+- ✅ Validação Zod em todas as entradas
+- ✅ Proteção contra SQL Injection (queries parametrizadas)
+- ✅ Helmet (headers de segurança)
+- ✅ CSP (Content Security Policy) no frontend
+- ✅ Rate limiting (geral + auth)
+- ✅ CORS configurado
+- ✅ HSTS habilitado
+- ✅ Graceful shutdown
+- ✅ Log estruturado com Pino
 
 ## 📈 Deploy
 
-### Backend (Railway, Render, Heroku)
-1. Configure as variáveis de ambiente
-2. Configure o banco PostgreSQL
-3. Deploy do código
-4. Execute as migrations
+> Guia completo em `DEPLOY.md`
 
-### Frontend (Vercel, Netlify)
-1. Configure a variável `NEXT_PUBLIC_API_URL`
-2. Deploy automático do repositório
+### Com Docker (Recomendado)
+```powershell
+# Configurar variáveis
+cp .env.example .env
+# Editar .env com suas configurações
 
-## 🆘 Suporte
+docker compose up -d
+```
 
-Para dúvidas e problemas:
-1. Verifique a documentação
-2. Confira os logs do servidor
-3. Teste as rotas da API com Postman/Insomnia
+### Manual
+- **Backend:** Railway, Render, VPS com PM2
+- **Frontend:** Vercel (otimizado para Next.js)
+- **Banco:** Railway, Supabase, Neon.tech
+
+## 📚 Documentação
+
+| Arquivo | Descrição |
+|---|---|
+| `README.md` | Este arquivo — Visão geral |
+| `QUICK_START.md` | Guia passo-a-passo para rodar |
+| `INSTALL.md` | Instalação simplificada |
+| `API_DOCS.md` | Documentação completa da API |
+| `PROJECT_STRUCTURE.md` | Estrutura do código |
+| `DEPLOY.md` | Deploy em produção |
+| `POSTGRESQL_SETUP.md` | Instalação do PostgreSQL |
+| `PLANOS.md` | Detalhes dos planos |
+| `WHATSAPP_BOT.md` | Configuração do bot |
+| `TROUBLESHOOTING.md` | Problemas comuns |
 
 ## 📝 Licença
 
 Este projeto é proprietário. Todos os direitos reservados.
-
-## 🎯 Próximos Passos
-
-- [ ] Implementar upload de fotos
-- [ ] Sistema de notificações push
-- [ ] App mobile nativo
-- [ ] Integração com Instagram
-- [ ] Programa de fidelidade
-- [ ] Sistema de avaliações
-- [ ] Relatórios avançados com IA
-
-## 👨‍💻 Desenvolvimento
-
-```bash
-# Rodar backend em desenvolvimento
-cd backend
-npm run dev
-
-# Rodar frontend em desenvolvimento
-cd frontend
-npm run dev
-
-# Build para produção
-npm run build
-npm start
-```
-
----
-
-Desenvolvido com ❤️ para revolucionar a gestão de barbearias

@@ -85,6 +85,107 @@ export interface User {
     plan: string;
 }
 
+export interface Expense {
+    id: string;
+    barbershop_id: string;
+    description: string;
+    category: string;
+    amount: number;
+    date: string;
+    created_at: string;
+}
+
+export interface MonthlyReportDay {
+    date: string;
+    earnings: number;
+    expenses: number;
+    profit: number;
+}
+
+// --- Form Data Types ---
+
+export interface AppointmentFormData {
+    clientId: string;
+    barberId: string;
+    serviceId: string;
+    date: string;
+    time: string;
+}
+
+export interface ClientFormData {
+    name: string;
+    phone: string;
+    email?: string;
+    birthDate?: string;
+    address?: string;
+    notes?: string;
+}
+
+export interface ServiceFormData {
+    name: string;
+    price: number;
+    duration_minutes: number;
+}
+
+export interface BarberFormData {
+    name: string;
+    photo?: string | null;
+}
+
+export interface ExpenseFormData {
+    description: string;
+    category: string;
+    amount: number;
+    date: string;
+}
+
+// --- API Response Types ---
+
+export interface LoginResponse {
+    user: User;
+}
+
+export interface RegisterResponse {
+    user: User;
+    barbershop: {
+        id: string;
+        name: string;
+        plan: string;
+    };
+}
+
+export interface PaginatedResponse<T> {
+    data: T[];
+    meta: {
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+    };
+}
+
+// --- WhatsApp Types ---
+
+export interface BotConfig {
+    welcome_message: string;
+    ask_name_message: string;
+    menu_options: MenuOption[];
+    auto_reply: boolean;
+}
+
+export interface MenuOption {
+    id: string;
+    label: string;
+    description: string;
+    enabled: boolean;
+}
+
+export interface WhatsAppStatus {
+    connected: boolean;
+    qr?: string;
+    phone?: string;
+}
+
 export type TabId = 'dashboard' | 'agendamentos' | 'financeiro' | 'clientes' | 'servicos' | 'planos' | 'configuracoes' | 'whatsapp';
 
 export interface TabItem {

@@ -1,6 +1,7 @@
 import '../styles/globals.css'
 import { ToastProvider } from '@/components/Toast'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { AuthProvider } from '@/contexts/AuthContext'
 
 export const metadata = {
   title: 'BarberPro - Sistema para Barbearias',
@@ -23,10 +24,15 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-BR">
-      <body>
+      <body className="bg-dark text-white">
+        <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-2 focus:left-2 focus:bg-primary focus:text-black focus:px-4 focus:py-2 focus:rounded-lg focus:font-bold">
+          Pular para o conteúdo
+        </a>
         <ErrorBoundary>
           <ToastProvider>
-            {children}
+            <AuthProvider>
+              {children}
+            </AuthProvider>
           </ToastProvider>
         </ErrorBoundary>
       </body>
