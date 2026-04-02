@@ -6,7 +6,7 @@ BEGIN;
 -- 1. Add new configurable message columns to whatsapp_bot_config
 ALTER TABLE whatsapp_bot_config ADD COLUMN IF NOT EXISTS welcome_header TEXT DEFAULT 'Olá 👋 Bem-vindo à {nome_barbearia}!
 
-Me chame de *BarberBot* 🤖 e estou aqui para agilizar seu atendimento.
+Me chame de *EasyBarber Bot* 🤖 e estou aqui para agilizar seu atendimento.
 
 Como posso ajudar hoje?';
 

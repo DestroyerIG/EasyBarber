@@ -1,4 +1,4 @@
-# 📋 Relatório de Refatoração — BarberPro SaaS
+# 📋 Relatório de Refatoração — EasyBarber
 
 ## Resumo Executivo
 

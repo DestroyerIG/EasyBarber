@@ -1,4 +1,4 @@
-# 🚀 GUIA DE INICIALIZAÇÃO RÁPIDA - BarberPro SaaS
+# 🚀 GUIA DE INICIALIZAÇÃO RÁPIDA - EasyBarber
 
 ## ✅ Pré-requisitos
 
@@ -177,7 +177,7 @@ Deve retornar: `{ status: "ok", db: "connected", uptime: ... }`
 
 ## 📱 Configurar WhatsApp (Opcional)
 
-O BarberPro usa **whatsapp-web.js** — conexão local via QR Code:
+O EasyBarber usa **whatsapp-web.js** — conexão local via QR Code:
 
 1. Inicie o backend (`npm run dev`)
 2. Faça login no sistema

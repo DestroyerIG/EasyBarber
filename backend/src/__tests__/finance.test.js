@@ -69,12 +69,27 @@ const app = createTestApp();
 const request = supertest(app);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
-const authToken = jwt.sign(
-  { userId: 'user-uuid', barbershopId: 'bbshop-uuid', email: 'test@test.com', plan: 'profissional', role: 'admin' },
-  JWT_SECRET,
-  { expiresIn: '15m' }
-);
-const authHeader = { Authorization: `Bearer ${authToken}` };
+const createAuthHeader = ({
+  plan = 'profissional',
+  subscriptionStatus = 'active',
+} = {}) => {
+  const authToken = jwt.sign(
+    {
+      userId: 'user-uuid',
+      barbershopId: 'bbshop-uuid',
+      email: 'test@test.com',
+      plan,
+      role: 'admin',
+      subscriptionStatus,
+    },
+    JWT_SECRET,
+    { expiresIn: '15m' }
+  );
+
+  return { Authorization: `Bearer ${authToken}` };
+};
+
+const authHeader = createAuthHeader();
 
 // ===================== TESTS =====================
 
@@ -137,6 +152,32 @@ describe('Finance API — /api/v1/finance', () => {
       const res = await request.post('/api/v1/finance/expenses').set(authHeader).send({});
 
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe('Feature guard', () => {
+    it('deve bloquear relatório mensal para plano básico', async () => {
+      const res = await request
+        .get('/api/v1/finance/monthly')
+        .set(createAuthHeader({ plan: 'basico', subscriptionStatus: 'active' }));
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('FEATURE_BLOCKED');
+      expect(res.body.error.reason).toBe('plan_upgrade_required');
+      expect(res.body.error.requiredPlan).toBe('profissional');
+    });
+
+    it('deve bloquear financeiro quando assinatura está past_due', async () => {
+      const res = await request
+        .get('/api/v1/finance/summary')
+        .set(createAuthHeader({ plan: 'premium', subscriptionStatus: 'past_due' }));
+
+      expect(res.status).toBe(402);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('FEATURE_BLOCKED');
+      expect(res.body.error.reason).toBe('subscription_status_restricted');
+      expect(res.body.error.billingActionRequired).toBe(true);
     });
   });
 });

@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'crypto';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -14,6 +15,9 @@ import clientRoutes from './routes/clients.js';
 import financeRoutes from './routes/finance.js';
 import barbershopRoutes from './routes/barbershop.js';
 import whatsappRoutes from './routes/whatsapp.js';
+import subscriptionRoutes from './routes/subscriptions.js';
+import adminRoutes from './routes/admin.js';
+import { stripeWebhook } from './controllers/subscriptionController.js';
 import { startReminderCron } from './services/cronService.js';
 import { initWhatsApp } from './services/whatsappClient.js';
 
@@ -30,14 +34,35 @@ for (const envVar of requiredEnvVars) {
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const API_V1 = '/api/v1';
 
-// Segurança
+// Segurança básica
 app.use(helmet());
+
+// CORS
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+].filter(Boolean);
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
+  origin: (origin, callback) => {
+    // Permite ferramentas sem origin definido (Postman, curl, apps locais)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`Origin não permitida pelo CORS: ${origin}`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
+
 app.use(cookieParser());
+app.post(`${API_V1}/subscriptions/webhook`, express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(express.json({ limit: '1mb' }));
 
 // Request ID + logging
@@ -46,9 +71,14 @@ app.use((req, res, next) => {
   res.setHeader('X-Request-Id', req.id);
 
   const start = Date.now();
+
   res.on('finish', () => {
     const duration = Date.now() - start;
-    const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+    const level =
+      res.statusCode >= 500 ? 'error' :
+      res.statusCode >= 400 ? 'warn' :
+      'info';
+
     logger[level]({
       requestId: req.id,
       method: req.method,
@@ -61,33 +91,75 @@ app.use((req, res, next) => {
   next();
 });
 
-// Prefixo versionado da API
-const API_V1 = '/api/v1';
-
-// Rate limiting
-const limiter = rateLimit({
+// Rate limit geral da API
+const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: { success: false, error: { code: 'RATE_LIMIT', message: 'Muitas requisições. Tente novamente em 15 minutos.' } }
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS' || req.originalUrl.startsWith(`${API_V1}/subscriptions/webhook`),
+  message: {
+    success: false,
+    error: {
+      code: 'RATE_LIMIT',
+      message: 'Muitas requisições. Tente novamente em alguns minutos.'
+    }
+  }
 });
-app.use(API_V1, limiter);
+app.use(API_V1, apiLimiter);
 
-const authLimiter = rateLimit({
+// Rate limit específico para login
+const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
-  message: { success: false, error: { code: 'RATE_LIMIT', message: 'Muitas tentativas de login. Tente novamente em 15 minutos.' } }
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
+  message: {
+    success: false,
+    error: {
+      code: 'RATE_LIMIT',
+      message: 'Muitas tentativas de login. Tente novamente em 15 minutos.'
+    }
+  }
 });
-app.use(`${API_V1}/auth`, authLimiter);
+
+// Rate limit específico para cadastro
+const registerLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
+  message: {
+    success: false,
+    error: {
+      code: 'RATE_LIMIT',
+      message: 'Muitas tentativas de cadastro. Tente novamente em 15 minutos.'
+    }
+  }
+});
 
 // Health check
 app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ status: 'ok', db: 'connected', uptime: process.uptime() });
+    res.json({
+      status: 'ok',
+      db: 'connected',
+      uptime: process.uptime(),
+    });
   } catch {
-    res.status(503).json({ status: 'error', db: 'disconnected' });
+    res.status(503).json({
+      status: 'error',
+      db: 'disconnected',
+    });
   }
 });
+
+// Auth com limitadores específicos
+app.use(`${API_V1}/auth/login`, loginLimiter);
+app.use(`${API_V1}/auth/register`, registerLimiter);
 
 // Rotas v1
 app.use(`${API_V1}/auth`, authRoutes);
@@ -97,6 +169,8 @@ app.use(`${API_V1}/clients`, clientRoutes);
 app.use(`${API_V1}/finance`, financeRoutes);
 app.use(`${API_V1}/barbershop`, barbershopRoutes);
 app.use(`${API_V1}/whatsapp`, whatsappRoutes);
+app.use(`${API_V1}/subscriptions`, subscriptionRoutes);
+app.use(`${API_V1}/admin`, adminRoutes);
 
 // Backward-compat: redireciona /api/<recurso> para /api/v1/<recurso>
 app.use('/api', (req, res, next) => {
@@ -108,13 +182,13 @@ app.use('/api', (req, res, next) => {
 
 app.get('/', (req, res) => {
   res.json({
-    message: '💈 BarberPro SaaS API',
+    message: '💈 EasyBarber SaaS API',
     version: '1.0.0',
-    status: 'online'
+    status: 'online',
   });
 });
 
-// 404 handler para rotas não encontradas
+// 404 handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -125,7 +199,7 @@ app.use((req, res) => {
   });
 });
 
-// Error handler global — DEVE ser o último middleware
+// Error handler global
 app.use(errorHandler);
 
 // Graceful shutdown

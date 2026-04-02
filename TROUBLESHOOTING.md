@@ -106,6 +106,8 @@ Para aplicar migrations:
 psql -U postgres -d barberpro -f backend\src\config\migration_v2.sql
 psql -U postgres -d barberpro -f backend\src\config\migration_v3.sql
 psql -U postgres -d barberpro -f backend\src\config\migration_v4.sql
+psql -U postgres -d barberpro -f backend\src\config\migration_v5.sql
+psql -U postgres -d barberpro -f backend\src\config\migration_v6.sql
 ```
 
 ---
@@ -145,13 +147,13 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 1. Backend está rodando na porta 5000?
 2. Arquivo `frontend\.env.local` existe com:
    ```
-   NEXT_PUBLIC_API_URL=http://localhost:5000/api
+   NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1
    ```
 3. Reiniciou o frontend após criar/alterar o `.env.local`?
 
 ### Criar se não existir
 ```powershell
-"NEXT_PUBLIC_API_URL=http://localhost:5000/api" | Out-File -FilePath frontend\.env.local -Encoding UTF8
+"NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1" | Out-File -FilePath frontend\.env.local -Encoding UTF8
 ```
 
 ---
@@ -258,6 +260,8 @@ docker compose up -d      # Recria tudo
 1. Verifique se as migrations de índices foram aplicadas:
    ```powershell
    psql -U postgres -d barberpro -f backend\src\config\migration_v4.sql
+   psql -U postgres -d barberpro -f backend\src\config\migration_v5.sql
+   psql -U postgres -d barberpro -f backend\src\config\migration_v6.sql
    ```
 2. Ajuste o pool no `.env`:
    ```env

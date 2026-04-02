@@ -8,6 +8,8 @@ import { PageHeader } from '@/components/ui';
 import { FinanceChart } from '@/components/finance/FinanceChart';
 import { ExpensesTable } from '@/components/finance/ExpensesTable';
 import { ExpenseModal } from '@/components/finance/ExpenseModal';
+import { FeatureGate } from '@/components/billing/FeatureGate';
+import type { FeatureAccessDecision } from '@/lib/subscriptionAccess';
 import type { Expense } from '@/types';
 import {
   TrendingUp, TrendingDown, DollarSign, Plus, FileText,
@@ -23,7 +25,19 @@ interface FinanceSummary {
   month: { earnings: number; expenses: number; profit: number };
 }
 
-export const FinanceModule = () => {
+interface FinanceModuleProps {
+  reportAccess: FeatureAccessDecision;
+  exportAccess: FeatureAccessDecision;
+  onUpgrade: () => void;
+  onManageBilling: () => void;
+}
+
+export const FinanceModule = ({
+  reportAccess,
+  exportAccess,
+  onUpgrade,
+  onManageBilling,
+}: FinanceModuleProps) => {
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
   const [reportData, setReportData] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -50,19 +64,29 @@ export const FinanceModule = () => {
     try {
       setLoading(true);
       const now = new Date();
+
+      const monthlyRequest = reportAccess.allowed
+        ? api.get('/finance/monthly', { params: { month: now.getMonth() + 1, year: now.getFullYear() } })
+        : Promise.resolve({ data: [] as any[] });
+
       const results = await Promise.allSettled([
         api.get('/finance/summary'),
-        api.get('/finance/monthly', { params: { month: now.getMonth() + 1, year: now.getFullYear() } }),
         api.get('/finance/expenses'),
+        monthlyRequest,
       ]);
 
       if (results[0].status === 'fulfilled') setSummary(results[0].value.data);
-      if (results[1].status === 'fulfilled') setReportData(results[1].value.data);
-      if (results[2].status === 'fulfilled') setExpenses(results[2].value.data);
+      if (results[1].status === 'fulfilled') setExpenses(results[1].value.data);
+      if (results[2].status === 'fulfilled') setReportData(results[2].value.data);
 
-      if (results[1].status === 'rejected' && (results[1].reason as any).response?.status === 403) {
-        /* Plan restriction — silent */
-      } else if (results.some(r => r.status === 'rejected')) {
+      const hasUnexpectedError = results.some(result => {
+        if (result.status !== 'rejected') return false;
+
+        const statusCode = (result.reason as { response?: { status?: number } })?.response?.status;
+        return statusCode !== 402 && statusCode !== 403;
+      });
+
+      if (hasUnexpectedError) {
         showToast('Alguns dados financeiros não puderam ser carregados.', 'error');
       }
     } catch {
@@ -100,12 +124,18 @@ export const FinanceModule = () => {
   };
 
   const exportToPDF = () => {
+    const monthSummary = {
+      earnings: summary?.month.earnings || 0,
+      expenses: summary?.month.expenses || 0,
+      profit: summary?.month.profit || 0,
+    };
+
     const doc = new jsPDF() as any;
     const now = format(new Date(), 'dd/MM/yyyy HH:mm');
 
     doc.setFontSize(20);
     doc.setTextColor(204, 133, 41);
-    doc.text('BarberPro SaaS - Relatório Financeiro', 14, 20);
+    doc.text('EasyBarber SaaS - Relatório Financeiro', 14, 20);
     doc.setFontSize(10);
     doc.setTextColor(100);
     doc.text(`Gerado em: ${now}`, 14, 28);
@@ -117,9 +147,9 @@ export const FinanceModule = () => {
       startY: 45,
       head: [['Métrica', 'Valor']],
       body: [
-        ['Ganhos', `R$ ${summary?.month.earnings.toFixed(2)}`],
-        ['Gastos', `R$ ${summary?.month.expenses.toFixed(2)}`],
-        ['Lucro Líquido', `R$ ${summary?.month.profit.toFixed(2)}`],
+        ['Ganhos', `R$ ${monthSummary.earnings.toFixed(2)}`],
+        ['Gastos', `R$ ${monthSummary.expenses.toFixed(2)}`],
+        ['Lucro Líquido', `R$ ${monthSummary.profit.toFixed(2)}`],
       ],
       theme: 'striped',
       headStyles: { fillColor: [204, 133, 41] },
@@ -159,10 +189,12 @@ export const FinanceModule = () => {
         description="Controle total de ganhos, gastos e saúde do seu negócio."
         action={
           <div className="flex gap-3">
-            <button onClick={exportToPDF} className="btn-secondary flex items-center gap-2 py-2.5 px-6">
-              <FileText size={20} className="text-primary" />
-              PDF
-            </button>
+            {exportAccess.allowed && (
+              <button onClick={exportToPDF} className="btn-secondary flex items-center gap-2 py-2.5 px-6">
+                <FileText size={20} className="text-primary" />
+                PDF
+              </button>
+            )}
             <button onClick={() => handleOpenModal()} className="btn-primary flex items-center gap-2">
               <Plus size={20} /> Novo Gasto
             </button>
@@ -225,7 +257,14 @@ export const FinanceModule = () => {
       {activeTab === 'dashboard' ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
-            <FinanceChart data={reportData} />
+            <FeatureGate
+              access={reportAccess}
+              onUpgrade={onUpgrade}
+              onManageBilling={onManageBilling}
+              title="Relatórios mensais indisponíveis"
+            >
+              <FinanceChart data={reportData} />
+            </FeatureGate>
           </div>
           <div className="space-y-6">
             <div className="card p-6 rounded-2xl">
@@ -250,14 +289,21 @@ export const FinanceModule = () => {
                 </div>
               </div>
             </div>
-            <div className="bg-gradient-to-br from-primary/10 to-transparent border border-primary/20 p-6 rounded-2xl">
-              <h3 className="text-sm font-bold text-white mb-2">Exportação Rápida</h3>
-              <p className="text-xs text-gray-400 mb-4">Gere um documento PDF com todos os dados financeiros deste mês.</p>
-              <button onClick={exportToPDF} className="w-full btn-primary flex items-center justify-center gap-2">
-                <FileText size={18} />
-                GERAR RELATÓRIO
-              </button>
-            </div>
+            <FeatureGate
+              access={exportAccess}
+              onUpgrade={onUpgrade}
+              onManageBilling={onManageBilling}
+              title="Exportações indisponíveis"
+            >
+              <div className="bg-gradient-to-br from-primary/10 to-transparent border border-primary/20 p-6 rounded-2xl">
+                <h3 className="text-sm font-bold text-white mb-2">Exportação Rápida</h3>
+                <p className="text-xs text-gray-400 mb-4">Gere um documento PDF com todos os dados financeiros deste mês.</p>
+                <button onClick={exportToPDF} className="w-full btn-primary flex items-center justify-center gap-2">
+                  <FileText size={18} />
+                  GERAR RELATÓRIO
+                </button>
+              </div>
+            </FeatureGate>
           </div>
         </div>
       ) : (

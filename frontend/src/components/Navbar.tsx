@@ -42,7 +42,7 @@ export function Navbar({ activeTab, onTabChange, onLogout }: NavbarProps) {
                     >
                         {menuOpen ? <X size={24} /> : <Menu size={24} />}
                     </button>
-                    <h1 className="text-2xl font-bold text-primary">💈 BarberPro</h1>
+                    <h1 className="text-2xl font-bold text-primary">💈 EasyBarber</h1>
                 </div>
 
                 {/* Desktop navigation */}

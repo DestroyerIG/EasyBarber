@@ -2,23 +2,26 @@ import express from 'express';
 import { handleWebhook } from '../services/whatsapp/index.js';
 import { getWhatsAppStatus, logoutWhatsApp, restartWhatsApp } from '../services/whatsappClient.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { requireTenantRoles } from '../middleware/rbac.js';
+import { requireFeature } from '../middleware/subscriptionGuard.js';
 import pool from '../config/database.js';
 import { sendSuccess, sendCreated } from '../utils/response.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
+const waProtected = [authMiddleware, requireTenantRoles, requireFeature('whatsapp_automation')];
 
 // Simulador local (mantido para testes no frontend)
 router.post('/webhook', handleWebhook);
 
 // Status da conexão WhatsApp
-router.get('/status', authMiddleware, (req, res) => {
+router.get('/status', ...waProtected, (req, res) => {
     const status = getWhatsAppStatus();
     sendSuccess(res, status);
 });
 
 // QR Code para pareamento
-router.get('/qr', authMiddleware, (req, res) => {
+router.get('/qr', ...waProtected, (req, res) => {
     const status = getWhatsAppStatus();
     if (status.status === 'qr' && status.qrCode) {
         sendSuccess(res, { qrCode: status.qrCode });
@@ -30,7 +33,7 @@ router.get('/qr', authMiddleware, (req, res) => {
 });
 
 // Desconectar WhatsApp
-router.post('/logout', authMiddleware, async (req, res, next) => {
+router.post('/logout', ...waProtected, async (req, res, next) => {
     try {
         const success = await logoutWhatsApp();
         if (success) {
@@ -44,7 +47,7 @@ router.post('/logout', authMiddleware, async (req, res, next) => {
 });
 
 // Reconectar WhatsApp
-router.post('/restart', authMiddleware, async (req, res, next) => {
+router.post('/restart', ...waProtected, async (req, res, next) => {
     try {
         await restartWhatsApp();
         sendSuccess(res, { message: 'WhatsApp reiniciando...' });
@@ -56,7 +59,7 @@ router.post('/restart', authMiddleware, async (req, res, next) => {
 // ==================== CONFIGURAÇÃO DE MENSAGENS ====================
 
 // Buscar configuração de mensagens do bot
-router.get('/config', authMiddleware, async (req, res, next) => {
+router.get('/config', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
 
@@ -81,7 +84,7 @@ router.get('/config', authMiddleware, async (req, res, next) => {
 });
 
 // Atualizar configuração de mensagens do bot
-router.put('/config', authMiddleware, async (req, res, next) => {
+router.put('/config', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
         const {
@@ -157,7 +160,7 @@ router.put('/config', authMiddleware, async (req, res, next) => {
 });
 
 // Resetar mensagens para padrão
-router.post('/config/reset', authMiddleware, async (req, res, next) => {
+router.post('/config/reset', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
 
@@ -194,7 +197,7 @@ const DEFAULT_MENU_OPTIONS = [
 ];
 
 // Listar opções do menu
-router.get('/config/menu', authMiddleware, async (req, res, next) => {
+router.get('/config/menu', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
 
@@ -226,7 +229,7 @@ router.get('/config/menu', authMiddleware, async (req, res, next) => {
 });
 
 // Criar nova opção customizada
-router.post('/config/menu', authMiddleware, async (req, res, next) => {
+router.post('/config/menu', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
         const { label, emoji, response_message } = req.body;
@@ -260,7 +263,7 @@ router.post('/config/menu', authMiddleware, async (req, res, next) => {
 });
 
 // Atualizar opção do menu
-router.put('/config/menu/:id', authMiddleware, async (req, res, next) => {
+router.put('/config/menu/:id', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
         const { id } = req.params;
@@ -295,7 +298,7 @@ router.put('/config/menu/:id', authMiddleware, async (req, res, next) => {
 });
 
 // Excluir opção customizada
-router.delete('/config/menu/:id', authMiddleware, async (req, res, next) => {
+router.delete('/config/menu/:id', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
         const { id } = req.params;
@@ -336,7 +339,7 @@ router.delete('/config/menu/:id', authMiddleware, async (req, res, next) => {
 });
 
 // Reordenar opções do menu
-router.put('/config/menu-reorder', authMiddleware, async (req, res, next) => {
+router.put('/config/menu-reorder', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
         const { order } = req.body; // Array de IDs na nova ordem
@@ -377,7 +380,7 @@ router.put('/config/menu-reorder', authMiddleware, async (req, res, next) => {
 });
 
 // Resetar menu para opções padrão
-router.post('/config/menu/reset', authMiddleware, async (req, res, next) => {
+router.post('/config/menu/reset', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
 

@@ -1,4 +1,4 @@
-# 💳 PLANOS DE ASSINATURA - BarberPro SaaS
+# 💳 PLANOS DE ASSINATURA - EasyBarber
 
 ## 📊 Comparativo de Planos
 
@@ -239,16 +239,16 @@ Sem perguntas, sem burocracia.
 ### Suporte por Plano:
 
 **Básico:**  
-📧 Email: suporte@barberpro.com  
+📧 Email: suporte@easybarber.com  
 ⏰ Resposta em até 48h  
 
 **Profissional:**  
-📧 Email: suporte@barberpro.com  
+📧 Email: suporte@easybarber.com  
 💬 Chat ao vivo (horário comercial)  
 ⏰ Resposta em até 24h  
 
 **Premium:**  
-📧 Email prioritário: premium@barberpro.com  
+📧 Email prioritário: premium@easybarber.com  
 💬 Chat ao vivo 24/7  
 📞 Telefone: (11) 9999-9999  
 ⏰ Resposta imediata  
@@ -281,4 +281,4 @@ Sem perguntas, sem burocracia.
 
 ---
 
-**💈 BarberPro - A solução completa para sua barbearia**
+**💈 EasyBarber - A solução completa para sua barbearia**

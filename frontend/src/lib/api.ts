@@ -1,6 +1,19 @@
-import axios from 'axios';
+import axios, {
+  AxiosError,
+  InternalAxiosRequestConfig,
+  AxiosResponse,
+} from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+
+type RetryableRequestConfig = InternalAxiosRequestConfig & {
+  _retry?: boolean;
+};
+
+type FailedQueueItem = {
+  resolve: (value?: unknown) => void;
+  reject: (reason?: unknown) => void;
+};
 
 const api = axios.create({
   baseURL: API_URL,
@@ -8,77 +21,108 @@ const api = axios.create({
   timeout: 15000,
 });
 
-// Interceptor de resposta: redirecionar em 401, tentar refresh automaticamente
 let isRefreshing = false;
-let failedQueue: Array<{
-  resolve: (value?: unknown) => void;
-  reject: (reason?: unknown) => void;
-}> = [];
+let failedQueue: FailedQueueItem[] = [];
 
 const processQueue = (error: unknown | null) => {
-  failedQueue.forEach((prom) => {
+  failedQueue.forEach(({ resolve, reject }) => {
     if (error) {
-      prom.reject(error);
+      reject(error);
     } else {
-      prom.resolve();
+      resolve();
     }
   });
+
   failedQueue = [];
 };
 
 api.interceptors.response.use(
-  (response) => {
-    // Auto-unwrap standardized backend responses { success: true, data: ... }
-    if (response.data && typeof response.data === 'object' && response.data.success === true && 'data' in response.data) {
-      response.data = response.data.data;
+  (response: AxiosResponse) => {
+    if (
+      response.data &&
+      typeof response.data === 'object' &&
+      response.data.success === true &&
+      'data' in response.data
+    ) {
+      const payload = response.data as {
+        data: unknown;
+        meta?: unknown;
+        message?: string;
+      };
+
+      response.data = payload.data;
+
+      if (payload.meta !== undefined) {
+        (response as AxiosResponse & { meta?: unknown }).meta = payload.meta;
+      }
+
+      if (payload.message !== undefined) {
+        (response as AxiosResponse & { message?: string }).message = payload.message;
+      }
     }
+
     return response;
   },
-  async (error) => {
-    // Normalize error: preserve details array, flatten message
-    if (error.response?.data?.error?.message) {
-      const details = error.response.data.error.details;
-      error.response.data.error = error.response.data.error.message;
-      if (details) {
-        error.response.data.details = details;
-      }
-    }
+  async (error: AxiosError) => {
+    const originalRequest = error.config as RetryableRequestConfig | undefined;
 
-    const originalRequest = error.config;
+    if (error.response?.data && typeof error.response.data === 'object') {
+      const data = error.response.data as {
+        error?: { message?: string; details?: string[] } | string;
+        details?: string[];
+      };
 
-    // Se o erro for 401 e não for uma tentativa de refresh
-    if (
-      error.response?.status === 401 &&
-      !originalRequest._retry &&
-      !originalRequest.url?.includes('/auth/refresh') &&
-      !originalRequest.url?.includes('/auth/login')
-    ) {
-      if (isRefreshing) {
-        // Enfileirar requests enquanto refresh está em andamento
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        }).then(() => api(originalRequest));
-      }
+      if (typeof data.error === 'object' && data.error?.message) {
+        const details = data.error.details;
+        (error.response.data as Record<string, unknown>).error = data.error.message;
 
-      originalRequest._retry = true;
-      isRefreshing = true;
-
-      try {
-        await api.post('/auth/refresh');
-        processQueue(null);
-        return api(originalRequest);
-      } catch (refreshError) {
-        processQueue(refreshError);
-        if (typeof window !== 'undefined') {
-          window.location.href = '/';
+        if (details) {
+          (error.response.data as Record<string, unknown>).details = details;
         }
-        return Promise.reject(refreshError);
-      } finally {
-        isRefreshing = false;
       }
     }
 
-    return Promise.reject(error);
+    const status = error.response?.status;
+    const url = originalRequest?.url || '';
+
+    const isAuthEndpoint =
+      url.includes('/auth/login') ||
+      url.includes('/auth/register') ||
+      url.includes('/auth/refresh') ||
+      url.includes('/auth/logout') ||
+      url.includes('/auth/me');
+
+    if (!originalRequest || status !== 401) {
+      return Promise.reject(error);
+    }
+
+    if (originalRequest._retry) {
+      return Promise.reject(error);
+    }
+
+    if (isAuthEndpoint) {
+      return Promise.reject(error);
+    }
+
+    if (isRefreshing) {
+      return new Promise((resolve, reject) => {
+        failedQueue.push({ resolve, reject });
+      }).then(() => api(originalRequest));
+    }
+
+    originalRequest._retry = true;
+    isRefreshing = true;
+
+    try {
+      await api.post('/auth/refresh');
+      processQueue(null);
+      return api(originalRequest);
+    } catch (refreshError) {
+      processQueue(refreshError);
+      return Promise.reject(refreshError);
+    } finally {
+      isRefreshing = false;
+    }
   }
 );
 

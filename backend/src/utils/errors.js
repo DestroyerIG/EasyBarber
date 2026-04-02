@@ -56,3 +56,36 @@ export class PlanLimitError extends AppError {
     this.requiredPlan = requiredPlan;
   }
 }
+
+export class FeatureAccessError extends AppError {
+  constructor(feature, decision = {}) {
+    const statusCode = decision.billingActionRequired ? 402 : 403;
+    const message = decision.message || 'Esta funcionalidade está indisponível para a sua assinatura.';
+
+    super(message, statusCode, 'FEATURE_BLOCKED');
+
+    this.feature = feature;
+    this.reason = decision.reason || 'subscription_status_restricted';
+    this.requiredPlan = decision.requiredPlan || null;
+    this.subscriptionStatus = decision.subscriptionStatus || null;
+    this.upgradeRequired = Boolean(decision.upgradeRequired);
+    this.billingActionRequired = Boolean(decision.billingActionRequired);
+  }
+}
+
+export class BillingError extends AppError {
+  constructor(message = 'Erro ao processar cobrança', statusCode = 502, code = 'BILLING_ERROR') {
+    super(message, statusCode, code);
+  }
+}
+
+export class SubscriptionStatusError extends AppError {
+  constructor(subscriptionStatus = 'incomplete') {
+    super(
+      `Sua assinatura está em estado ${subscriptionStatus}. Regularize o pagamento para continuar.`,
+      402,
+      'SUBSCRIPTION_INACTIVE'
+    );
+    this.subscriptionStatus = subscriptionStatus;
+  }
+}

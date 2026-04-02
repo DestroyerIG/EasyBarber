@@ -1,4 +1,4 @@
-# 🤖 BOT WHATSAPP - BarberPro SaaS
+# 🤖 BOT WHATSAPP - EasyBarber
 
 ## Visão Geral
 

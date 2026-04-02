@@ -58,7 +58,7 @@ export const ChatSimulator = ({ onSendMessage }: ChatSimulatorProps) => {
           </div>
           <div>
             <h3 className="font-bold text-white text-sm">Teste o Bot</h3>
-            <p className="text-[10px] text-green-500 font-bold uppercase tracking-tighter">BarberBot Online</p>
+            <p className="text-[10px] text-green-500 font-bold uppercase tracking-tighter">EasyBarber Bot Online</p>
           </div>
         </div>
         <button onClick={() => setMessages([])} className="text-xs text-gray-500 hover:text-white uppercase font-black">

@@ -1,6 +1,6 @@
-# 🚀 GUIA DE DEPLOY - BarberPro SaaS
+# 🚀 GUIA DE DEPLOY - EasyBarber
 
-Guia para deploy do BarberPro SaaS em produção.
+Guia para deploy do EasyBarber em produção.
 
 ---
 
@@ -106,6 +106,8 @@ psql "sua_connection_string" -f backend/src/config/database.sql
 psql "sua_connection_string" -f backend/src/config/migration_v2.sql
 psql "sua_connection_string" -f backend/src/config/migration_v3.sql
 psql "sua_connection_string" -f backend/src/config/migration_v4.sql
+psql "sua_connection_string" -f backend/src/config/migration_v5.sql
+psql "sua_connection_string" -f backend/src/config/migration_v6.sql
 ```
 
 ### ⚙️ Backend
@@ -119,6 +121,11 @@ psql "sua_connection_string" -f backend/src/config/migration_v4.sql
    DATABASE_URL=postgresql://...
    JWT_SECRET=sua_chave_secreta
    FRONTEND_URL=https://seu-frontend.vercel.app
+    STRIPE_SECRET_KEY=sk_live_...
+    STRIPE_WEBHOOK_SECRET=whsec_...
+    STRIPE_PRICE_ID_BASICO=price_...
+    STRIPE_PRICE_ID_PROFISSIONAL=price_...
+    STRIPE_PRICE_ID_PREMIUM=price_...
    NODE_ENV=production
    ```
 4. Deploy automático a cada push
@@ -138,7 +145,7 @@ psql "sua_connection_string" -f backend/src/config/migration_v4.sql
 3. Framework Preset: Next.js (detectado automaticamente)
 4. Variáveis de ambiente:
    ```
-   NEXT_PUBLIC_API_URL=https://sua-api.railway.app/api
+    NEXT_PUBLIC_API_URL=https://sua-api.railway.app/api/v1
    ```
 5. Deploy automático a cada push
 
@@ -149,7 +156,7 @@ psql "sua_connection_string" -f backend/src/config/migration_v4.sql
 4. Publish directory: `.next`
 5. Variáveis de ambiente:
    ```
-   NEXT_PUBLIC_API_URL=https://sua-api.railway.app/api
+    NEXT_PUBLIC_API_URL=https://sua-api.railway.app/api/v1
    ```
 
 ---
@@ -175,12 +182,14 @@ sudo -u postgres psql -d barberpro -f backend/src/config/database.sql
 sudo -u postgres psql -d barberpro -f backend/src/config/migration_v2.sql
 sudo -u postgres psql -d barberpro -f backend/src/config/migration_v3.sql
 sudo -u postgres psql -d barberpro -f backend/src/config/migration_v4.sql
+sudo -u postgres psql -d barberpro -f backend/src/config/migration_v5.sql
+sudo -u postgres psql -d barberpro -f backend/src/config/migration_v6.sql
 ```
 
 ### 2. Deploy Backend
 
 ```bash
-cd Barberpro-saas/backend
+cd easybarber-saas/backend
 npm install --production
 
 # Criar .env com variáveis de produção
@@ -189,11 +198,16 @@ PORT=5000
 DATABASE_URL=postgresql://postgres:senha@localhost:5432/barberpro
 JWT_SECRET=sua_chave_secreta_longa
 FRONTEND_URL=https://seudominio.com
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PRICE_ID_BASICO=price_...
+STRIPE_PRICE_ID_PROFISSIONAL=price_...
+STRIPE_PRICE_ID_PREMIUM=price_...
 NODE_ENV=production
 EOF
 
 # Iniciar com PM2
-pm2 start src/server.js --name barberpro-api
+pm2 start src/server.js --name easybarber-api
 pm2 save
 pm2 startup
 ```
@@ -201,14 +215,14 @@ pm2 startup
 ### 3. Deploy Frontend
 
 ```bash
-cd Barberpro-saas/frontend
+cd easybarber-saas/frontend
 
 # Criar .env.local
-echo "NEXT_PUBLIC_API_URL=https://api.seudominio.com/api" > .env.local
+echo "NEXT_PUBLIC_API_URL=https://api.seudominio.com/api/v1" > .env.local
 
 npm install
 npm run build
-pm2 start npm --name barberpro-web -- start
+pm2 start npm --name easybarber-web -- start
 pm2 save
 ```
 
@@ -218,7 +232,7 @@ pm2 save
 apt-get install nginx certbot python3-certbot-nginx
 
 # Config Backend
-cat > /etc/nginx/sites-available/barberpro-api << 'EOF'
+cat > /etc/nginx/sites-available/easybarber-api << 'EOF'
 server {
     listen 80;
     server_name api.seudominio.com;
@@ -237,7 +251,7 @@ server {
 EOF
 
 # Config Frontend
-cat > /etc/nginx/sites-available/barberpro-web << 'EOF'
+cat > /etc/nginx/sites-available/easybarber-web << 'EOF'
 server {
     listen 80;
     server_name seudominio.com;
@@ -254,8 +268,8 @@ server {
 EOF
 
 # Ativar
-ln -s /etc/nginx/sites-available/barberpro-api /etc/nginx/sites-enabled/
-ln -s /etc/nginx/sites-available/barberpro-web /etc/nginx/sites-enabled/
+ln -s /etc/nginx/sites-available/easybarber-api /etc/nginx/sites-enabled/
+ln -s /etc/nginx/sites-available/easybarber-web /etc/nginx/sites-enabled/
 nginx -t
 systemctl restart nginx
 
@@ -276,6 +290,11 @@ certbot --nginx -d api.seudominio.com -d seudominio.com
 | `JWT_SECRET` | Sim | Chave secreta para tokens JWT |
 | `NODE_ENV` | Não | `development` ou `production` |
 | `FRONTEND_URL` | Não | URL do frontend para CORS (padrão: http://localhost:3000) |
+| `STRIPE_SECRET_KEY` | Sim (billing) | Chave secreta da API Stripe |
+| `STRIPE_WEBHOOK_SECRET` | Sim (billing) | Segredo de assinatura do webhook Stripe |
+| `STRIPE_PRICE_ID_BASICO` | Sim (billing) | Price ID do plano Básico |
+| `STRIPE_PRICE_ID_PROFISSIONAL` | Sim (billing) | Price ID do plano Profissional |
+| `STRIPE_PRICE_ID_PREMIUM` | Sim (billing) | Price ID do plano Premium |
 | `DB_POOL_MIN` | Não | Conexões mínimas no pool (padrão: 2) |
 | `DB_POOL_MAX` | Não | Conexões máximas no pool (padrão: 20) |
 | `DB_IDLE_TIMEOUT` | Não | Timeout de conexão ociosa em ms (padrão: 30000) |
@@ -287,7 +306,8 @@ certbot --nginx -d api.seudominio.com -d seudominio.com
 
 | Variável | Obrigatória | Descrição |
 |---|---|---|
-| `NEXT_PUBLIC_API_URL` | Sim | URL da API do backend (ex: `http://localhost:5000/api`) |
+| `NEXT_PUBLIC_API_URL` | Sim | URL da API do backend (ex: `http://localhost:5000/api/v1`) |
+| `NEXT_PUBLIC_WHATSAPP_CONTACT_URL` | Sim | URL do WhatsApp comercial para CTA público |
 
 ### Docker Compose (`.env` na raiz)
 

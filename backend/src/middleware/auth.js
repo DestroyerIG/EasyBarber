@@ -1,5 +1,18 @@
 import jwt from 'jsonwebtoken';
-import { UnauthorizedError, PlanLimitError } from '../utils/errors.js';
+import { UnauthorizedError, PlanLimitError, SubscriptionStatusError } from '../utils/errors.js';
+import { normalizeRole } from '../utils/roles.js';
+
+const resolveJwtSecret = () => {
+  if (process.env.JWT_SECRET) {
+    return process.env.JWT_SECRET;
+  }
+
+  if (process.env.NODE_ENV === 'test') {
+    return 'test-secret';
+  }
+
+  throw new UnauthorizedError('Configuração JWT inválida');
+};
 
 export const authMiddleware = async (req, res, next) => {
   try {
@@ -13,8 +26,11 @@ export const authMiddleware = async (req, res, next) => {
       return next(new UnauthorizedError('Token não fornecido'));
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+    const decoded = jwt.verify(token, resolveJwtSecret());
+    req.user = {
+      ...decoded,
+      role: normalizeRole(decoded.role),
+    };
     next();
   } catch (error) {
     if (error.name === 'TokenExpiredError') {
@@ -33,6 +49,18 @@ export const checkPlan = (requiredPlan) => {
 
     if (requiredLevel === undefined || userPlanLevel < requiredLevel) {
       return next(new PlanLimitError(requiredPlan));
+    }
+
+    next();
+  };
+};
+
+export const checkSubscriptionStatus = (allowedStatuses = ['active', 'trialing']) => {
+  return (req, res, next) => {
+    const currentStatus = req.user.subscriptionStatus || 'incomplete';
+
+    if (!allowedStatuses.includes(currentStatus)) {
+      return next(new SubscriptionStatusError(currentStatus));
     }
 
     next();

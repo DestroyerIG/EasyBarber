@@ -1,9 +1,9 @@
-# 📁 ESTRUTURA DO PROJETO - BarberPro SaaS
+# 📁 ESTRUTURA DO PROJETO - EasyBarber
 
 ## 🌳 Árvore de Arquivos
 
 ```
-Barberpro-saas/
+easybarber-saas/
 │
 ├── README.md                        # Documentação principal
 ├── QUICK_START.md                   # Guia de inicialização rápida

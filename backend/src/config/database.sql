@@ -9,9 +9,20 @@ CREATE TABLE IF NOT EXISTS barbershops (
     whatsapp VARCHAR(20) NOT NULL,
     plan VARCHAR(50) NOT NULL DEFAULT 'basico'
         CHECK (plan IN ('basico', 'profissional', 'premium')),
+    stripe_customer_id VARCHAR(255) UNIQUE,
+    stripe_subscription_id VARCHAR(255) UNIQUE,
+    stripe_price_id VARCHAR(255),
+    subscription_status VARCHAR(50) NOT NULL DEFAULT 'active'
+        CHECK (subscription_status IN ('active', 'trialing', 'past_due', 'canceled', 'incomplete')),
+    subscription_current_period_start TIMESTAMP,
+    subscription_current_period_end TIMESTAMP,
+    subscription_cancel_at_period_end BOOLEAN NOT NULL DEFAULT false,
+    subscription_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     instagram_handle VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    suspended_at TIMESTAMP,
+    suspended_reason VARCHAR(255),
     active BOOLEAN DEFAULT true
 );
 
@@ -21,8 +32,11 @@ CREATE TABLE IF NOT EXISTS users (
     barbershop_id UUID NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash CHAR(60) NOT NULL,
-    role VARCHAR(20) NOT NULL DEFAULT 'admin'
-        CHECK (role IN ('admin', 'barber')),
+    role VARCHAR(20) NOT NULL DEFAULT 'tenant_admin'
+        CHECK (role IN ('platform_admin', 'tenant_admin', 'employee')),
+    blocked BOOLEAN NOT NULL DEFAULT false,
+    blocked_at TIMESTAMP,
+    blocked_reason VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -115,6 +129,34 @@ CREATE TABLE IF NOT EXISTS expenses (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Tabela de auditoria de eventos da assinatura
+CREATE TABLE IF NOT EXISTS subscription_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    stripe_event_id VARCHAR(255) NOT NULL UNIQUE,
+    event_type VARCHAR(255) NOT NULL,
+    barbershop_id UUID REFERENCES barbershops(id) ON DELETE SET NULL,
+    payload JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Tabela de auditoria de ações administrativas
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    action_type VARCHAR(50) NOT NULL,
+    actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    actor_barbershop_id UUID REFERENCES barbershops(id) ON DELETE SET NULL,
+    target_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    target_barbershop_id UUID REFERENCES barbershops(id) ON DELETE SET NULL,
+    resource_type VARCHAR(50),
+    resource_id UUID,
+    details JSONB,
+    ip_address VARCHAR(45),
+    user_agent TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'success' CHECK (status IN ('success', 'failed')),
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Tabela para controlar sessões do bot WhatsApp
 CREATE TABLE IF NOT EXISTS whatsapp_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -132,7 +174,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_bot_config (
     barbershop_id UUID NOT NULL UNIQUE REFERENCES barbershops(id) ON DELETE CASCADE,
     welcome_message TEXT DEFAULT 'Olá 👋 Bem-vindo à {nome_barbearia}!
 
-Me chame de *BarberBot* 🤖 e estou aqui para agilizar seu atendimento.
+Me chame de *EasyBarber Bot* 🤖 e estou aqui para agilizar seu atendimento.
 
 Como posso ajudar hoje?
 
@@ -204,6 +246,17 @@ CREATE INDEX IF NOT EXISTS idx_expenses_barbershop_date ON expenses(barbershop_i
 -- Refresh tokens: busca por hash e limpeza de expirados
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token_hash ON refresh_tokens(token_hash) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_users_email_not_blocked ON users(email) WHERE blocked = false;
+CREATE INDEX IF NOT EXISTS idx_users_barbershop_blocked ON users(barbershop_id, blocked);
+
+-- Stripe billing
+CREATE INDEX IF NOT EXISTS idx_barbershops_subscription_status ON barbershops(subscription_status);
+CREATE INDEX IF NOT EXISTS idx_barbershops_stripe_customer ON barbershops(stripe_customer_id);
+CREATE INDEX IF NOT EXISTS idx_subscription_events_created_at ON subscription_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_user ON audit_logs(actor_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_target_user ON audit_logs(target_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action_type ON audit_logs(action_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
 
 -- WhatsApp
 CREATE INDEX IF NOT EXISTS idx_whatsapp_sessions_phone ON whatsapp_sessions(phone);

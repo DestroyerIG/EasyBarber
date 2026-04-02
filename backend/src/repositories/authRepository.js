@@ -3,11 +3,13 @@ import pool from '../config/database.js';
 export const authRepository = {
   async findUserByEmail(email) {
     const result = await pool.query(
-      `SELECT u.id, u.email, u.password_hash, u.role,
-              b.plan, b.name as barbershop_name, b.id as barbershop_id
+      `SELECT u.id, u.email, u.password_hash, u.role, u.blocked,
+              b.plan, b.name as barbershop_name, b.id as barbershop_id,
+              b.subscription_status,
+              b.subscription_current_period_end
        FROM users u
        JOIN barbershops b ON u.barbershop_id = b.id
-       WHERE u.email = $1 AND b.active = true`,
+       WHERE u.email = $1 AND b.active = true AND u.blocked = false`,
       [email]
     );
     return result.rows[0] || null;
@@ -64,12 +66,14 @@ export const authRepository = {
   async findValidRefreshToken(tokenHash) {
     const result = await pool.query(
       `SELECT rt.id, rt.user_id, u.email, u.role, b.id as barbershop_id, b.plan
+              , b.subscription_status, b.subscription_current_period_end
        FROM refresh_tokens rt
        JOIN users u ON rt.user_id = u.id
        JOIN barbershops b ON u.barbershop_id = b.id
        WHERE rt.token_hash = $1
          AND rt.revoked_at IS NULL
          AND rt.expires_at > NOW()
+         AND u.blocked = false
          AND b.active = true`,
       [tokenHash]
     );

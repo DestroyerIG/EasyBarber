@@ -1,4 +1,4 @@
-// Interfaces TypeScript do BarberPro
+// Interfaces TypeScript do EasyBarber
 
 export interface DashboardData {
     appointmentsToday: number;
@@ -83,6 +83,8 @@ export interface User {
     role: string;
     barbershopName: string;
     plan: string;
+    subscriptionStatus?: 'active' | 'trialing' | 'past_due' | 'canceled' | 'incomplete';
+    subscriptionCurrentPeriodEnd?: string | null;
 }
 
 export interface Expense {

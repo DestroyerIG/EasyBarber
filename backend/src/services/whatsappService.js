@@ -68,7 +68,7 @@ const getBotConfig = async (barbershopId) => {
     );
 
     const defaultConfig = {
-      welcome_header: 'Olá 👋 Bem-vindo à {nome_barbearia}!\n\nMe chame de *BarberBot* 🤖 e estou aqui para agilizar seu atendimento.\n\nComo posso ajudar hoje?',
+      welcome_header: 'Olá 👋 Bem-vindo à {nome_barbearia}!\n\nMe chame de *EasyBarber Bot* 🤖 e estou aqui para agilizar seu atendimento.\n\nComo posso ajudar hoje?',
       ask_name_message: 'Vejo que é sua primeira vez aqui! 😊\n\nQual o seu *nome completo*?',
       attendant_message: 'Um atendente entrará em contato em breve! 👨‍💼',
       confirmation_message: '✅ Seu horário foi agendado com sucesso! 💈\n\n📋 Serviço: {servico}\n👨‍🦱 Barbeiro: {barbeiro}\n📅 Data: {data}\n⏰ Horário: {horario}\n💰 Valor: R$ {valor}\n\nAté lá! 👋',

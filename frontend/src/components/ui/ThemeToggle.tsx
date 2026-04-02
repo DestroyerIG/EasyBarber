@@ -3,11 +3,14 @@
 import { useState, useEffect } from 'react';
 import { Moon, Sun } from 'lucide-react';
 
+const THEME_KEY = 'easybarber-theme';
+const LEGACY_THEME_KEY = 'barberpro-theme';
+
 export function ThemeToggle() {
   const [isDark, setIsDark] = useState(true);
 
   useEffect(() => {
-    const stored = localStorage.getItem('barberpro-theme');
+    const stored = localStorage.getItem(THEME_KEY) || localStorage.getItem(LEGACY_THEME_KEY);
     if (stored === 'light') {
       setIsDark(false);
       document.documentElement.classList.remove('dark');
@@ -21,10 +24,10 @@ export function ThemeToggle() {
     setIsDark(next);
     if (next) {
       document.documentElement.classList.add('dark');
-      localStorage.setItem('barberpro-theme', 'dark');
+      localStorage.setItem(THEME_KEY, 'dark');
     } else {
       document.documentElement.classList.remove('dark');
-      localStorage.setItem('barberpro-theme', 'light');
+      localStorage.setItem(THEME_KEY, 'light');
     }
   };
 

@@ -1,4 +1,4 @@
-# ⚡ INSTALAÇÃO - BarberPro SaaS
+# ⚡ INSTALAÇÃO - EasyBarber
 
 ## 🎯 Resumo
 
@@ -117,6 +117,8 @@ Se o banco já existia de uma versão anterior, execute as migrations:
 psql -U postgres -d barberpro -f backend\src\config\migration_v2.sql
 psql -U postgres -d barberpro -f backend\src\config\migration_v3.sql
 psql -U postgres -d barberpro -f backend\src\config\migration_v4.sql
+psql -U postgres -d barberpro -f backend\src\config\migration_v5.sql
+psql -U postgres -d barberpro -f backend\src\config\migration_v6.sql
 ```
 
 ---

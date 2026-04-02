@@ -1,4 +1,4 @@
-# 📘 DOCUMENTAÇÃO DA API - BarberPro SaaS
+# 📘 DOCUMENTAÇÃO DA API - EasyBarber
 
 **Base URL:** `http://localhost:5000/api/v1`
 
@@ -77,7 +77,7 @@ Os tokens são enviados via **httpOnly cookies** (mais seguro) ou via header `Au
 
 ```json
 {
-  "message": "💈 BarberPro SaaS API",
+  "message": "💈 EasyBarber SaaS API",
   "version": "1.0.0",
   "status": "online"
 }
@@ -85,7 +85,7 @@ Os tokens são enviados via **httpOnly cookies** (mais seguro) ou via header `Au
 
 ---
 
-## AUTENTICAÇÃO (`/api/auth`)
+## AUTENTICAÇÃO (`/api/v1/auth`)
 
 ### 1. Registrar Barbearia
 
@@ -204,7 +204,7 @@ Invalida o refresh token e limpa os cookies.
 
 ---
 
-## DASHBOARD (`/api/dashboard`)
+## DASHBOARD (`/api/v1/dashboard`)
 
 ### 6. Dados do Dashboard
 
@@ -230,7 +230,7 @@ Invalida o refresh token e limpa os cookies.
 
 ---
 
-## AGENDAMENTOS (`/api/appointments`)
+## AGENDAMENTOS (`/api/v1/appointments`)
 
 ### 7. Listar Agendamentos
 
@@ -339,7 +339,7 @@ Invalida o refresh token e limpa os cookies.
 
 ---
 
-## CLIENTES (`/api/clients`)
+## CLIENTES (`/api/v1/clients`)
 
 ### 13. Listar Clientes
 
@@ -416,7 +416,7 @@ Aceita todos os campos de criação (todos opcionais no update).
 
 ---
 
-## FINANCEIRO (`/api/finance`)
+## FINANCEIRO (`/api/v1/finance`)
 
 ### 17. Resumo Financeiro
 
@@ -507,7 +507,7 @@ Aceita todos os campos de criação (todos opcionais no update).
 
 ---
 
-## SERVIÇOS E BARBEIROS (`/api/barbershop`)
+## SERVIÇOS E BARBEIROS (`/api/v1/barbershop`)
 
 ### 23. Listar Serviços
 
@@ -615,7 +615,7 @@ Aceita todos os campos de criação (todos opcionais no update).
 
 ---
 
-## WHATSAPP (`/api/whatsapp`)
+## WHATSAPP (`/api/v1/whatsapp`)
 
 ### Conexão
 
@@ -794,6 +794,94 @@ Rota usada internamente pelo `whatsapp-web.js` para processar mensagens recebida
 
 ---
 
+## ASSINATURAS / BILLING STRIPE (`/api/v1/subscriptions`)
+
+### 45. Criar Sessão de Checkout
+
+**POST** `/subscriptions/checkout-session` 🔒
+
+```json
+{
+  "plan": "profissional"
+}
+```
+
+**Planos aceitos:** `basico`, `profissional`, `premium`
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "data": {
+    "sessionId": "cs_test_...",
+    "checkoutUrl": "https://checkout.stripe.com/c/pay/..."
+  }
+}
+```
+
+---
+
+### 46. Status da Assinatura
+
+**GET** `/subscriptions/status` 🔒
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "data": {
+    "plan": "profissional",
+    "subscriptionStatus": "active",
+    "currentPeriodStart": "2026-04-02T10:00:00.000Z",
+    "currentPeriodEnd": "2026-05-02T10:00:00.000Z",
+    "cancelAtPeriodEnd": false,
+    "hasCustomer": true
+  }
+}
+```
+
+**Estados mínimos suportados:**
+- `active`
+- `trialing`
+- `past_due`
+- `canceled`
+- `incomplete`
+
+---
+
+### 47. Portal de Assinatura
+
+**POST** `/subscriptions/portal` 🔒
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "data": {
+    "portalUrl": "https://billing.stripe.com/p/session/..."
+  }
+}
+```
+
+---
+
+### 48. Webhook Stripe
+
+**POST** `/subscriptions/webhook` (Sem autenticação)
+
+Webhook assinado pelo Stripe para sincronização de pagamento e assinatura.
+
+**Eventos processados:**
+- `checkout.session.completed`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
+
+**Observações de segurança:**
+- O endpoint valida `stripe-signature` com `STRIPE_WEBHOOK_SECRET`.
+- Eventos são armazenados com idempotência (`stripe_event_id` único).
+
+---
+
 ## 🔒 Legenda
 
 - 🔒 = Requer autenticação (token JWT via cookie ou header `Authorization: Bearer <token>`)
@@ -814,23 +902,23 @@ $body = @{
   password = "MinhaSenh4"
 } | ConvertTo-Json
 
-Invoke-RestMethod -Uri "http://localhost:5000/api/auth/register" -Method POST -ContentType "application/json" -Body $body
+Invoke-RestMethod -Uri "http://localhost:5000/api/v1/auth/register" -Method POST -ContentType "application/json" -Body $body
 ```
 
 ### Login e usar token
 
 ```powershell
 $login = @{ email = "joao@teste.com"; password = "MinhaSenh4" } | ConvertTo-Json
-$response = Invoke-RestMethod -Uri "http://localhost:5000/api/auth/login" -Method POST -ContentType "application/json" -Body $login
+$response = Invoke-RestMethod -Uri "http://localhost:5000/api/v1/auth/login" -Method POST -ContentType "application/json" -Body $login
 
 $token = $response.data.token
 $headers = @{ Authorization = "Bearer $token" }
 
 # Dashboard
-Invoke-RestMethod -Uri "http://localhost:5000/api/dashboard" -Headers $headers
+Invoke-RestMethod -Uri "http://localhost:5000/api/v1/dashboard" -Headers $headers
 
 # Listar serviços
-Invoke-RestMethod -Uri "http://localhost:5000/api/barbershop/services" -Headers $headers
+Invoke-RestMethod -Uri "http://localhost:5000/api/v1/barbershop/services" -Headers $headers
 ```
 
 ### Health Check

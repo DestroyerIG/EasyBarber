@@ -1,5 +1,7 @@
 import express from 'express';
-import { authMiddleware, checkPlan } from '../middleware/auth.js';
+import { authMiddleware } from '../middleware/auth.js';
+import { requireTenantRoles } from '../middleware/rbac.js';
+import { requireFeature } from '../middleware/subscriptionGuard.js';
 import { validate } from '../middleware/validate.js';
 import {
   getFinanceSummary,
@@ -14,11 +16,11 @@ import {
 
 const router = express.Router();
 
-router.get('/summary', authMiddleware, getFinanceSummary);
-router.get('/monthly', authMiddleware, checkPlan('profissional'), getMonthlyReport);
-router.post('/expenses', authMiddleware, validate({ body: addExpenseSchema }), addExpense);
-router.put('/expenses/:id', authMiddleware, validate({ body: updateExpenseSchema }), updateExpense);
-router.delete('/expenses/:id', authMiddleware, deleteExpense);
-router.get('/expenses', authMiddleware, getExpenses);
+router.get('/summary', authMiddleware, requireTenantRoles, requireFeature('finance'), getFinanceSummary);
+router.get('/monthly', authMiddleware, requireTenantRoles, requireFeature('reports'), getMonthlyReport);
+router.post('/expenses', authMiddleware, requireTenantRoles, requireFeature('finance'), validate({ body: addExpenseSchema }), addExpense);
+router.put('/expenses/:id', authMiddleware, requireTenantRoles, requireFeature('finance'), validate({ body: updateExpenseSchema }), updateExpense);
+router.delete('/expenses/:id', authMiddleware, requireTenantRoles, requireFeature('finance'), deleteExpense);
+router.get('/expenses', authMiddleware, requireTenantRoles, requireFeature('finance'), getExpenses);
 
 export default router;

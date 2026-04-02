@@ -43,6 +43,11 @@ export const errorHandler = (err, req, res, _next) => {
     };
     if (err.details) body.error.details = err.details;
     if (err.requiredPlan) body.error.requiredPlan = err.requiredPlan;
+    if (err.subscriptionStatus) body.error.subscriptionStatus = err.subscriptionStatus;
+    if (err.feature) body.error.feature = err.feature;
+    if (err.reason) body.error.reason = err.reason;
+    if (typeof err.upgradeRequired === 'boolean') body.error.upgradeRequired = err.upgradeRequired;
+    if (typeof err.billingActionRequired === 'boolean') body.error.billingActionRequired = err.billingActionRequired;
     return res.status(err.statusCode).json(body);
   }
 

@@ -1,4 +1,4 @@
-# 💈 BarberPro SaaS - Sistema Completo para Barbearias
+# 💈 EasyBarber - Sistema Completo para Barbearias
 
 Sistema SaaS completo para gestão de barbearias com agendamento automático via WhatsApp, controle financeiro e painel administrativo profissional.
 
@@ -12,10 +12,11 @@ Sistema SaaS completo para gestão de barbearias com agendamento automático via
 ## 🚀 Funcionalidades
 
 ### 🔐 Autenticação e Segurança
-- Login e cadastro com validação Zod
+- Homepage SaaS pública com fluxo comercial (Início, Recursos, Planos, Contato)
+- Login em `/login` e cadastro em `/cadastro` com validação Zod
 - Tokens JWT (access + refresh) via httpOnly cookies
 - Política de senha forte (8+ caracteres, maiúscula, número)
-- Rate limiting por IP (100 req/15min geral, 20 req/15min para auth)
+- Rate limiting por IP (300 req/15min geral, 20 req/15min login, 50 req/15min cadastro)
 - Headers de segurança (Helmet, CSP, HSTS)
 
 ### 📊 Dashboard Administrativo
@@ -59,9 +60,12 @@ Sistema SaaS completo para gestão de barbearias com agendamento automático via
 - Limites por plano de assinatura
 
 ### 💳 Planos de Assinatura
-- **Básico** (R$ 49,90/mês): 1 barbeiro, 100 clientes
-- **Profissional** (R$ 99,90/mês): 5 barbeiros, 500 clientes, relatórios
-- **Premium** (R$ 199,90/mês): Ilimitado, todas as funcionalidades
+- **Básico** (R$ 49/mês)
+- **Profissional** (R$ 99/mês)
+- **Premium** (R$ 199/mês)
+- Checkout de assinatura com Stripe
+- Webhook Stripe para sincronização automática de status
+- Portal Stripe para upgrade, downgrade e cancelamento
 
 ## 🛠️ Stack Tecnológica
 
@@ -116,7 +120,7 @@ Controller → Service → Repository → Database (PostgreSQL)
 ### 1. Clone e instale
 ```powershell
 git clone <seu-repositorio>
-cd Barberpro-saas
+cd easybarber-saas
 ```
 
 ### 2. Execute o script de configuração automática
@@ -154,7 +158,7 @@ Sobe PostgreSQL, Backend e Frontend automaticamente.
 
 ## 🗄️ Banco de Dados
 
-### 12 Tabelas
+### 14 Tabelas
 | Tabela | Descrição |
 |---|---|
 | `barbershops` | Dados das barbearias |
@@ -169,18 +173,22 @@ Sobe PostgreSQL, Backend e Frontend automaticamente.
 | `whatsapp_sessions` | Sessões do bot |
 | `whatsapp_bot_config` | Configurações de mensagens do bot |
 | `whatsapp_ratings` | Avaliações dos clientes |
+| `subscription_events` | Auditoria de eventos Stripe |
+| `audit_logs` | Auditoria de ações administrativas |
 
 ### Migrations
-- `database.sql` — Schema inicial (12 tabelas)
+- `database.sql` — Schema inicial (14 tabelas)
 - `migration_v2.sql` — Constraints, índices, refresh_tokens, trigger updated_at
 - `migration_v3.sql` — 21 mensagens configuráveis, tabela menu_options, 9 opções padrão
 - `migration_v4.sql` — Índices de performance (conflitos, lookup, dashboard)
+- `migration_v5.sql` — Billing Stripe (customer, subscription, status, eventos)
+- `migration_v6.sql` — RBAC admin (`platform_admin`/`tenant_admin`/`employee`), bloqueio de usuário/tenant e tabela `audit_logs`
 
 ## 🔌 API Endpoints
 
 > Documentação completa em `API_DOCS.md`
 
-### Autenticação (`/api/auth`)
+### Autenticação (`/api/v1/auth`)
 | Método | Rota | Descrição | Auth |
 |---|---|---|---|
 | POST | `/register` | Cadastrar barbearia | Não |
@@ -189,12 +197,12 @@ Sobe PostgreSQL, Backend e Frontend automaticamente.
 | POST | `/logout` | Logout | Não |
 | GET | `/me` | Dados do usuário atual | Sim |
 
-### Dashboard (`/api/dashboard`)
+### Dashboard (`/api/v1/dashboard`)
 | Método | Rota | Descrição | Auth |
 |---|---|---|---|
 | GET | `/` | Métricas do dashboard | Sim |
 
-### Agendamentos (`/api/appointments`)
+### Agendamentos (`/api/v1/appointments`)
 | Método | Rota | Descrição | Auth |
 |---|---|---|---|
 | GET | `/` | Listar agendamentos | Sim |
@@ -204,7 +212,7 @@ Sobe PostgreSQL, Backend e Frontend automaticamente.
 | PUT | `/:id/status` | Atualizar status | Sim |
 | DELETE | `/:id` | Excluir agendamento | Sim |
 
-### Clientes (`/api/clients`)
+### Clientes (`/api/v1/clients`)
 | Método | Rota | Descrição | Auth |
 |---|---|---|---|
 | GET | `/` | Listar clientes | Sim |
@@ -212,7 +220,7 @@ Sobe PostgreSQL, Backend e Frontend automaticamente.
 | PUT | `/:id` | Atualizar cliente | Sim |
 | GET | `/:id/history` | Histórico do cliente | Sim |
 
-### Financeiro (`/api/finance`)
+### Financeiro (`/api/v1/finance`)
 | Método | Rota | Descrição | Auth | Plano |
 |---|---|---|---|---|
 | GET | `/summary` | Resumo financeiro | Sim | Todos |
@@ -222,7 +230,7 @@ Sobe PostgreSQL, Backend e Frontend automaticamente.
 | DELETE | `/expenses/:id` | Excluir gasto | Sim | Todos |
 | GET | `/expenses` | Listar gastos | Sim | Todos |
 
-### Serviços e Barbeiros (`/api/barbershop`)
+### Serviços e Barbeiros (`/api/v1/barbershop`)
 | Método | Rota | Descrição | Auth |
 |---|---|---|---|
 | GET | `/services` | Listar serviços | Sim |
@@ -234,7 +242,7 @@ Sobe PostgreSQL, Backend e Frontend automaticamente.
 | PUT | `/barbers/:id` | Atualizar barbeiro | Sim |
 | DELETE | `/barbers/:id` | Excluir barbeiro | Sim |
 
-### WhatsApp (`/api/whatsapp`)
+### WhatsApp (`/api/v1/whatsapp`)
 | Método | Rota | Descrição | Auth |
 |---|---|---|---|
 | POST | `/webhook` | Receber mensagens | Não |
@@ -252,7 +260,15 @@ Sobe PostgreSQL, Backend e Frontend automaticamente.
 | PUT | `/config/menu-reorder` | Reordenar menu | Sim |
 | POST | `/config/menu/reset` | Resetar menu | Sim |
 
-**Total: 39 endpoints**
+### Assinaturas (`/api/v1/subscriptions`)
+| Método | Rota | Descrição | Auth |
+|---|---|---|---|
+| POST | `/checkout-session` | Criar sessão Stripe Checkout | Sim |
+| GET | `/status` | Consultar status da assinatura | Sim |
+| POST | `/portal` | Abrir portal Stripe para gestão | Sim |
+| POST | `/webhook` | Webhook Stripe | Não |
+
+**Total: 43+ endpoints**
 
 ## 🔒 Segurança Implementada
 

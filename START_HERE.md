@@ -1,4 +1,4 @@
-# 💈 BarberPro SaaS - Visão Geral
+# 💈 EasyBarber - Visão Geral
 
 ## 🎉 PROJETO COMPLETO E PRONTO PARA USO
 

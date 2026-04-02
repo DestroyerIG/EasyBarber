@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { authRepository } from '../repositories/authRepository.js';
 import { AppError, ConflictError, UnauthorizedError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
+import { normalizeRole } from '../utils/roles.js';
 
 const COMMON_PASSWORDS = new Set([
   'password', '123456', '12345678', 'qwerty', 'abc123', 'password1',
@@ -11,8 +12,20 @@ const COMMON_PASSWORDS = new Set([
   'admin123', 'welcome', 'letmein', 'monkey', 'master', 'dragon',
 ]);
 
+const resolveJwtSecret = () => {
+  if (process.env.JWT_SECRET) {
+    return process.env.JWT_SECRET;
+  }
+
+  if (process.env.NODE_ENV === 'test') {
+    return 'test-secret';
+  }
+
+  throw new AppError('JWT_SECRET não configurado', 500, 'JWT_SECRET_MISSING');
+};
+
 const generateAccessToken = (payload) => {
-  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '15m' });
+  return jwt.sign(payload, resolveJwtSecret(), { expiresIn: '15m' });
 };
 
 const generateRefreshToken = async (dbClient, userId) => {
@@ -62,7 +75,7 @@ export const authService = {
 
       const passwordHash = await bcrypt.hash(password, 12);
       const user = await authRepository.createUser(client, {
-        barbershopId: barbershop.id, email, passwordHash, role: 'admin',
+        barbershopId: barbershop.id, email, passwordHash, role: 'tenant_admin',
       });
 
       const accessToken = generateAccessToken({
@@ -70,7 +83,9 @@ export const authService = {
         barbershopId: barbershop.id,
         email,
         plan,
-        role: 'admin',
+        role: 'tenant_admin',
+        subscriptionStatus: 'active',
+        subscriptionCurrentPeriodEnd: null,
       });
 
       const refreshToken = await generateRefreshToken(client, user.id);
@@ -80,7 +95,12 @@ export const authService = {
       logger.info({ barbershopId: barbershop.id, email }, 'Nova barbearia registrada');
 
       return {
-        user: { email, role: 'admin' },
+        user: {
+          email,
+          role: 'tenant_admin',
+          subscriptionStatus: 'active',
+          subscriptionCurrentPeriodEnd: null,
+        },
         barbershop: { id: barbershop.id, name: barbershopName, plan },
       };
     } catch (error) {
@@ -105,6 +125,8 @@ export const authService = {
         throw new UnauthorizedError('Email ou senha incorretos');
       }
 
+      const normalizedRole = normalizeRole(user.role);
+
       const isValid = await bcrypt.compare(password, user.password_hash);
       if (!isValid) {
         logger.warn({ email, userId: user.id }, 'Tentativa de login com senha incorreta');
@@ -118,7 +140,9 @@ export const authService = {
         barbershopId: user.barbershop_id,
         email: user.email,
         plan: user.plan,
-        role: user.role,
+        role: normalizedRole,
+        subscriptionStatus: user.subscription_status,
+        subscriptionCurrentPeriodEnd: user.subscription_current_period_end,
       });
 
       const refreshToken = await generateRefreshToken(client, user.id);
@@ -129,9 +153,11 @@ export const authService = {
       return {
         user: {
           email: user.email,
-          role: user.role,
+          role: normalizedRole,
           barbershopName: user.barbershop_name,
           plan: user.plan,
+          subscriptionStatus: user.subscription_status,
+          subscriptionCurrentPeriodEnd: user.subscription_current_period_end,
         },
       };
     } finally {
@@ -153,6 +179,8 @@ export const authService = {
 
     const client = await authRepository.getClient();
     try {
+      const normalizedRole = normalizeRole(row.role);
+
       await client.query('BEGIN');
       await authRepository.revokeRefreshTokenById(client, row.id);
       const newRefreshToken = await generateRefreshToken(client, row.user_id);
@@ -163,7 +191,9 @@ export const authService = {
         barbershopId: row.barbershop_id,
         email: row.email,
         plan: row.plan,
-        role: row.role,
+        role: normalizedRole,
+        subscriptionStatus: row.subscription_status,
+        subscriptionCurrentPeriodEnd: row.subscription_current_period_end,
       });
 
       setAuthCookies(res, accessToken, newRefreshToken);
@@ -171,8 +201,10 @@ export const authService = {
       return {
         user: {
           email: row.email,
-          role: row.role,
+          role: normalizedRole,
           plan: row.plan,
+          subscriptionStatus: row.subscription_status,
+          subscriptionCurrentPeriodEnd: row.subscription_current_period_end,
         },
       };
     } catch (err) {
@@ -199,12 +231,16 @@ export const authService = {
       throw new UnauthorizedError('Usuário não encontrado');
     }
 
+    const normalizedRole = normalizeRole(user.role);
+
     return {
       user: {
         email: user.email,
-        role: user.role,
+        role: normalizedRole,
         barbershopName: user.barbershop_name,
         plan: user.plan,
+        subscriptionStatus: user.subscription_status,
+        subscriptionCurrentPeriodEnd: user.subscription_current_period_end,
       },
     };
   },

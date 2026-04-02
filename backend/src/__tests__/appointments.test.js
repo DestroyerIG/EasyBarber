@@ -95,13 +95,27 @@ const request = supertest(app);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
 
-const authToken = jwt.sign(
-  { userId: 'user-uuid', barbershopId: 'bbshop-uuid', email: 'test@test.com', plan: 'basico', role: 'admin' },
-  JWT_SECRET,
-  { expiresIn: '15m' }
-);
+const createAuthHeader = ({
+  plan = 'basico',
+  subscriptionStatus = 'active',
+} = {}) => {
+  const authToken = jwt.sign(
+    {
+      userId: 'user-uuid',
+      barbershopId: 'bbshop-uuid',
+      email: 'test@test.com',
+      plan,
+      role: 'admin',
+      subscriptionStatus,
+    },
+    JWT_SECRET,
+    { expiresIn: '15m' }
+  );
 
-const authHeader = { Authorization: `Bearer ${authToken}` };
+  return { Authorization: `Bearer ${authToken}` };
+};
+
+const authHeader = createAuthHeader();
 
 const resetMocks = () => {
   jest.clearAllMocks();
@@ -129,6 +143,18 @@ describe('Appointments API — /api/v1/appointments', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(Array.isArray(res.body.data)).toBe(true);
+    });
+
+    it('deve bloquear acesso quando assinatura está incomplete', async () => {
+      const res = await request
+        .get('/api/v1/appointments')
+        .set(createAuthHeader({ subscriptionStatus: 'incomplete' }));
+
+      expect(res.status).toBe(402);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('FEATURE_BLOCKED');
+      expect(res.body.error.reason).toBe('subscription_status_restricted');
+      expect(mockAppointmentRepo.findAll).not.toHaveBeenCalled();
     });
   });
 
