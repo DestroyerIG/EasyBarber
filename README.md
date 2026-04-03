@@ -1,323 +1,305 @@
-# 💈 EasyBarber - Sistema Completo para Barbearias
+# EasyBarber SaaS 2.0
 
-Sistema SaaS completo para gestão de barbearias com agendamento automático via WhatsApp, controle financeiro e painel administrativo profissional.
+Plataforma SaaS para gestão de barbearias com agenda, clientes, financeiro, automações de WhatsApp, assinatura recorrente e painel administrativo de plataforma.
 
-## 🎨 Identidade Visual
+## Visão Geral
 
-- **Primária:** Laranja (#FF7A00)
-- **Secundária:** Preto (#000000)
-- **Fundo:** Cinza escuro (#0a0a0a)
-- **Design Responsivo:** Desktop, Laptop, Tablet e Mobile
+O projeto é dividido em dois serviços principais:
 
-## 🚀 Funcionalidades
+- Backend Node.js/Express em backend.
+- Frontend Next.js (App Router) em frontend.
 
-### 🔐 Autenticação e Segurança
-- Homepage SaaS pública com fluxo comercial (Início, Recursos, Planos, Contato)
-- Login em `/login` e cadastro em `/cadastro` com validação Zod
-- Tokens JWT (access + refresh) via httpOnly cookies
-- Política de senha forte (8+ caracteres, maiúscula, número)
-- Rate limiting por IP (300 req/15min geral, 20 req/15min login, 50 req/15min cadastro)
-- Headers de segurança (Helmet, CSP, HSTS)
+Também há suporte a execução via Docker Compose com PostgreSQL.
 
-### 📊 Dashboard Administrativo
-- Agendamentos do dia
-- Ganhos, gastos e lucro em tempo real
-- Total de clientes atendidos
-- Gráfico semanal de faturamento
+## Principais Funcionalidades
 
-### 🤖 Bot WhatsApp (whatsapp-web.js)
-- Conexão local via QR Code (sem API externa)
-- 9 opções de menu padrão + opções customizáveis (até 15)
-- 21 mensagens configuráveis pelo painel
-- Fluxo automático: serviço → barbeiro → data → horário → confirmação
-- Cancelamento e reagendamento pelo bot
-- Avaliação pós-atendimento
-- Lembretes automáticos 2h antes (cron a cada 10 min)
+- Autenticação com JWT (access + refresh token em cookies httpOnly).
+- Gestão de agendamentos, clientes, serviços e barbeiros.
+- Módulo financeiro com resumo diário/mensal e despesas.
+- Bot de WhatsApp via whatsapp-web.js com configuração de mensagens e menu dinâmico.
+- Assinaturas com Stripe (checkout, portal e webhook).
+- Painel administrativo de plataforma com bloqueio de contas/usuários e auditoria.
+- Controle de acesso por plano e status de assinatura.
 
-### 📅 Gestão de Agendamentos
-- Calendário interativo com navegação por dia
-- Status: Confirmado, Cancelado, Concluído
-- Detecção de conflitos de horário
-- Registro automático de ganho ao concluir
-
-### 💰 Módulo Financeiro
-- Registro automático de ganhos (ao concluir agendamento)
-- Cadastro de gastos com categorias
-- Relatórios mensais (plano Profissional+)
-- Exportação em PDF
-- Gráficos de crescimento
-
-### 👥 Gestão de Clientes
-- Cadastro completo (nome, telefone, email, endereço, notas)
-- Histórico de atendimentos
-- Total gasto e última visita
-- Busca rápida
-
-### 💈 Gestão de Serviços e Barbeiros
-- Serviços com nome, preço e duração
-- Barbeiros com foto
-- Agenda individual por barbeiro
-- Limites por plano de assinatura
-
-### 💳 Planos de Assinatura
-- **Básico** (R$ 49/mês)
-- **Profissional** (R$ 99/mês)
-- **Premium** (R$ 199/mês)
-- Checkout de assinatura com Stripe
-- Webhook Stripe para sincronização automática de status
-- Portal Stripe para upgrade, downgrade e cancelamento
-
-## 🛠️ Stack Tecnológica
+## Stack
 
 ### Backend
-| Tecnologia | Uso |
-|---|---|
-| Node.js 20 | Runtime |
-| Express 4 | Framework HTTP |
-| PostgreSQL 16 | Banco de dados |
-| JWT + Refresh Tokens | Autenticação |
-| Bcrypt | Hash de senhas |
-| Zod 4 | Validação de dados |
-| Pino | Logging estruturado |
-| Helmet | Headers de segurança |
-| express-rate-limit | Rate limiting |
-| whatsapp-web.js | Bot WhatsApp (QR Code) |
-| node-cron | Lembretes automáticos |
-| Docker | Containerização |
+
+- Node.js 20+
+- Express 4
+- PostgreSQL (driver pg)
+- Zod (validação)
+- jsonwebtoken + bcryptjs
+- Pino (logs)
+- stripe
+- whatsapp-web.js
 
 ### Frontend
-| Tecnologia | Uso |
-|---|---|
-| Next.js 15 | Framework React (App Router) |
-| React 18 | UI Library |
-| TypeScript | Type Safety |
-| Tailwind CSS 3 | Estilização |
-| Recharts | Gráficos |
-| Lucide React | Ícones |
-| jsPDF | Exportação PDF |
-| date-fns | Manipulação de datas |
-| Axios | Cliente HTTP |
 
-### Arquitetura Backend
+- Next.js 15
+- React 18
+- TypeScript
+- Tailwind CSS
+- Axios
+- Recharts
+
+## Arquitetura
+
+No backend, o fluxo principal segue:
+
+Controller -> Service -> Repository -> PostgreSQL
+
+Componentes de apoio:
+
+- Middleware de auth e RBAC.
+- Middleware de feature gate por plano/status de assinatura.
+- Error handler global com payload padronizado.
+
+No frontend, o App Router organiza páginas públicas, dashboard tenant e área admin, com contexto de autenticação e cliente Axios com refresh automático.
+
+## Estrutura de Pastas Relevante
+
+```text
+backend/
+  src/
+    config/        # database.sql e migration_v2..v6.sql
+    controllers/
+    middleware/
+    repositories/
+    routes/
+    services/
+    validators/
+frontend/
+  src/
+    app/           # Rotas Next.js
+    components/
+    contexts/
+    lib/
 ```
-Controller → Service → Repository → Database (PostgreSQL)
+
+Detalhes: PROJECT_STRUCTURE.md
+
+## Pré-requisitos
+
+- Node.js 20+ (recomendado).
+- npm 10+.
+- PostgreSQL 14+ (recomendado 16).
+- Git.
+
+Opcional:
+
+- Docker + Docker Compose para stack containerizada.
+
+## Variáveis de Ambiente
+
+### Backend (backend/.env)
+
+Base no arquivo backend/.env.example:
+
+```env
+PORT=5000
+NODE_ENV=development
+LOG_LEVEL=info
+DATABASE_URL=postgresql://postgres:senha@localhost:5432/barberpro
+JWT_SECRET=troque_esta_chave
+FRONTEND_URL=http://localhost:3000
+
+# Stripe (obrigatório somente para billing em produção)
+STRIPE_SECRET_KEY=sk_test_xxx
+STRIPE_WEBHOOK_SECRET=whsec_xxx
+STRIPE_PRICE_ID_BASICO=price_xxx
+STRIPE_PRICE_ID_PROFISSIONAL=price_xxx
+STRIPE_PRICE_ID_PREMIUM=price_xxx
+
+# WhatsApp (opcional)
+WHATSAPP_ENABLED=false
+WHATSAPP_SESSION_TIMEOUT_MS=1800000
 ```
-- **Controllers**: Lógica de requisição/resposta
-- **Services**: Regras de negócio
-- **Repositories**: Acesso ao banco de dados
-- **Middleware**: Auth (JWT), Validação (Zod), Error Handler
-- **Erro personalizado**: AppError, ValidationError, NotFoundError, etc.
 
-## 📦 Instalação Rápida
+### Frontend (frontend/.env.local)
 
-> Para guia completo, veja `INSTALL.md` e `QUICK_START.md`
+Base no arquivo frontend/.env.example:
 
-### Pré-requisitos
-- Node.js 20+ (ou 18+)
-- PostgreSQL 14+
-- Git
-
-### 1. Clone e instale
-```powershell
-git clone <seu-repositorio>
-cd easybarber-saas
+```env
+NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1
+NEXT_PUBLIC_WHATSAPP_CONTACT_URL=https://wa.me/5500000000000?text=Ola
 ```
 
-### 2. Execute o script de configuração automática
-```powershell
-.\setup.ps1
+## Instalação e Execução (Desenvolvimento)
+
+### 1. Clonar e instalar dependências
+
+```bash
+git clone <url-do-repositorio>
+cd Barberpro-saas-2.0
+npm run install:all
 ```
-O script cria o banco, tabelas e arquivos `.env` automaticamente.
 
-### 3. Instale as dependências e inicie
+Ou instalar separado:
 
-**Terminal 1 — Backend:**
-```powershell
+```bash
+cd backend && npm install
+cd ../frontend && npm install
+```
+
+### 2. Configurar .env
+
+- Copiar backend/.env.example para backend/.env e ajustar valores.
+- Copiar frontend/.env.example para frontend/.env.local e ajustar valores.
+
+### 3. Preparar banco e migrations SQL
+
+A sequência recomendada para banco novo é:
+
+1. backend/src/config/database.sql
+2. backend/src/config/migration_v3.sql
+3. backend/src/config/migration_v4.sql
+4. backend/src/config/migration_v5.sql
+5. backend/src/config/migration_v6.sql
+
+Observação: migration_v2.sql é voltada a upgrade legado e normalmente não é necessária em ambiente novo.
+
+Passo a passo detalhado e comandos por sistema operacional: POSTGRESQL_SETUP.md
+
+### 4. Iniciar serviços
+
+Terminal 1 (backend):
+
+```bash
 cd backend
-npm install
 npm run dev
 ```
 
-**Terminal 2 — Frontend:**
-```powershell
+Terminal 2 (frontend):
+
+```bash
 cd frontend
-npm install
 npm run dev
 ```
 
-### 4. Acesse
-- **Frontend:** http://localhost:3000
-- **Backend API:** http://localhost:5000
-- **Health Check:** http://localhost:5000/health
+## Portas Utilizadas
 
-### Com Docker
-```powershell
-docker compose up -d
-```
-Sobe PostgreSQL, Backend e Frontend automaticamente.
+- Frontend: 3000
+- Backend: 5000
+- PostgreSQL: 5432
 
-## 🗄️ Banco de Dados
+## Fluxo Básico de Autenticação
 
-### 14 Tabelas
-| Tabela | Descrição |
-|---|---|
-| `barbershops` | Dados das barbearias |
-| `users` | Usuários e autenticação |
-| `refresh_tokens` | Tokens de refresh JWT |
-| `barbers` | Barbeiros |
-| `services` | Serviços oferecidos |
-| `clients` | Clientes |
-| `appointments` | Agendamentos |
-| `earnings` | Ganhos (automático) |
-| `expenses` | Gastos |
-| `whatsapp_sessions` | Sessões do bot |
-| `whatsapp_bot_config` | Configurações de mensagens do bot |
-| `whatsapp_ratings` | Avaliações dos clientes |
-| `subscription_events` | Auditoria de eventos Stripe |
-| `audit_logs` | Auditoria de ações administrativas |
+1. Usuário cadastra tenant em /api/v1/auth/register.
+2. Backend define cookies access_token e refresh_token.
+3. Frontend consulta /api/v1/auth/me para montar sessão.
+4. Em expiração de access token, frontend tenta /api/v1/auth/refresh.
+5. Rotas protegidas exigem auth, role e feature permission.
 
-### Migrations
-- `database.sql` — Schema inicial (14 tabelas)
-- `migration_v2.sql` — Constraints, índices, refresh_tokens, trigger updated_at
-- `migration_v3.sql` — 21 mensagens configuráveis, tabela menu_options, 9 opções padrão
-- `migration_v4.sql` — Índices de performance (conflitos, lookup, dashboard)
-- `migration_v5.sql` — Billing Stripe (customer, subscription, status, eventos)
-- `migration_v6.sql` — RBAC admin (`platform_admin`/`tenant_admin`/`employee`), bloqueio de usuário/tenant e tabela `audit_logs`
+## Módulos Principais
 
-## 🔌 API Endpoints
+- Tenant app:
+  - Dashboard
+  - Agendamentos
+  - Clientes
+  - Financeiro
+  - Serviços/Barbeiros
+  - WhatsApp
+  - Assinatura
+- Platform admin:
+  - Métricas globais
+  - Gestão de contas (tenants)
+  - Gestão de assinaturas
+  - Auditoria
 
-> Documentação completa em `API_DOCS.md`
+## Banco de Dados e Migrations SQL
 
-### Autenticação (`/api/v1/auth`)
-| Método | Rota | Descrição | Auth |
-|---|---|---|---|
-| POST | `/register` | Cadastrar barbearia | Não |
-| POST | `/login` | Login | Não |
-| POST | `/refresh` | Renovar access token | Não |
-| POST | `/logout` | Logout | Não |
-| GET | `/me` | Dados do usuário atual | Sim |
+O projeto usa PostgreSQL.
 
-### Dashboard (`/api/v1/dashboard`)
-| Método | Rota | Descrição | Auth |
-|---|---|---|---|
-| GET | `/` | Métricas do dashboard | Sim |
+Arquivos SQL em backend/src/config:
 
-### Agendamentos (`/api/v1/appointments`)
-| Método | Rota | Descrição | Auth |
-|---|---|---|---|
-| GET | `/` | Listar agendamentos | Sim |
-| GET | `/available-slots` | Horários disponíveis | Sim |
-| POST | `/` | Criar agendamento | Sim |
-| PUT | `/:id` | Atualizar agendamento | Sim |
-| PUT | `/:id/status` | Atualizar status | Sim |
-| DELETE | `/:id` | Excluir agendamento | Sim |
+- database.sql (schema base)
+- migration_v2.sql (upgrade legado)
+- migration_v3.sql (bot WhatsApp: colunas novas + tabela whatsapp_menu_options)
+- migration_v4.sql (índices de performance)
+- migration_v5.sql (campos e eventos Stripe)
+- migration_v6.sql (RBAC admin/tenant/employee e audit logs)
 
-### Clientes (`/api/v1/clients`)
-| Método | Rota | Descrição | Auth |
-|---|---|---|---|
-| GET | `/` | Listar clientes | Sim |
-| POST | `/` | Cadastrar cliente | Sim |
-| PUT | `/:id` | Atualizar cliente | Sim |
-| GET | `/:id/history` | Histórico do cliente | Sim |
+A documentação completa de migrations manuais, validação, rollback e troubleshooting está em POSTGRESQL_SETUP.md.
 
-### Financeiro (`/api/v1/finance`)
-| Método | Rota | Descrição | Auth | Plano |
-|---|---|---|---|---|
-| GET | `/summary` | Resumo financeiro | Sim | Todos |
-| GET | `/monthly` | Relatório mensal | Sim | Profissional+ |
-| POST | `/expenses` | Adicionar gasto | Sim | Todos |
-| PUT | `/expenses/:id` | Atualizar gasto | Sim | Todos |
-| DELETE | `/expenses/:id` | Excluir gasto | Sim | Todos |
-| GET | `/expenses` | Listar gastos | Sim | Todos |
+## Problemas Comuns
 
-### Serviços e Barbeiros (`/api/v1/barbershop`)
-| Método | Rota | Descrição | Auth |
-|---|---|---|---|
-| GET | `/services` | Listar serviços | Sim |
-| POST | `/services` | Criar serviço | Sim |
-| PUT | `/services/:id` | Atualizar serviço | Sim |
-| DELETE | `/services/:id` | Excluir serviço | Sim |
-| GET | `/barbers` | Listar barbeiros | Sim |
-| POST | `/barbers` | Criar barbeiro | Sim |
-| PUT | `/barbers/:id` | Atualizar barbeiro | Sim |
-| DELETE | `/barbers/:id` | Excluir barbeiro | Sim |
+- Erro de conexão PostgreSQL: revisar DATABASE_URL e serviço do banco.
+- Erro function gen_random_uuid() does not exist: habilitar extensão pgcrypto.
+- Erro de migration v3: conferir execução no banco correto e com UTF-8.
+- Erro de CORS: garantir FRONTEND_URL no backend.
+- Erro de porta ocupada: ajustar processo ou variável PORT.
 
-### WhatsApp (`/api/v1/whatsapp`)
-| Método | Rota | Descrição | Auth |
-|---|---|---|---|
-| POST | `/webhook` | Receber mensagens | Não |
-| GET | `/status` | Status da conexão | Sim |
-| GET | `/qr` | QR Code para conectar | Sim |
-| POST | `/logout` | Desconectar WhatsApp | Sim |
-| POST | `/restart` | Reiniciar conexão | Sim |
-| GET | `/config` | Configurações do bot | Sim |
-| PUT | `/config` | Atualizar mensagens | Sim |
-| POST | `/config/reset` | Resetar mensagens | Sim |
-| GET | `/config/menu` | Opções do menu | Sim |
-| POST | `/config/menu` | Criar opção de menu | Sim |
-| PUT | `/config/menu/:id` | Atualizar opção | Sim |
-| DELETE | `/config/menu/:id` | Excluir opção | Sim |
-| PUT | `/config/menu-reorder` | Reordenar menu | Sim |
-| POST | `/config/menu/reset` | Resetar menu | Sim |
+Guia completo: TROUBLESHOOTING.md
 
-### Assinaturas (`/api/v1/subscriptions`)
-| Método | Rota | Descrição | Auth |
-|---|---|---|---|
-| POST | `/checkout-session` | Criar sessão Stripe Checkout | Sim |
-| GET | `/status` | Consultar status da assinatura | Sim |
-| POST | `/portal` | Abrir portal Stripe para gestão | Sim |
-| POST | `/webhook` | Webhook Stripe | Não |
+## Deploy
 
-**Total: 43+ endpoints**
+Guia completo de produção: DEPLOY.md
 
-## 🔒 Segurança Implementada
+Inclui:
 
-- ✅ Senhas com bcrypt (CHAR(60))
-- ✅ JWT com access + refresh tokens
-- ✅ Cookies httpOnly (não acessíveis via JavaScript)
-- ✅ Validação Zod em todas as entradas
-- ✅ Proteção contra SQL Injection (queries parametrizadas)
-- ✅ Helmet (headers de segurança)
-- ✅ CSP (Content Security Policy) no frontend
-- ✅ Rate limiting (geral + auth)
-- ✅ CORS configurado
-- ✅ HSTS habilitado
-- ✅ Graceful shutdown
-- ✅ Log estruturado com Pino
+- Requisitos mínimos.
+- Variáveis obrigatórias.
+- Build e start.
+- Ordem de migrations antes de produção.
+- Check pós-deploy e rollback.
 
-## 📈 Deploy
+## Comandos Úteis
 
-> Guia completo em `DEPLOY.md`
+Na raiz:
 
-### Com Docker (Recomendado)
-```powershell
-# Configurar variáveis
-cp .env.example .env
-# Editar .env com suas configurações
-
-docker compose up -d
+```bash
+npm run install:all
+npm run dev:backend
+npm run dev:frontend
+npm run build:backend
+npm run build:frontend
+npm run start:backend
+npm run start:frontend
 ```
 
-### Manual
-- **Backend:** Railway, Render, VPS com PM2
-- **Frontend:** Vercel (otimizado para Next.js)
-- **Banco:** Railway, Supabase, Neon.tech
+Backend:
 
-## 📚 Documentação
+```bash
+cd backend
+npm run dev
+npm start
+npm test
+npm run test:watch
+```
 
-| Arquivo | Descrição |
-|---|---|
-| `README.md` | Este arquivo — Visão geral |
-| `QUICK_START.md` | Guia passo-a-passo para rodar |
-| `INSTALL.md` | Instalação simplificada |
-| `API_DOCS.md` | Documentação completa da API |
-| `PROJECT_STRUCTURE.md` | Estrutura do código |
-| `DEPLOY.md` | Deploy em produção |
-| `POSTGRESQL_SETUP.md` | Instalação do PostgreSQL |
-| `PLANOS.md` | Detalhes dos planos |
-| `WHATSAPP_BOT.md` | Configuração do bot |
-| `TROUBLESHOOTING.md` | Problemas comuns |
+Frontend:
 
-## 📝 Licença
+```bash
+cd frontend
+npm run dev
+npm run build
+npm start
+npm run lint
+```
 
-Este projeto é proprietário. Todos os direitos reservados.
+## Índice de Documentação
+
+- START_HERE.md
+- QUICK_START.md
+- INSTALL.md
+- POSTGRESQL_SETUP.md
+- API_DOCS.md
+- PROJECT_STRUCTURE.md
+- WHATSAPP_BOT.md
+- PLANOS.md
+- DEPLOY.md
+- TROUBLESHOOTING.md
+
+## Status de Configuração do Repositório
+
+As inconsistências operacionais críticas foram corrigidas no estado atual do projeto:
+
+- backend/.env.example usa DB_CONNECT_TIMEOUT.
+- docker-compose.yml usa FRONTEND_URL no backend e NEXT_PUBLIC_API_URL com /api/v1 no frontend.
+- setup.ps1 aplica database.sql + migration_v3..v6.
+- fix-env.ps1 remove variáveis legadas WHATSAPP_API_* e mantém defaults compatíveis com o backend atual.
+
+Observação:
+
+- No Docker, scripts de inicialização em /docker-entrypoint-initdb.d rodam apenas no primeiro bootstrap de um volume novo. Se o volume já existia, aplique migrations manualmente ou recrie o volume.

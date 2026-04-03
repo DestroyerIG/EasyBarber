@@ -1,210 +1,305 @@
-# 🐘 GUIA DE INSTALAÇÃO DO POSTGRESQL
+# PostgreSQL e Migrations SQL
 
-## 📥 PASSO 1: INSTALAR
+Guia técnico para preparar, validar e manter o banco PostgreSQL do projeto, com foco em execução manual de migrations SQL.
 
-### Opção 1: Instalador Oficial (Recomendado)
+## 1. Banco Utilizado
 
-1. **Baixar:** https://www.postgresql.org/download/windows/
-2. Clique em "Download the installer"
-3. Escolha **PostgreSQL 16.x** para Windows x86-64
-4. Execute o instalador
+- SGBD: PostgreSQL
+- Driver: pg (Node.js)
+- Conexão no backend via DATABASE_URL
+- Scripts SQL em backend/src/config
 
-**Durante a instalação:**
-- ✅ Marcar: PostgreSQL Server, pgAdmin 4, Command Line Tools
-- ⚠️ **ANOTE A SENHA** do superusuário `postgres`
-- Porta: **5432** (manter padrão)
-- Locale: Default locale
+Arquivos SQL atuais:
 
-### Opção 2: Winget
+- backend/src/config/database.sql
+- backend/src/config/migration_v2.sql
+- backend/src/config/migration_v3.sql
+- backend/src/config/migration_v4.sql
+- backend/src/config/migration_v5.sql
+- backend/src/config/migration_v6.sql
+
+## 2. Pré-requisitos
+
+- PostgreSQL instalado e serviço ativo.
+- Cliente psql disponível no PATH.
+- Banco de destino conhecido.
+- Backup antes de qualquer migração em ambiente com dados.
+
+## 3. Conexão e Encoding
+
+Este projeto usa strings com acentos e emojis em mensagens padrão de WhatsApp (principalmente em migration_v3.sql). Use UTF-8 no banco e no cliente.
+
+Verificações:
+
+```sql
+SHOW server_encoding;
+SHOW client_encoding;
+```
+
+Resultado esperado:
+
+- server_encoding = UTF8
+- client_encoding = UTF8
+
+Se necessário, no psql:
+
+```sql
+\encoding UTF8
+```
+
+No PowerShell (para melhor exibição):
 
 ```powershell
-winget install PostgreSQL.PostgreSQL
+chcp 65001
+$env:PGCLIENTENCODING = "UTF8"
 ```
 
----
+## 4. Criação de Banco (Do Zero)
 
-## ✅ PASSO 2: VERIFICAR INSTALAÇÃO
+### Linux/macOS
 
-### Adicionar ao PATH (se necessário)
+```bash
+createdb -h localhost -p 5432 -U postgres --encoding=UTF8 barberpro
+psql -h localhost -p 5432 -U postgres -d barberpro -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+```
+
+### Windows PowerShell
 
 ```powershell
-$env:Path += ";C:\Program Files\PostgreSQL\16\bin"
+createdb -h localhost -p 5432 -U postgres --encoding=UTF8 barberpro
+psql -h localhost -p 5432 -U postgres -d barberpro -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
 ```
 
-Para tornar permanente (PowerShell como Admin):
-```powershell
-[Environment]::SetEnvironmentVariable(
-    "Path",
-    "$env:Path;C:\Program Files\PostgreSQL\16\bin",
-    [EnvironmentVariableTarget]::Machine
-)
+Observação:
+
+- A extensão pgcrypto é necessária para gen_random_uuid().
+
+## 5. Ordem de Migrations
+
+### Cenário A: Banco novo (recomendado para dev local)
+
+Executar nesta ordem:
+
+1. database.sql
+2. migration_v3.sql
+3. migration_v4.sql
+4. migration_v5.sql
+5. migration_v6.sql
+
+Justificativa:
+
+- database.sql cria o schema base.
+- migration_v3.sql adiciona colunas e tabela necessárias ao módulo WhatsApp atual.
+- migration_v4..v6 consolidam índices e recursos de billing/admin.
+
+### Cenário B: Upgrade legado
+
+Se o banco vier de versão antiga (pré-v3), executar:
+
+1. migration_v2.sql
+2. migration_v3.sql
+3. migration_v4.sql
+4. migration_v5.sql
+5. migration_v6.sql
+
+Importante:
+
+- migration_v2.sql é de compatibilidade e pode não ser necessária em banco recém-criado.
+- Sempre validar em staging antes de aplicar em produção.
+
+## 6. Comandos Exatos de Execução Manual
+
+### Linux/macOS (a partir da raiz do projeto)
+
+```bash
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/database.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v3.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
 ```
 
-### Testar
-
-```powershell
-psql --version
-# psql (PostgreSQL) 16.x
-```
-
----
-
-## 🔧 PASSO 3: CRIAR BANCO DE DADOS
-
-### Via linha de comando
-
-```powershell
-psql -U postgres -c "CREATE DATABASE barberpro;"
-```
-
-### Via pgAdmin
-
-1. Abra o pgAdmin 4 (menu iniciar)
-2. Conecte ao servidor (localhost, porta 5432, senha do postgres)
-3. Botão direito em "Databases" → "Create" → "Database"
-4. Nome: `barberpro` → Salvar
-
----
-
-## 📊 PASSO 4: CRIAR TABELAS
-
-### Via linha de comando (Recomendado)
-
-```powershell
-# Na pasta raiz do projeto
-psql -U postgres -d barberpro -f backend\src\config\database.sql
-```
-
-### Via pgAdmin
-
-1. Expanda "Databases" → "barberpro"
-2. Botão direito em "barberpro" → "Query Tool"
-3. Abra e copie o conteúdo de `backend/src/config/database.sql`
-4. Cole e execute (F5)
-
----
-
-## ✅ PASSO 5: VERIFICAR TABELAS
+### Windows PowerShell (a partir da raiz do projeto)
 
 ```powershell
-psql -U postgres -d barberpro -c "\dt"
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\database.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v3.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v4.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v5.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v6.sql
 ```
 
-Deve exibir 12 tabelas:
+### Com URL de conexão
 
-```
- Schema |        Name            | Type  |  Owner
---------+------------------------+-------+----------
- public | appointments           | table | postgres
- public | barbershops            | table | postgres
- public | barbers                | table | postgres
- public | clients                | table | postgres
- public | earnings               | table | postgres
- public | expenses               | table | postgres
- public | refresh_tokens         | table | postgres
- public | services               | table | postgres
- public | users                  | table | postgres
- public | whatsapp_bot_config    | table | postgres
- public | whatsapp_ratings       | table | postgres
- public | whatsapp_sessions      | table | postgres
+```bash
+psql "postgresql://postgres:senha@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v3.sql
 ```
 
----
+## 7. Execução com Docker Compose
 
-## 🔧 PASSO 6: APLICAR MIGRATIONS (se necessário)
+No docker-compose.yml atual, o container db aplica automaticamente database.sql + migration_v3..v6 no primeiro bootstrap do volume.
 
-Se você já tinha o banco de uma versão anterior:
+Se o volume já existia antes dessa configuração, execute as migrations manualmente.
+
+### Usando psql do host
+
+```bash
+psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v3.sql
+psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
+psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
+psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
+```
+
+### Sem psql local (pipe para container db)
+
+Linux/macOS:
+
+```bash
+cat backend/src/config/migration_v3.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
+cat backend/src/config/migration_v4.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
+cat backend/src/config/migration_v5.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
+cat backend/src/config/migration_v6.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
+```
+
+Windows PowerShell:
 
 ```powershell
-psql -U postgres -d barberpro -f backend\src\config\migration_v2.sql
-psql -U postgres -d barberpro -f backend\src\config\migration_v3.sql
-psql -U postgres -d barberpro -f backend\src\config\migration_v4.sql
-psql -U postgres -d barberpro -f backend\src\config\migration_v5.sql
-psql -U postgres -d barberpro -f backend\src\config\migration_v6.sql
+Get-Content .\backend\src\config\migration_v3.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
+Get-Content .\backend\src\config\migration_v4.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
+Get-Content .\backend\src\config\migration_v5.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
+Get-Content .\backend\src\config\migration_v6.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
 ```
 
----
+## 8. Como Validar se Migrou com Sucesso
 
-## 🔐 PASSO 7: CONFIGURAR .ENV
+### 8.1 Verificar tabelas essenciais
 
-Crie o arquivo `backend\.env`:
-
-```env
-PORT=5000
-DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5432/barberpro
-JWT_SECRET=gere_uma_chave_aleatoria_aqui
-NODE_ENV=development
+```sql
+\dt
 ```
 
-> Substitua `SUA_SENHA` pela senha definida na instalação do PostgreSQL.
+Tabela crítica adicionada por migration_v3:
 
-Ou use o script automático:
+- whatsapp_menu_options
+
+### 8.2 Verificar colunas críticas
+
+```sql
+SELECT column_name
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = 'whatsapp_bot_config'
+  AND column_name IN ('welcome_header', 'end_session_message', 'promotions_message');
+```
+
+### 8.3 Verificar role constraint final (migration_v6)
+
+```sql
+SELECT conname
+FROM pg_constraint
+WHERE conname = 'chk_users_role';
+```
+
+### 8.4 Verificar total de tabelas
+
+```sql
+SELECT COUNT(*)
+FROM information_schema.tables
+WHERE table_schema = 'public'
+  AND table_type = 'BASE TABLE';
+```
+
+No estado atual do projeto, o schema final inclui 15 tabelas de domínio.
+
+## 9. Recriar Banco do Zero
+
+### Linux/macOS
+
+```bash
+dropdb -h localhost -p 5432 -U postgres --if-exists barberpro
+createdb -h localhost -p 5432 -U postgres --encoding=UTF8 barberpro
+psql -h localhost -p 5432 -U postgres -d barberpro -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/database.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v3.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
+```
+
+### Windows PowerShell
+
 ```powershell
-.\setup.ps1
+dropdb -h localhost -p 5432 -U postgres --if-exists barberpro
+createdb -h localhost -p 5432 -U postgres --encoding=UTF8 barberpro
+psql -h localhost -p 5432 -U postgres -d barberpro -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\database.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v3.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v4.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v5.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v6.sql
 ```
 
----
+## 10. Backup Antes de Migrar (Recomendado)
 
-## 🧪 PASSO 8: TESTAR CONEXÃO
+```bash
+pg_dump -h localhost -p 5432 -U postgres -d barberpro -Fc -f backup_barberpro_$(date +%F_%H%M).dump
+```
+
+Windows PowerShell:
 
 ```powershell
-cd backend
-npm install
-npm run dev
+$stamp = Get-Date -Format "yyyy-MM-dd_HHmm"
+pg_dump -h localhost -p 5432 -U postgres -d barberpro -Fc -f "backup_barberpro_$stamp.dump"
 ```
 
-Deve exibir:
-```
-Servidor rodando na porta 5000
-Conexão com banco de dados verificada
-```
+## 11. Erros Comuns de Migration
 
-Ou teste via Health Check:
-```powershell
-Invoke-RestMethod -Uri "http://localhost:5000/health"
-# { status: "ok", db: "connected" }
-```
+### Erro de path (arquivo SQL não encontrado)
 
----
+- Execute os comandos a partir da raiz do repositório.
+- Confirme existência com:
 
-## 🛠️ PROBLEMAS COMUNS
-
-### ❌ `psql não é reconhecido`
-```powershell
-$env:Path += ";C:\Program Files\PostgreSQL\16\bin"
+```bash
+ls backend/src/config/*.sql
 ```
 
-### ❌ `password authentication failed`
-Senha incorreta. Verifique em `backend\.env` ou execute `.\fix-env.ps1`.
+### Erro de permissão
 
-### ❌ `ECONNREFUSED :5432`
-PostgreSQL não está rodando:
-```powershell
-Start-Service "postgresql-x64-16"
+- Verifique acesso de leitura ao arquivo SQL.
+- Em Linux/macOS:
+
+```bash
+chmod 644 backend/src/config/*.sql
 ```
 
-### ❌ Porta 5432 já em uso
-Outra instância do PostgreSQL está rodando. Verifique:
-```powershell
-netstat -ano | findstr ":5432"
+### Erro de autenticação
+
+- Revisar usuário/senha no psql e no DATABASE_URL.
+- Testar conexão simples:
+
+```bash
+psql -h localhost -p 5432 -U postgres -d barberpro -c "SELECT 1;"
 ```
 
-### ❌ Esqueceu a senha do postgres
-1. Edite `C:\Program Files\PostgreSQL\16\data\pg_hba.conf`
-2. Mude `scram-sha-256` para `trust` na linha do localhost
-3. Reinicie o PostgreSQL
-4. Conecte: `psql -U postgres`
-5. Mude a senha: `ALTER USER postgres PASSWORD 'nova_senha';`
-6. Reverta `pg_hba.conf` para `scram-sha-256`
-7. Reinicie o PostgreSQL
+### Erro de encoding
 
----
+- Garantir UTF-8 no banco e no cliente.
+- Repetir execução com PGCLIENTENCODING=UTF8.
 
-## 💡 DICAS
+### Erro gen_random_uuid() does not exist
 
-- Use o **pgAdmin** para visualizar dados (interface gráfica)
-- Use `psql -U postgres -d barberpro` para acesso rápido via terminal
-- Configure backup automático em produção:
-  ```powershell
-  pg_dump -U postgres -d barberpro > backup_$(Get-Date -Format 'yyyy-MM-dd').sql
-  ```
+- Rodar:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+```
+
+## 12. Referências Relacionadas
+
+- README.md
+- INSTALL.md
+- QUICK_START.md
+- TROUBLESHOOTING.md
+- DEPLOY.md

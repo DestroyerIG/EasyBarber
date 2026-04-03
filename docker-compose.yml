@@ -5,6 +5,10 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./backend/src/config/database.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./backend/src/config/migration_v3.sql:/docker-entrypoint-initdb.d/02-migration-v3.sql
+      - ./backend/src/config/migration_v4.sql:/docker-entrypoint-initdb.d/03-migration-v4.sql
+      - ./backend/src/config/migration_v5.sql:/docker-entrypoint-initdb.d/04-migration-v5.sql
+      - ./backend/src/config/migration_v6.sql:/docker-entrypoint-initdb.d/05-migration-v6.sql
     environment:
       POSTGRES_DB: barberpro
       POSTGRES_USER: barberpro
@@ -28,7 +32,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       NODE_ENV: production
       PORT: 5000
-      CORS_ORIGIN: http://localhost:3000
+      FRONTEND_URL: http://localhost:3000
       LOG_LEVEL: info
     ports:
       - "5000:5000"
@@ -39,7 +43,7 @@ services:
     depends_on:
       - backend
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:5000/api
+      NEXT_PUBLIC_API_URL: http://localhost:5000/api/v1
     ports:
       - "3000:3000"
 

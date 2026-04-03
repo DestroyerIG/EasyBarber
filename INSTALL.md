@@ -1,186 +1,198 @@
-# ⚡ INSTALAÇÃO - EasyBarber
+# Instalação Completa
 
-## 🎯 Resumo
+Guia completo para instalação local do projeto em Linux, macOS ou Windows.
 
-1. Instalar PostgreSQL
-2. Configurar banco de dados e variáveis de ambiente
-3. Instalar dependências e iniciar
+## 1. Pré-requisitos
 
----
+- Node.js 20+
+- npm 10+
+- PostgreSQL 14+ (recomendado 16)
+- Git
 
-## 1️⃣ INSTALAR POSTGRESQL
+Verificações:
 
-**Baixar:** https://www.postgresql.org/download/windows/
-
-Durante a instalação:
-- ✅ Marcar todos os componentes (Server, pgAdmin, Command Line Tools)
-- ⚠️ **ANOTAR A SENHA** do superusuário `postgres`
-- Porta: **5432** (padrão)
-
-Após instalar, verifique se o `psql` está no PATH:
-```powershell
+```bash
+node -v
+npm -v
 psql --version
+git --version
 ```
 
-Se não for reconhecido:
-```powershell
-$env:Path += ";C:\Program Files\PostgreSQL\16\bin"
+## 2. Clonar o Repositório
+
+```bash
+git clone <url-do-repositorio>
+cd Barberpro-saas-2.0
 ```
 
-> Guia detalhado: `POSTGRESQL_SETUP.md`
+## 3. Instalar Dependências
 
----
+Opção única:
 
-## 2️⃣ CONFIGURAR O PROJETO
-
-### Opção A: Script Automático (Recomendado)
-
-```powershell
-# Habilitar execução de scripts (uma vez)
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-
-# Executar setup
-.\setup.ps1
+```bash
+npm run install:all
 ```
 
-O script cria banco, tabelas e arquivos `.env` automaticamente.
+Ou manual:
 
-### Opção B: Manual
-
-**Criar banco de dados:**
-```powershell
-psql -U postgres -c "CREATE DATABASE barberpro;"
-psql -U postgres -d barberpro -f backend\src\config\database.sql
+```bash
+cd backend && npm install
+cd ../frontend && npm install
 ```
 
-**Criar `backend\.env`:**
+## 4. Configurar Arquivos de Ambiente
+
+### Backend
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Editar backend/.env com no mínimo:
+
 ```env
 PORT=5000
-DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5432/barberpro
-JWT_SECRET=gere_uma_chave_aleatoria_aqui
 NODE_ENV=development
+LOG_LEVEL=info
+DATABASE_URL=postgresql://postgres:senha@localhost:5432/barberpro
+JWT_SECRET=troque_esta_chave
+FRONTEND_URL=http://localhost:3000
 ```
 
-**Criar `frontend\.env.local`:**
+### Frontend
+
+```bash
+cp frontend/.env.example frontend/.env.local
+```
+
+Configuração mínima:
+
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:5000/api
+NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1
+NEXT_PUBLIC_WHATSAPP_CONTACT_URL=https://wa.me/5500000000000?text=Ola
 ```
 
-### Opção C: Docker
+## 5. Preparar Banco de Dados
+
+### 5.1 Criar banco UTF-8
+
+Linux/macOS:
+
+```bash
+createdb -h localhost -p 5432 -U postgres --encoding=UTF8 barberpro
+```
+
+Windows PowerShell:
 
 ```powershell
-$env:JWT_SECRET = "sua_chave_secreta"
+createdb -h localhost -p 5432 -U postgres --encoding=UTF8 barberpro
+```
+
+### 5.2 Garantir extensão para UUID
+
+```bash
+psql -h localhost -p 5432 -U postgres -d barberpro -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+```
+
+### 5.3 Aplicar schema e migrations
+
+Sequência recomendada para ambiente novo:
+
+1. backend/src/config/database.sql
+2. backend/src/config/migration_v3.sql
+3. backend/src/config/migration_v4.sql
+4. backend/src/config/migration_v5.sql
+5. backend/src/config/migration_v6.sql
+
+Linux/macOS:
+
+```bash
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/database.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v3.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
+```
+
+Windows PowerShell:
+
+```powershell
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\database.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v3.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v4.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v5.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v6.sql
+```
+
+Observação:
+
+- migration_v2.sql é migração de compatibilidade com schema legado e não costuma ser necessária para banco novo.
+
+## 6. Subir Ambiente de Desenvolvimento
+
+Terminal 1:
+
+```bash
+cd backend
+npm run dev
+```
+
+Terminal 2:
+
+```bash
+cd frontend
+npm run dev
+```
+
+## 7. Validar Setup
+
+- Frontend: http://localhost:3000
+- Backend: http://localhost:5000
+- Health check: http://localhost:5000/health
+
+Teste básico da API:
+
+```bash
+curl http://localhost:5000/health
+```
+
+## 8. Executar Testes
+
+Backend:
+
+```bash
+cd backend
+npm test
+```
+
+Frontend lint:
+
+```bash
+cd frontend
+npm run lint
+```
+
+## 9. Setup com Docker (Opcional)
+
+```bash
 docker compose up -d
 ```
 
-Sobe PostgreSQL + Backend + Frontend automaticamente. Pule para a seção "Acessar".
+O compose atual aplica database.sql + migration_v3..v6 no primeiro bootstrap do volume.
+Se o volume do PostgreSQL já existia antes dessa configuração, aplique as migrations manualmente ou recrie o volume.
 
----
+## 10. Ordem Correta de Setup (Resumo)
 
-## 3️⃣ INSTALAR E INICIAR
+1. Clonar repositório.
+2. Instalar dependências.
+3. Configurar backend/.env e frontend/.env.local.
+4. Criar banco e aplicar SQL/migrations.
+5. Subir backend.
+6. Subir frontend.
+7. Validar /health e fluxo de login.
 
-**Terminal 1 — Backend:**
-```powershell
-cd backend
-npm install
-npm run dev
-```
+## Documentos Relacionados
 
-**Terminal 2 — Frontend:**
-```powershell
-cd frontend
-npm install
-npm run dev
-```
-
----
-
-## 4️⃣ ACESSAR
-
-- **Sistema:** http://localhost:3000
-- **API:** http://localhost:5000
-- **Health Check:** http://localhost:5000/health
-
-### Primeira vez
-1. Clique em **"Cadastre-se"**
-2. Preencha nome da barbearia, responsável, WhatsApp, email e senha
-3. Senha deve ter: mínimo 8 caracteres, 1 maiúscula, 1 número
-4. Clique em **"Criar Conta"**
-
----
-
-## 🔧 Executar Migrations (se necessário)
-
-Se o banco já existia de uma versão anterior, execute as migrations:
-
-```powershell
-psql -U postgres -d barberpro -f backend\src\config\migration_v2.sql
-psql -U postgres -d barberpro -f backend\src\config\migration_v3.sql
-psql -U postgres -d barberpro -f backend\src\config\migration_v4.sql
-psql -U postgres -d barberpro -f backend\src\config\migration_v5.sql
-psql -U postgres -d barberpro -f backend\src\config\migration_v6.sql
-```
-
----
-
-## ✅ CHECKLIST
-
-- [ ] PostgreSQL instalado e rodando
-- [ ] Banco `barberpro` criado com tabelas
-- [ ] Arquivo `backend\.env` com DATABASE_URL e JWT_SECRET
-- [ ] Arquivo `frontend\.env.local` com NEXT_PUBLIC_API_URL
-- [ ] Backend rodando na porta 5000
-- [ ] Frontend rodando na porta 3000
-- [ ] Consegue acessar http://localhost:3000
-- [ ] Consegue criar conta e fazer login
-
----
-
-## 🆘 PROBLEMAS COMUNS
-
-### ❌ `psql não é reconhecido`
-```powershell
-$env:Path += ";C:\Program Files\PostgreSQL\16\bin"
-```
-
-### ❌ `password authentication failed`
-Corrija a senha em `backend\.env` ou execute:
-```powershell
-.\fix-env.ps1
-```
-
-### ❌ `ECONNREFUSED 127.0.0.1:5432`
-PostgreSQL não está rodando:
-```powershell
-Get-Service postgresql*
-Start-Service "postgresql-x64-16"
-```
-
-### ❌ `database "barberpro" does not exist`
-```powershell
-psql -U postgres -c "CREATE DATABASE barberpro;"
-psql -U postgres -d barberpro -f backend\src\config\database.sql
-```
-
-### ❌ `relation "barbershops" does not exist`
-```powershell
-psql -U postgres -d barberpro -f backend\src\config\database.sql
-```
-
-### ❌ Frontend não conecta com backend
-Verifique `frontend\.env.local`:
-```env
-NEXT_PUBLIC_API_URL=http://localhost:5000/api
-```
-Reinicie o frontend após alterar.
-
-> Guia completo: `TROUBLESHOOTING.md`
-
----
-
-## 📚 PRÓXIMOS PASSOS
-
-- **Configurar WhatsApp:** Leia `WHATSAPP_BOT.md`
-- **Ver a API:** Leia `API_DOCS.md`
-- **Entender o código:** Leia `PROJECT_STRUCTURE.md`
-- **Fazer deploy:** Leia `DEPLOY.md`
+- Setup rápido: QUICK_START.md
+- Banco e migrations detalhadas: POSTGRESQL_SETUP.md
+- Problemas frequentes: TROUBLESHOOTING.md

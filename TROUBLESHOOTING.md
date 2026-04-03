@@ -1,282 +1,248 @@
-# 🔧 TROUBLESHOOTING - Problemas Comuns e Soluções
+# Troubleshooting
 
-## 🔍 Diagnóstico Rápido
+Guia de diagnóstico para erros comuns em desenvolvimento e operação.
 
-Antes de mais nada, verifique:
+## 1. Diagnóstico Inicial
+
+Verificações rápidas:
+
+```bash
+curl http://localhost:5000/health
+```
+
+```bash
+psql -h localhost -p 5432 -U postgres -d barberpro -c "SELECT 1;"
+```
+
+```bash
+node -v && npm -v
+```
+
+## 2. Erros de Banco PostgreSQL
+
+## 2.1 Erro de conexão com PostgreSQL
+
+Sintoma:
+
+- ECONNREFUSED
+- timeout ao conectar
+
+Checklist:
+
+- Serviço PostgreSQL está ativo.
+- Host/porta no DATABASE_URL estão corretos.
+- Firewall/liberação de rede (ambiente remoto).
+
+Comando de teste:
+
+```bash
+psql -h localhost -p 5432 -U postgres -d barberpro -c "SELECT current_database();"
+```
+
+## 2.2 Erro de autenticação no banco
+
+Sintoma:
+
+- password authentication failed
+
+Ações:
+
+- Revisar usuário/senha no DATABASE_URL.
+- Testar conexão psql com os mesmos dados.
+- Em docker, validar usuário/senha do serviço db no compose.
+
+## 2.3 Backend inicia e cai por falta de conexão
+
+No estado atual do código, o backend valida conexão no bootstrap e encerra processo em falha de banco.
+
+Ações:
+
+- Corrigir DATABASE_URL.
+- Testar conexão manual com psql.
+- Verificar saúde do banco antes de subir backend.
+
+## 3. Erros de SQL / Migrations
+
+## 3.1 Arquivo SQL não encontrado
+
+Sintoma:
+
+- No such file
+- could not open file
+
+Ações:
+
+- Execute comandos a partir da raiz do repositório.
+- Validar caminhos:
+
+```bash
+ls backend/src/config/*.sql
+```
+
+No Windows PowerShell:
 
 ```powershell
-# 1. Backend rodando?
-Invoke-RestMethod -Uri "http://localhost:5000/health"
-
-# 2. PostgreSQL rodando?
-Get-Service postgresql*
-
-# 3. Frontend rodando?
-# Acesse http://localhost:3000 no navegador
+Get-ChildItem .\backend\src\config\*.sql
 ```
 
----
+## 3.2 Migration falhando
 
-## 🚨 ERRO: "Erro ao processar solicitação" no cadastro
+Ações gerais:
 
-### Causa
-O backend não consegue conectar ao banco de dados.
+1. Ativar parada imediata:
 
-### Solução Rápida
+```bash
+psql ... -v ON_ERROR_STOP=1 -f <arquivo.sql>
+```
+
+2. Validar banco alvo antes de executar:
+
+```sql
+SELECT current_database(), current_user;
+```
+
+3. Fazer backup antes de produção.
+
+4. Executar na ordem documentada em POSTGRESQL_SETUP.md.
+
+## 3.3 Erro gen_random_uuid() does not exist
+
+Causa:
+
+- Extensão pgcrypto ausente.
+
+Solução:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+```
+
+## 3.4 Erro de encoding
+
+Sintoma:
+
+- invalid byte sequence
+- erro ao aplicar textos com acentos/emojis
+
+Ações:
+
+```sql
+SHOW server_encoding;
+SHOW client_encoding;
+```
+
+- Garantir UTF8 para ambos.
+- No psql: \encoding UTF8
+- No PowerShell: chcp 65001 e PGCLIENTENCODING=UTF8
+
+## 4. Portas e Ambiente
+
+## 4.1 Porta em uso
+
+Sintoma:
+
+- EADDRINUSE: address already in use :::5000
+- conflito na 3000/5432
+
+Ações:
+
+Linux/macOS:
+
+```bash
+lsof -i :5000
+lsof -i :3000
+lsof -i :5432
+```
+
+Windows PowerShell:
+
 ```powershell
-.\fix-env.ps1
+netstat -ano | findstr :5000
+netstat -ano | findstr :3000
+netstat -ano | findstr :5432
 ```
 
-### Solução Manual
-1. Abra `backend\.env`
-2. Verifique se `DATABASE_URL` está correto:
-   ```
-   DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5432/barberpro
-   ```
-3. Corrija a porta (**5432**, não 5433)
-4. Corrija a senha do PostgreSQL
-5. Reinicie o backend (`Ctrl+C` → `npm run dev`)
+Finalize o processo conflitante ou altere a porta via env.
 
----
+## 4.2 Variáveis de ambiente ausentes
 
-## 🚨 ERRO: `ECONNREFUSED 127.0.0.1:5432`
+Backend exige obrigatoriamente:
 
-### Causa
-PostgreSQL não está rodando.
+- JWT_SECRET
+- DATABASE_URL
 
-### Solução
-```powershell
-# Verificar status
-Get-Service postgresql*
+Se ausentes, o processo encerra no startup.
 
-# Iniciar (ajuste a versão se necessário)
-Start-Service "postgresql-x64-16"
-```
+Valide backend/.env e reinicie o serviço.
 
-Se o serviço não existir, reinstale o PostgreSQL: `POSTGRESQL_SETUP.md`
+## 4.3 Frontend sem conexão com API
 
----
+Checklist:
 
-## 🚨 ERRO: `password authentication failed`
+- NEXT_PUBLIC_API_URL aponta para /api/v1.
+- Backend está disponível na URL configurada.
+- FRONTEND_URL no backend está correto para CORS.
 
-### Causa
-Senha incorreta no `DATABASE_URL`.
+## 5. WhatsApp
 
-### Solução
-1. Execute `.\fix-env.ps1` e digite a senha correta
-2. Ou edite manualmente `backend\.env`:
-   ```
-   DATABASE_URL=postgresql://postgres:SENHA_CORRETA@localhost:5432/barberpro
-   ```
+## 5.1 QR Code não aparece
 
-### Resetar senha do PostgreSQL
-Se esqueceu a senha:
-1. Abra `C:\Program Files\PostgreSQL\16\data\pg_hba.conf`
-2. Altere `scram-sha-256` para `trust` na linha do `localhost`
-3. Reinicie o PostgreSQL
-4. Conecte sem senha: `psql -U postgres`
-5. Mude a senha: `ALTER USER postgres PASSWORD 'nova_senha';`
-6. Reverta o `pg_hba.conf` para `scram-sha-256`
-7. Reinicie novamente
+Checklist:
 
----
+- WHATSAPP_ENABLED=true no backend/.env.
+- Migração v3 aplicada (colunas e tabela do bot).
+- Backend sem erro no log de inicialização.
 
-## 🚨 ERRO: `database "barberpro" does not exist`
+## 5.2 Endpoints de WhatsApp retornando erro de schema
 
-### Solução
-```powershell
-psql -U postgres -c "CREATE DATABASE barberpro;"
-psql -U postgres -d barberpro -f backend\src\config\database.sql
-```
+Causa comum:
 
----
+- database.sql executado sem migration_v3.sql.
 
-## 🚨 ERRO: `relation "barbershops" does not exist`
+Solução:
 
-### Causa
-Tabelas não foram criadas.
+- Aplicar migration_v3.sql e validar tabela whatsapp_menu_options.
 
-### Solução
-```powershell
-psql -U postgres -d barberpro -f backend\src\config\database.sql
-```
+## 6. Inconsistências entre documentação e scripts
 
-Para aplicar migrations:
-```powershell
-psql -U postgres -d barberpro -f backend\src\config\migration_v2.sql
-psql -U postgres -d barberpro -f backend\src\config\migration_v3.sql
-psql -U postgres -d barberpro -f backend\src\config\migration_v4.sql
-psql -U postgres -d barberpro -f backend\src\config\migration_v5.sql
-psql -U postgres -d barberpro -f backend\src\config\migration_v6.sql
-```
+As inconsistências operacionais principais foram corrigidas no estado atual do repositório.
 
----
+Checklist atual:
 
-## 🚨 ERRO: `psql não é reconhecido`
+1. backend/.env.example está alinhado com DB_CONNECT_TIMEOUT.
+2. docker-compose.yml usa FRONTEND_URL no backend.
+3. docker-compose.yml usa NEXT_PUBLIC_API_URL com /api/v1 no frontend.
+4. setup.ps1 aplica database.sql + migration_v3..v6.
+5. fix-env.ps1 não adiciona variáveis legadas WHATSAPP_API_*.
 
-### Solução
-Adicione ao PATH:
-```powershell
-$env:Path += ";C:\Program Files\PostgreSQL\16\bin"
-```
+Como proceder:
 
-Para permanente (requer admin):
-```powershell
-[Environment]::SetEnvironmentVariable(
-    "Path",
-    "$env:Path;C:\Program Files\PostgreSQL\16\bin",
-    [EnvironmentVariableTarget]::Machine
-)
-```
-Feche e reabra o terminal.
+- Seguir os guias README.md, INSTALL.md e POSTGRESQL_SETUP.md.
+- Em Docker, lembrar que scripts de init só rodam no primeiro bootstrap do volume; para volume antigo, aplicar migrations manualmente.
 
----
+## 7. Fluxo de Recuperação Rápida
 
-## 🚨 ERRO: Script `setup.ps1` não executa
+Quando o ambiente está inconsistente:
 
-### Solução
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
+1. Backup (se houver dados).
+2. Recriar banco do zero.
+3. Aplicar database.sql + migration_v3..v6.
+4. Revisar backend/.env e frontend/.env.local.
+5. Subir backend e validar /health.
+6. Subir frontend.
 
----
+## 8. Quando Escalar para Investigação
 
-## 🌐 Frontend não conecta com Backend
+Escalar quando houver:
 
-### Verificar
-1. Backend está rodando na porta 5000?
-2. Arquivo `frontend\.env.local` existe com:
-   ```
-   NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1
-   ```
-3. Reiniciou o frontend após criar/alterar o `.env.local`?
+- Falha recorrente após reset completo do banco.
+- Inconsistência entre estado do Stripe e estado local de assinatura.
+- Erro intermitente de rede/infra fora do host local.
+- Corrupção de dados após migração.
 
-### Criar se não existir
-```powershell
-"NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1" | Out-File -FilePath frontend\.env.local -Encoding UTF8
-```
+Nesses casos, anexar:
 
----
-
-## 🌐 ERRO: CORS
-
-### Sintoma
-```
-Access to XMLHttpRequest has been blocked by CORS policy
-```
-
-### Solução
-Verifique no `backend\.env`:
-```env
-FRONTEND_URL=http://localhost:3000
-```
-
-O servidor usa `FRONTEND_URL` para configurar CORS. Se não estiver definido, o padrão é `http://localhost:3000`.
-
-Em produção, configure para a URL real do frontend.
-
----
-
-## 🔑 Token inválido ou expirado
-
-### Causa
-O access token expira após um tempo. O sistema tenta renovar automaticamente via refresh token.
-
-### Solução
-1. Faça logout e login novamente
-2. Se persistir, limpe os cookies do navegador
-3. Verifique se `JWT_SECRET` no `.env` não mudou
-
----
-
-## 📱 WhatsApp não conecta
-
-### QR Code não aparece
-1. Verifique se o backend está rodando
-2. Acesse a aba WhatsApp no dashboard
-3. Aguarde o QR Code aparecer (pode levar alguns segundos)
-
-### QR Code aparece mas não conecta
-1. Escaneie rapidamente (o QR expira)
-2. Use o WhatsApp principal do celular (não WhatsApp Business secundário)
-3. Vá em WhatsApp > Aparelhos conectados > Conectar aparelho
-
-### Desconectou inesperadamente
-1. No dashboard, aba WhatsApp, clique em "Reiniciar"
-2. Ou reinicie o backend completo
-
-### Erro com Puppeteer/Chrome
-O `whatsapp-web.js` precisa do Chromium. Se der erro:
-```powershell
-# No Windows, geralmente funciona automaticamente
-# Se houver problemas, reinstale as dependências:
-cd backend
-Remove-Item -Recurse -Force node_modules
-npm install
-```
-
----
-
-## 💾 Backup e restauração do banco
-
-### Backup
-```powershell
-pg_dump -U postgres -d barberpro > backup.sql
-```
-
-### Restaurar
-```powershell
-psql -U postgres -c "DROP DATABASE IF EXISTS barberpro;"
-psql -U postgres -c "CREATE DATABASE barberpro;"
-psql -U postgres -d barberpro < backup.sql
-```
-
----
-
-## 🐳 Problemas com Docker
-
-### Containers não sobem
-```powershell
-docker compose logs
-```
-
-### Banco não aceita conexão
-O container `db` precisa estar healthy antes do backend iniciar. Verifique:
-```powershell
-docker compose ps
-```
-
-### Resetar tudo
-```powershell
-docker compose down -v    # Remove volumes (dados do banco)
-docker compose up -d      # Recria tudo
-```
-
----
-
-## ⚡ Performance
-
-### Backend lento
-1. Verifique se as migrations de índices foram aplicadas:
-   ```powershell
-   psql -U postgres -d barberpro -f backend\src\config\migration_v4.sql
-   psql -U postgres -d barberpro -f backend\src\config\migration_v5.sql
-   psql -U postgres -d barberpro -f backend\src\config\migration_v6.sql
-   ```
-2. Ajuste o pool no `.env`:
-   ```env
-   DB_POOL_MIN=2
-   DB_POOL_MAX=20
-   ```
-
-### Frontend lento em dev
-Normal — Next.js em modo desenvolvimento compila as páginas sob demanda. Em produção (`npm run build && npm start`) é muito mais rápido.
-
----
-
-## 📞 Ainda com problemas?
-
-1. Leia `POSTGRESQL_SETUP.md` para problemas com banco
-2. Leia `API_DOCS.md` para testar endpoints
-3. Verifique os logs do backend no terminal
-4. Use `http://localhost:5000/health` para verificar conexão com o banco
+- Comando executado.
+- Saída completa de erro.
+- Hash do commit.
+- Ambiente (Linux/macOS/Windows, Docker ou não).

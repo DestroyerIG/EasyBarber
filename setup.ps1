@@ -82,26 +82,47 @@ try {
 
     Write-Host "Banco criado com sucesso!" -ForegroundColor Green
 
-    # 5. Executar SQL
-    $sqlFile = "backend/src/config/database.sql"
+    # 5. Executar SQL base + migrations
+    $sqlFiles = @(
+        "backend/src/config/database.sql",
+        "backend/src/config/migration_v3.sql",
+        "backend/src/config/migration_v4.sql",
+        "backend/src/config/migration_v5.sql",
+        "backend/src/config/migration_v6.sql"
+    )
 
-    if (-not (Test-Path $sqlFile)) {
-        Write-Host "Arquivo SQL nao encontrado: $sqlFile" -ForegroundColor Red
-        Read-Host "Pressione ENTER para sair"
-        exit
+    foreach ($sqlFile in $sqlFiles) {
+        if (-not (Test-Path $sqlFile)) {
+            Write-Host "Arquivo SQL nao encontrado: $sqlFile" -ForegroundColor Red
+            Read-Host "Pressione ENTER para sair"
+            exit
+        }
     }
 
-    Write-Host "Criando tabelas..." -ForegroundColor Cyan
-    $result = & psql -h $pgHost -p $pgPort -U $pgUser -d $projectDatabase -f $sqlFile 2>&1
+    Write-Host "Garantindo extensao pgcrypto..." -ForegroundColor Cyan
+    $result = & psql -h $pgHost -p $pgPort -U $pgUser -d $projectDatabase -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;" 2>&1
 
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "Erro ao criar tabelas" -ForegroundColor Red
+        Write-Host "Erro ao habilitar extensao pgcrypto" -ForegroundColor Red
         Write-Host $result -ForegroundColor Red
         Read-Host "Pressione ENTER para sair"
         exit
     }
 
-    Write-Host "Tabelas criadas com sucesso!" -ForegroundColor Green
+    foreach ($sqlFile in $sqlFiles) {
+        $sqlName = Split-Path $sqlFile -Leaf
+        Write-Host "Aplicando $sqlName..." -ForegroundColor Cyan
+        $result = & psql -h $pgHost -p $pgPort -U $pgUser -d $projectDatabase -v ON_ERROR_STOP=1 -f $sqlFile 2>&1
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Erro ao aplicar $sqlName" -ForegroundColor Red
+            Write-Host $result -ForegroundColor Red
+            Read-Host "Pressione ENTER para sair"
+            exit
+        }
+    }
+
+    Write-Host "Schema e migrations aplicados com sucesso!" -ForegroundColor Green
 
     # 6. Criar .env backend
     $envFile = "backend\.env"
@@ -114,6 +135,8 @@ PORT=5000
 DATABASE_URL=$databaseUrl
 JWT_SECRET=$jwtSecret
 NODE_ENV=development
+    LOG_LEVEL=info
+    FRONTEND_URL=http://localhost:3000
 "@ | Out-File -FilePath $envFile -Encoding UTF8
 
     Write-Host ".env backend criado com sucesso!" -ForegroundColor Green

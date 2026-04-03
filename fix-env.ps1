@@ -47,8 +47,20 @@ if (Test-Path $envFile) {
     Write-Host ""
     Write-Host "Corrigindo arquivo .env..." -ForegroundColor Cyan
 
-    $newDatabaseUrl = "postgresql://postgres:$pgPasswordText@localhost:5432/barberpro"
+    $escapedPassword = [Uri]::EscapeDataString($pgPasswordText)
+    $newDatabaseUrl = "postgresql://postgres:$escapedPassword@localhost:5432/barberpro"
     $newContent = $content -replace "DATABASE_URL=.*", "DATABASE_URL=$newDatabaseUrl"
+
+    # Remove variaveis legadas nao utilizadas pelo backend atual
+    $newContent = $newContent -replace "(?m)^WHATSAPP_API_KEY=.*\r?\n?", ""
+    $newContent = $newContent -replace "(?m)^WHATSAPP_API_URL=.*\r?\n?", ""
+
+    # Alinha nome da variavel de timeout com o que o backend le
+    $newContent = $newContent -replace "(?m)^DB_CONNECTION_TIMEOUT=", "DB_CONNECT_TIMEOUT="
+
+    if ($newContent -notmatch "(?m)^FRONTEND_URL=") {
+        $newContent = $newContent.TrimEnd() + "`r`nFRONTEND_URL=http://localhost:3000`r`n"
+    }
 
     $newContent | Set-Content $envFile
 
@@ -75,11 +87,11 @@ if (Test-Path $envFile) {
 
     $envContent = @"
 PORT=5000
-DATABASE_URL=postgresql://postgres:$pgPasswordText@localhost:5432/barberpro
+DATABASE_URL=postgresql://postgres:$([Uri]::EscapeDataString($pgPasswordText))@localhost:5432/barberpro
 JWT_SECRET=$jwtSecret
-WHATSAPP_API_KEY=configurar_depois
-WHATSAPP_API_URL=https://api.z-api.io/instances/SEU_ID
 NODE_ENV=development
+LOG_LEVEL=info
+FRONTEND_URL=http://localhost:3000
 "@
 
     $envContent | Out-File -FilePath $envFile -Encoding UTF8
