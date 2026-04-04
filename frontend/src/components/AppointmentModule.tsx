@@ -11,6 +11,7 @@ import { AppointmentCard } from '@/components/appointments/AppointmentCard';
 import { CreateAppointmentModal } from '@/components/appointments/CreateAppointmentModal';
 import type { AppointmentFormData } from '@/components/appointments/CreateAppointmentModal';
 import type { Appointment, Client, Barber, Service } from '@/types';
+import { getApiErrorMessage } from '@/utils/handleApiError';
 import { Calendar, Clock, CheckCircle, XCircle, Plus, Loader2 } from 'lucide-react';
 
 type ViewMode = 'day' | 'week';
@@ -44,7 +45,7 @@ export function AppointmentModule() {
         } finally {
             setLoading(false);
         }
-    }, [selectedDate, viewMode]);
+    }, [selectedDate, showToast, viewMode]);
 
     useEffect(() => {
         loadAppointments();
@@ -97,8 +98,9 @@ export function AppointmentModule() {
                 status === 'concluido' ? 'success' : 'info'
             );
             loadAppointments();
-        } catch (error: any) {
-            showToast(error.response?.data?.error || 'Erro ao atualizar status', 'error');
+        } catch (error: unknown) {
+            const message = getApiErrorMessage(error, 'Erro ao atualizar status');
+            showToast(message, 'error');
         } finally {
             setActionLoading(null);
         }

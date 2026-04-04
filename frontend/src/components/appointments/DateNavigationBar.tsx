@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronLeft, ChevronRight, Calendar, Filter } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter } from 'lucide-react';
 import { formatDate, formatDateShort, getToday, addDays } from '@/lib/dateUtils';
 import { STATUS_CONFIG } from '@/lib/constants';
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -19,6 +19,7 @@ import { PricingPlansSection } from '@/components/marketing/PricingPlansSection'
 import { billingApi } from '@/lib/billing';
 import { isPlanId, PLAN_MAP } from '@/lib/plans';
 import { useSubscriptionAccess } from '@/hooks/useSubscriptionAccess';
+import { getApiErrorMessage } from '@/utils/handleApiError';
 import { FeatureGate } from '@/components/billing/FeatureGate';
 import { Settings, ShieldCheck } from 'lucide-react';
 import type { DashboardData, TabId } from '@/types';
@@ -40,6 +41,37 @@ export default function DashboardPage() {
 
   const goToPlans = () => setActiveTab('planos');
 
+  const loadDashboard = useCallback(async () => {
+    try {
+      const response = await api.get('/dashboard');
+      setData(response.data);
+    } catch {
+      showToast('Erro ao carregar dashboard. Redirecionando...', 'error');
+      setTimeout(() => router.push('/login'), 2000);
+    } finally {
+      setLoading(false);
+    }
+  }, [router, showToast]);
+
+  const loadSubscriptionStatus = useCallback(async () => {
+    try {
+      const response = await billingApi.getStatus();
+      setSubscriptionStatus(response.subscriptionStatus);
+    } catch {
+      // A API de billing pode não estar configurada no ambiente local.
+    }
+  }, []);
+
+  const startCheckout = useCallback(async (plan: 'basico' | 'profissional' | 'premium') => {
+    try {
+      const session = await billingApi.createCheckoutSession(plan);
+      window.location.assign(session.checkoutUrl);
+    } catch (error: unknown) {
+      const message = getApiErrorMessage(error, 'Não foi possível iniciar o checkout agora.');
+      showToast(message, 'error');
+    }
+  }, [showToast]);
+
   useEffect(() => {
     if (authLoading) {
       return;
@@ -53,7 +85,7 @@ export default function DashboardPage() {
 
     loadDashboard();
     loadSubscriptionStatus();
-  }, [authLoading, user?.role]);
+  }, [authLoading, loadDashboard, loadSubscriptionStatus, router, user?.role]);
 
   useEffect(() => {
     if (authLoading || checkoutTriggeredRef.current || user?.role === 'platform_admin') {
@@ -78,52 +110,15 @@ export default function DashboardPage() {
 
     checkoutTriggeredRef.current = true;
     startCheckout(checkoutPlan);
-  }, [authLoading, showToast, user]);
-
-  const loadDashboard = async () => {
-    try {
-      const response = await api.get('/dashboard');
-      setData(response.data);
-    } catch (error) {
-      showToast('Erro ao carregar dashboard. Redirecionando...', 'error');
-      setTimeout(() => router.push('/login'), 2000);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadSubscriptionStatus = async () => {
-    try {
-      const response = await billingApi.getStatus();
-      setSubscriptionStatus(response.subscriptionStatus);
-    } catch {
-      // A API de billing pode não estar configurada no ambiente local.
-    }
-  };
-
-  const startCheckout = async (plan: 'basico' | 'profissional' | 'premium') => {
-    try {
-      const session = await billingApi.createCheckoutSession(plan);
-      window.location.assign(session.checkoutUrl);
-    } catch (error: any) {
-      const message =
-        error?.response?.data?.error ||
-        error?.response?.data?.message ||
-        'Não foi possível iniciar o checkout agora.';
-      showToast(message, 'error');
-    }
-  };
+  }, [authLoading, loadSubscriptionStatus, showToast, startCheckout, user?.role]);
 
   const openBillingPortal = async () => {
     setPortalLoading(true);
     try {
       const response = await billingApi.createPortalSession();
       window.location.assign(response.portalUrl);
-    } catch (error: any) {
-      const message =
-        error?.response?.data?.error ||
-        error?.response?.data?.message ||
-        'Portal de assinatura indisponível no momento.';
+    } catch (error: unknown) {
+      const message = getApiErrorMessage(error, 'Portal de assinatura indisponível no momento.');
       showToast(message, 'error');
     } finally {
       setPortalLoading(false);

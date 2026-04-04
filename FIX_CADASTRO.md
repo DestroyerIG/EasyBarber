@@ -1,94 +1,61 @@
-# 🔧 CORREÇÃO RÁPIDA - Erro ao Processar Solicitação
+# Correção Rápida para Falha no Cadastro
 
-## 🚨 O QUE ESTÁ ACONTECENDO
+Guia objetivo para quando o cadastro/login falha no ambiente local.
 
-Na tela você vê:
-```
-Erro ao processar solicitação
-```
+## Sintomas
 
-E o botão fica em **"Processando..."** infinitamente.
+- Tela de cadastro retorna erro genérico.
+- Backend responde 500/401/400 sem concluir fluxo.
+- Dashboard não abre após registrar conta.
 
-**CAUSA:** O backend não consegue conectar ao banco de dados.
+## Checklist de Correção
 
----
+1. Verificar backend/.env com DATABASE_URL e JWT_SECRET válidos.
+2. Verificar frontend/.env.local com NEXT_PUBLIC_API_URL apontando para /api/v1.
+3. Verificar se banco foi criado com UTF-8 e extensão pgcrypto.
+4. Verificar se migration_v3..v6 foram aplicadas (não apenas database.sql).
 
-## ✅ SOLUÇÃO RÁPIDA
+## Comandos de Verificação
 
-Execute o script de correção:
-```powershell
-.\fix-env.ps1
-```
+### Backend health
 
-Ele corrige automaticamente o arquivo `backend\.env` com a porta e senha corretas.
-
----
-
-## ✅ SOLUÇÃO MANUAL
-
-### 1. Abra o arquivo `backend\.env`
-
-### 2. Verifique a linha `DATABASE_URL`:
-
-**ERRADO (porta 5433):**
-```
-DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5433/barberpro
+```bash
+curl http://localhost:5000/health
 ```
 
-**CORRETO (porta 5432):**
-```
-DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5432/barberpro
-```
+### Teste de conexão DB
 
-### 3. Verifique se a senha está correta
-
-A senha deve ser a mesma que você definiu na instalação do PostgreSQL.
-
-### 4. Salve o arquivo
-
-### 5. Reinicie o backend
-
-Se estiver usando `npm run dev` com nodemon, ele reinicia automaticamente.
-
-Caso contrário:
-```powershell
-# Parar (Ctrl+C)
-cd backend
-npm run dev
+```bash
+psql -h localhost -p 5432 -U postgres -d barberpro -c "SELECT 1;"
 ```
 
-### 6. Aguarde aparecer:
-```
-Servidor rodando na porta 5000
-Conexão com banco de dados verificada
-```
+### Verificar tabela crítica do módulo atual
 
----
-
-## 🧪 TESTAR
-
-1. Acesse http://localhost:3000
-2. Cadastre uma barbearia
-3. Senha deve ter: mínimo 8 caracteres, 1 maiúscula, 1 número
-
----
-
-## ❓ AINDA COM ERRO?
-
-Verifique se o PostgreSQL está rodando:
-```powershell
-Get-Service postgresql*
+```bash
+psql -h localhost -p 5432 -U postgres -d barberpro -c "SELECT to_regclass('public.whatsapp_menu_options');"
 ```
 
-Verifique se o banco existe:
-```powershell
-psql -U postgres -c "\l" | findstr barberpro
+## Reaplicar Schema Completo (Banco Novo)
+
+```bash
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/database.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v3.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
 ```
 
-Se não existir:
-```powershell
-psql -U postgres -c "CREATE DATABASE barberpro;"
-psql -U postgres -d barberpro -f backend\src\config\database.sql
-```
+## Pontos que Mais Quebram Cadastro
 
-> Guia completo: `TROUBLESHOOTING.md`
+- DATABASE_URL com senha/host incorretos.
+- JWT_SECRET ausente.
+- API URL do frontend sem /api/v1.
+- Banco criado sem migrations adicionais (v3..v6).
+
+## Se Persistir
+
+Siga TROUBLESHOOTING.md e anexe:
+
+- log do backend no momento do erro
+- comando executado
+- resposta HTTP recebida

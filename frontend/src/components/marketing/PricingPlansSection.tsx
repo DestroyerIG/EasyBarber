@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
 import { billingApi } from '@/lib/billing';
 import { SAAS_PLANS, type PlanId } from '@/lib/plans';
+import { getApiErrorMessage } from '@/utils/handleApiError';
 
 interface PricingPlansSectionProps {
   sectionId?: string;
@@ -51,11 +52,8 @@ export function PricingPlansSection({
     try {
       const session = await billingApi.createCheckoutSession(planId);
       window.location.assign(session.checkoutUrl);
-    } catch (error: any) {
-      const message =
-        error?.response?.data?.error ||
-        error?.response?.data?.message ||
-        'Não foi possível iniciar o checkout no momento.';
+    } catch (error: unknown) {
+      const message = getApiErrorMessage(error, 'Não foi possível iniciar o checkout no momento.');
       showToast(message, 'error');
     } finally {
       setProcessingPlan(null);

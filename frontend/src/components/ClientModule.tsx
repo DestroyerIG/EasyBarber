@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
 import { useToast } from './Toast';
 import { PageHeader } from '@/components/ui';
@@ -21,9 +21,7 @@ export const ClientModule = () => {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const { showToast } = useToast();
 
-  useEffect(() => { loadClients(); }, []);
-
-  const loadClients = async () => {
+  const loadClients = useCallback(async () => {
     try {
       const response = await api.get('/clients');
       setClients(response.data);
@@ -32,7 +30,11 @@ export const ClientModule = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [showToast]);
+
+  useEffect(() => {
+    loadClients();
+  }, [loadClients]);
 
   const loadHistory = async (clientId: string) => {
     setLoadingHistory(true);

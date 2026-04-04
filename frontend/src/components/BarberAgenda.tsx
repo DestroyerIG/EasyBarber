@@ -1,11 +1,12 @@
 'use client';
 
+import Image from 'next/image';
 import { useEffect, useState, useCallback } from 'react';
 import api from '@/lib/api';
 import { useToast } from '@/components/Toast';
 import type { Appointment, Barber } from '@/types';
 import {
-    Clock, Calendar, CheckCircle, XCircle, User, Scissors, Loader2, ChevronLeft, ChevronRight
+    Calendar, User, Loader2, ChevronLeft, ChevronRight
 } from 'lucide-react';
 
 interface BarberAgendaProps {
@@ -51,7 +52,7 @@ export function BarberAgenda({ barber }: BarberAgendaProps) {
         } finally {
             setLoading(false);
         }
-    }, [selectedDate, barber.id]);
+    }, [barber.id, selectedDate, showToast]);
 
     useEffect(() => {
         loadAppointments();
@@ -63,7 +64,15 @@ export function BarberAgenda({ barber }: BarberAgendaProps) {
                 <div className="flex items-center gap-4">
                     <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-primary bg-black/40 flex items-center justify-center">
                         {barber.photo ? (
-                            <img src={barber.photo} alt={barber.name} className="w-full h-full object-cover" />
+                            <Image
+                                src={barber.photo}
+                                alt={barber.name}
+                                width={64}
+                                height={64}
+                                unoptimized
+                                loader={({ src }) => src}
+                                className="w-full h-full object-cover"
+                            />
                         ) : (
                             <User className="text-primary/40" size={32} />
                         )}

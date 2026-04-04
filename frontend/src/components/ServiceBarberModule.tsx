@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
 import { useToast } from './Toast';
 import { Plus, ArrowLeft } from 'lucide-react';
@@ -22,9 +22,7 @@ export const ServiceBarberModule = () => {
   const [selectedBarberForAgenda, setSelectedBarberForAgenda] = useState<Barber | null>(null);
   const { showToast } = useToast();
 
-  useEffect(() => { loadData(); }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       const [servicesRes, barbersRes] = await Promise.all([
@@ -38,7 +36,11 @@ export const ServiceBarberModule = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [showToast]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleOpenModal = (item?: Service | Barber) => {
     setEditingItem(item || null);

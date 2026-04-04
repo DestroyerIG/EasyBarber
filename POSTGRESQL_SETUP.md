@@ -298,6 +298,14 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 ## 12. Referências Relacionadas
 
+Após concluir o preparo do banco em ambiente local, execute no diretório backend:
+
+```bash
+npm run seed:test-users
+```
+
+As credenciais de desenvolvimento ficam centralizadas em README.md, na seção "Usuários de teste (ambiente local)".
+
 - README.md
 - INSTALL.md
 - QUICK_START.md

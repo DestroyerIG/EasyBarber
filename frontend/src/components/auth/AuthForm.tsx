@@ -2,10 +2,10 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { AxiosError } from 'axios';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
 import { isPlanId, PLAN_MAP } from '@/lib/plans';
+import { getApiErrorMessage } from '@/utils/handleApiError';
 
 type AuthMode = 'login' | 'register';
 
@@ -61,16 +61,7 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
         showToast('Cadastro concluído com sucesso.', 'success');
       }
     } catch (error: unknown) {
-      if (error instanceof AxiosError) {
-        const resData = error.response?.data;
-        const message =
-          resData?.details?.join(' | ') ||
-          (typeof resData?.error === 'string' ? resData.error : resData?.error?.message) ||
-          'Erro ao processar solicitação';
-        showToast(message, 'error');
-      } else {
-        showToast('Erro inesperado. Tente novamente.', 'error');
-      }
+      showToast(getApiErrorMessage(error, 'Erro ao processar solicitação'), 'error');
     } finally {
       setLoading(false);
     }

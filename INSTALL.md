@@ -156,6 +156,14 @@ Teste básico da API:
 curl http://localhost:5000/health
 ```
 
+Para acesso rápido no ambiente local, execute no diretório backend:
+
+```bash
+npm run seed:test-users
+```
+
+As credenciais e permissões dos usuários padrão de desenvolvimento estão centralizadas em README.md, na seção "Usuários de teste (ambiente local)".
+
 ## 8. Executar Testes
 
 Backend:

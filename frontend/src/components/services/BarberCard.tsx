@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { Users, Calendar, ChevronRight, Edit2, Trash2 } from 'lucide-react';
 import type { Barber } from '@/types';
 
@@ -16,7 +17,15 @@ export const BarberCard = ({ barber, onEdit, onDelete, onViewAgenda }: BarberCar
       <div className="flex items-center gap-4">
         <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-primary/20 bg-black/40 flex items-center justify-center">
           {barber.photo ? (
-            <img src={barber.photo} alt={barber.name} className="w-full h-full object-cover" />
+            <Image
+              src={barber.photo}
+              alt={barber.name}
+              width={64}
+              height={64}
+              unoptimized
+              loader={({ src }) => src}
+              className="w-full h-full object-cover"
+            />
           ) : (
             <Users className="text-primary/40" size={32} />
           )}

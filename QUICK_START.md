@@ -80,6 +80,14 @@ cd frontend
 npm run dev
 ```
 
+Para acesso rápido no ambiente local, execute no diretório backend:
+
+```bash
+npm run seed:test-users
+```
+
+Após subir o projeto, utilize os usuários de teste documentados no README para acessar o sistema.
+
 ## 5) Validar execução
 
 - Frontend: http://localhost:3000

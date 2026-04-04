@@ -177,6 +177,53 @@ cd frontend
 npm run dev
 ```
 
+## Usuários de teste (ambiente local)
+
+Antes de utilizar os usuários abaixo, execute:
+
+```bash
+npm run seed:test-users
+```
+
+O comando deve ser executado no diretório backend.
+
+### Admin (plataforma)
+
+- Email: contato@easyconnectcg.com.br
+- Senha: @Easyconnect08
+- Role: platform_admin
+
+Permissões:
+
+- Acesso total ao sistema
+- Acesso à área administrativa
+- Gerenciamento global de tenants
+
+### Usuário de teste (tenant)
+
+- Email: teste@easybarber.com
+- Senha: 12345678
+- Role: employee
+
+Contexto:
+
+- Barbearia: EasyBarber Teste
+- Plano: profissional
+- Status da assinatura: active
+
+Acesso liberado:
+
+- Dashboard
+- Clientes
+- Agenda
+- Financeiro
+- Relatórios
+- Funcionalidades premium
+
+> Observação:
+> O controle de acesso no sistema é baseado no tenant (barbershop), não diretamente no usuário.
+> Ou seja, o plano e o status da assinatura são definidos na barbearia vinculada ao usuário.
+
 ## Portas Utilizadas
 
 - Frontend: 3000

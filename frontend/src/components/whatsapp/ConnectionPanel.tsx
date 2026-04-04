@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import {
   CheckCircle,
   QrCode,
@@ -7,7 +8,6 @@ import {
   WifiOff,
   Smartphone,
   RefreshCw,
-  LogOut,
 } from 'lucide-react';
 
 interface WhatsAppStatus {
@@ -35,7 +35,15 @@ export const ConnectionPanel = ({ waStatus, statusLoading, actionLoading, onRest
       {waStatus.status === 'qr' && waStatus.qrCode && (
         <div className="flex flex-col items-center space-y-6">
           <div className="relative p-6 bg-white rounded-2xl shadow-2xl shadow-primary/10 transition-all duration-500 scale-100 hover:scale-105">
-            <img src={waStatus.qrCode} alt="QR Code WhatsApp" className="w-[280px] h-[280px]" style={{ imageRendering: 'pixelated' }} />
+            <Image
+              src={waStatus.qrCode}
+              alt="QR Code WhatsApp"
+              width={280}
+              height={280}
+              unoptimized
+              className="w-[280px] h-[280px]"
+              style={{ imageRendering: 'pixelated' }}
+            />
             <div className="absolute -top-3 -right-3 w-10 h-10 bg-primary rounded-full flex items-center justify-center shadow-lg shadow-primary/30">
               <QrCode size={20} className="text-black" />
             </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
 import { useToast } from './Toast';
 import { formatCurrency } from '@/lib/formatters';
@@ -10,7 +10,8 @@ import { ExpensesTable } from '@/components/finance/ExpensesTable';
 import { ExpenseModal } from '@/components/finance/ExpenseModal';
 import { FeatureGate } from '@/components/billing/FeatureGate';
 import type { FeatureAccessDecision } from '@/lib/subscriptionAccess';
-import type { Expense } from '@/types';
+import type { Expense, MonthlyReportDay } from '@/types';
+import { getApiErrorMessage } from '@/utils/handleApiError';
 import {
   TrendingUp, TrendingDown, DollarSign, Plus, FileText,
   Calendar, ArrowUpRight, ArrowDownRight, Activity
@@ -32,6 +33,8 @@ interface FinanceModuleProps {
   onManageBilling: () => void;
 }
 
+type AutoTableDoc = jsPDF & { lastAutoTable: { finalY: number } };
+
 export const FinanceModule = ({
   reportAccess,
   exportAccess,
@@ -39,7 +42,7 @@ export const FinanceModule = ({
   onManageBilling,
 }: FinanceModuleProps) => {
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
-  const [reportData, setReportData] = useState<any[]>([]);
+  const [reportData, setReportData] = useState<MonthlyReportDay[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -58,16 +61,14 @@ export const FinanceModule = ({
     }
   };
 
-  useEffect(() => { loadAllData(); }, []);
-
-  const loadAllData = async () => {
+  const loadAllData = useCallback(async () => {
     try {
       setLoading(true);
       const now = new Date();
 
       const monthlyRequest = reportAccess.allowed
         ? api.get('/finance/monthly', { params: { month: now.getMonth() + 1, year: now.getFullYear() } })
-        : Promise.resolve({ data: [] as any[] });
+        : Promise.resolve({ data: [] as MonthlyReportDay[] });
 
       const results = await Promise.allSettled([
         api.get('/finance/summary'),
@@ -94,7 +95,11 @@ export const FinanceModule = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [reportAccess.allowed, showToast]);
+
+  useEffect(() => {
+    loadAllData();
+  }, [loadAllData]);
 
   const handleOpenModal = (expense?: Expense) => {
     setEditingExpense(expense || null);
@@ -118,8 +123,9 @@ export const FinanceModule = ({
       await api.delete(`/finance/expenses/${id}`);
       showToast('Gasto excluído com sucesso', 'success');
       loadAllData();
-    } catch (error: any) {
-      showToast(error.response?.data?.error || 'Erro ao excluir gasto', 'error');
+    } catch (error: unknown) {
+      const message = getApiErrorMessage(error, 'Erro ao excluir gasto');
+      showToast(message, 'error');
     }
   };
 
@@ -130,7 +136,7 @@ export const FinanceModule = ({
       profit: summary?.month.profit || 0,
     };
 
-    const doc = new jsPDF() as any;
+    const doc = new jsPDF() as AutoTableDoc;
     const now = format(new Date(), 'dd/MM/yyyy HH:mm');
 
     doc.setFontSize(20);

@@ -1,7 +1,10 @@
+const path = require('path');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
+  outputFileTracingRoot: path.join(__dirname, '..'),
 
   async headers() {
     // Extrair somente a origem (scheme+host+port) da URL da API para o CSP
