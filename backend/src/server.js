@@ -47,10 +47,19 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 
+const vercelProjectPrefix = process.env.VERCEL_PROJECT_PREFIX || 'barberpro-saas-2-0';
+
 const isAllowedVercelPreview = (origin) => {
   try {
     const hostname = new URL(origin).hostname;
-    return hostname.endsWith('.vercel.app');
+    if (!hostname.endsWith('.vercel.app')) {
+      return false;
+    }
+
+    return (
+      hostname === `${vercelProjectPrefix}.vercel.app` ||
+      hostname.startsWith(`${vercelProjectPrefix}-`)
+    );
   } catch {
     return false;
   }

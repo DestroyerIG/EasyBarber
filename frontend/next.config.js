@@ -10,7 +10,7 @@ const nextConfig = {
     // Extrair somente a origem (scheme+host+port) da URL da API para o CSP
     const apiOrigin = (() => {
       try {
-        return new URL(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').origin;
+        return new URL(process.env.BACKEND_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').origin;
       } catch {
         return 'http://localhost:5000';
       }

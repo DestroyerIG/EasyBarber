@@ -13,14 +13,8 @@ const COMMON_PASSWORDS = new Set([
 ]);
 
 const resolveJwtSecret = () => {
-  if (process.env.JWT_SECRET) {
-    return process.env.JWT_SECRET;
-  }
-
-  if (process.env.NODE_ENV === 'test') {
-    return 'test-secret';
-  }
-
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  if (process.env.NODE_ENV === 'test') return 'test-secret';
   throw new AppError('JWT_SECRET não configurado', 500, 'JWT_SECRET_MISSING');
 };
 
@@ -37,25 +31,73 @@ const generateRefreshToken = async (dbClient, userId) => {
   return token;
 };
 
-const setAuthCookies = (res, accessToken, refreshToken) => {
+const getCookieOptions = () => {
   const isProduction = process.env.NODE_ENV === 'production';
+  const sameSite = isProduction ? 'none' : 'lax';
+  const domain = process.env.AUTH_COOKIE_DOMAIN || undefined;
 
-  res.cookie('access_token', accessToken, {
+  const shared = {
     httpOnly: true,
     secure: isProduction,
-    sameSite: 'strict',
-    maxAge: 15 * 60 * 1000,
+    sameSite,
     path: '/',
+    ...(domain ? { domain } : {}),
+  };
+
+  return {
+    access: {
+      ...shared,
+      maxAge: 15 * 60 * 1000,
+    },
+    refresh: {
+      ...shared,
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    },
+  };
+};
+
+const setAuthCookies = (res, accessToken, refreshToken) => {
+  const cookieOptions = getCookieOptions();
+
+  res.cookie('access_token', accessToken, cookieOptions.access);
+  res.cookie('refresh_token', refreshToken, cookieOptions.refresh);
+};
+
+const clearAuthCookies = (res) => {
+  const cookieOptions = getCookieOptions();
+
+  res.clearCookie('access_token', {
+    path: cookieOptions.access.path,
+    httpOnly: cookieOptions.access.httpOnly,
+    secure: cookieOptions.access.secure,
+    sameSite: cookieOptions.access.sameSite,
+    ...(cookieOptions.access.domain ? { domain: cookieOptions.access.domain } : {}),
   });
 
-  res.cookie('refresh_token', refreshToken, {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: 'strict',
-    maxAge: 30 * 24 * 60 * 60 * 1000,
-    path: '/api',
+  res.clearCookie('refresh_token', {
+    path: cookieOptions.refresh.path,
+    httpOnly: cookieOptions.refresh.httpOnly,
+    secure: cookieOptions.refresh.secure,
+    sameSite: cookieOptions.refresh.sameSite,
+    ...(cookieOptions.refresh.domain ? { domain: cookieOptions.refresh.domain } : {}),
   });
 };
+
+const buildUserPayload = ({
+  email,
+  role,
+  barbershopName,
+  plan,
+  subscriptionStatus,
+  subscriptionCurrentPeriodEnd,
+}) => ({
+  email,
+  role,
+  barbershopName,
+  plan,
+  subscriptionStatus,
+  subscriptionCurrentPeriodEnd,
+});
 
 export const authService = {
   isCommonPassword(password) {
@@ -69,6 +111,7 @@ export const authService = {
       await client.query('BEGIN');
 
       const plan = 'basico';
+
       const barbershop = await authRepository.createBarbershop(client, {
         name: barbershopName,
         ownerName,
@@ -78,6 +121,7 @@ export const authService = {
       });
 
       const passwordHash = await bcrypt.hash(password, 12);
+
       const user = await authRepository.createUser(client, {
         barbershopId: barbershop.id,
         email,
@@ -96,19 +140,26 @@ export const authService = {
       });
 
       const refreshToken = await generateRefreshToken(client, user.id);
+
       await client.query('COMMIT');
 
       setAuthCookies(res, accessToken, refreshToken);
+
       logger.info({ barbershopId: barbershop.id, email }, 'Nova barbearia registrada');
+
+      const normalizedRole = normalizeRole('tenant_admin');
 
       return {
         token: accessToken,
-        user: {
+        refreshToken,
+        user: buildUserPayload({
           email,
-          role: 'tenant_admin',
+          role: normalizedRole,
+          barbershopName,
+          plan,
           subscriptionStatus: 'active',
           subscriptionCurrentPeriodEnd: null,
-        },
+        }),
         barbershop: {
           id: barbershop.id,
           name: barbershopName,
@@ -141,13 +192,14 @@ export const authService = {
       }
 
       const normalizedRole = normalizeRole(user.role);
-
       const isValid = await bcrypt.compare(password, user.password_hash);
+
       if (!isValid) {
         logger.warn({ email, userId: user.id }, 'Tentativa de login com senha incorreta');
         throw new UnauthorizedError('Email ou senha incorretos');
       }
 
+      await client.query('BEGIN');
       await authRepository.revokeUserRefreshTokens(client, user.id);
 
       const accessToken = generateAccessToken({
@@ -161,21 +213,28 @@ export const authService = {
       });
 
       const refreshToken = await generateRefreshToken(client, user.id);
+
+      await client.query('COMMIT');
+
       setAuthCookies(res, accessToken, refreshToken);
 
       logger.info({ userId: user.id, email }, 'Login realizado');
 
       return {
         token: accessToken,
-        user: {
+        refreshToken,
+        user: buildUserPayload({
           email: user.email,
           role: normalizedRole,
           barbershopName: user.barbershop_name,
           plan: user.plan,
           subscriptionStatus: user.subscription_status,
           subscriptionCurrentPeriodEnd: user.subscription_current_period_end,
-        },
+        }),
       };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
     } finally {
       client.release();
     }
@@ -200,8 +259,8 @@ export const authService = {
 
       await client.query('BEGIN');
       await authRepository.revokeRefreshTokenById(client, row.id);
+
       const newRefreshToken = await generateRefreshToken(client, row.user_id);
-      await client.query('COMMIT');
 
       const accessToken = generateAccessToken({
         userId: row.user_id,
@@ -213,17 +272,21 @@ export const authService = {
         subscriptionCurrentPeriodEnd: row.subscription_current_period_end,
       });
 
+      await client.query('COMMIT');
+
       setAuthCookies(res, accessToken, newRefreshToken);
 
       return {
         token: accessToken,
-        user: {
+        refreshToken: newRefreshToken,
+        user: buildUserPayload({
           email: row.email,
           role: normalizedRole,
+          barbershopName: row.barbershop_name,
           plan: row.plan,
           subscriptionStatus: row.subscription_status,
           subscriptionCurrentPeriodEnd: row.subscription_current_period_end,
-        },
+        }),
       };
     } catch (err) {
       await client.query('ROLLBACK');
@@ -239,8 +302,7 @@ export const authService = {
       await authRepository.revokeRefreshTokenByHash(tokenHash);
     }
 
-    res.clearCookie('access_token', { path: '/' });
-    res.clearCookie('refresh_token', { path: '/api' });
+    clearAuthCookies(res);
   },
 
   async getMe({ userId, barbershopId, email, plan, role }) {

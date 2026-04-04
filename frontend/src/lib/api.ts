@@ -1,18 +1,11 @@
 import axios, {
   AxiosError,
-  InternalAxiosRequestConfig,
   AxiosResponse,
+  InternalAxiosRequestConfig,
 } from 'axios';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
 
 type RetryableRequestConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
-};
-
-type FailedQueueItem = {
-  resolve: (value?: unknown) => void;
-  reject: (reason?: unknown) => void;
 };
 
 type ApiSuccessPayload<T = unknown> = {
@@ -23,43 +16,51 @@ type ApiSuccessPayload<T = unknown> = {
 };
 
 type RefreshResponse = {
-  token?: string;
   user?: unknown;
 };
 
 const api = axios.create({
-  baseURL: API_URL,
+  baseURL: '/api',
   withCredentials: true,
   timeout: 15000,
 });
 
-let isRefreshing = false;
-let failedQueue: FailedQueueItem[] = [];
+let refreshPromise: Promise<void> | null = null;
 
-const processQueue = (error: unknown | null) => {
-  failedQueue.forEach(({ resolve, reject }) => {
-    if (error) {
-      reject(error);
-    } else {
-      resolve();
-    }
-  });
-
-  failedQueue = [];
+const shouldSkipRefreshByUrl = (url: string) => {
+  return (
+    url.includes('/auth/login') ||
+    url.includes('/auth/register') ||
+    url.includes('/auth/refresh') ||
+    url.includes('/auth/logout')
+  );
 };
 
-api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('token');
-
-    if (token) {
-      config.headers = config.headers ?? {};
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+const notifySessionExpired = () => {
+  if (typeof window === 'undefined') {
+    return;
   }
 
-  return config;
-});
+  window.dispatchEvent(new Event('auth:session-expired'));
+
+  const currentPath = window.location.pathname;
+  if (currentPath !== '/login' && currentPath !== '/cadastro') {
+    window.location.replace('/login');
+  }
+};
+
+const ensureSessionRefresh = async () => {
+  if (!refreshPromise) {
+    refreshPromise = api
+      .post<RefreshResponse>('/auth/refresh')
+      .then(() => undefined)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+
+  return refreshPromise;
+};
 
 api.interceptors.response.use(
   (response: AxiosResponse) => {
@@ -106,13 +107,6 @@ api.interceptors.response.use(
     const status = error.response?.status;
     const url = originalRequest?.url || '';
 
-    const isAuthEndpoint =
-      url.includes('/auth/login') ||
-      url.includes('/auth/register') ||
-      url.includes('/auth/refresh') ||
-      url.includes('/auth/logout') ||
-      url.includes('/auth/me');
-
     if (!originalRequest || status !== 401) {
       return Promise.reject(error);
     }
@@ -121,47 +115,20 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    if (isAuthEndpoint) {
+    if (shouldSkipRefreshByUrl(url)) {
       return Promise.reject(error);
     }
 
-    if (isRefreshing) {
-      return new Promise((resolve, reject) => {
-        failedQueue.push({ resolve, reject });
-      }).then(() => api(originalRequest));
-    }
-
     originalRequest._retry = true;
-    isRefreshing = true;
 
     try {
-      const refreshResponse = await api.post<RefreshResponse>('/auth/refresh');
-      const newToken = refreshResponse.data?.token;
-
-      if (typeof window !== 'undefined' && newToken) {
-        localStorage.setItem('token', newToken);
-      }
-
-      if (newToken) {
-        api.defaults.headers.common.Authorization = `Bearer ${newToken}`;
-      } else {
-        delete api.defaults.headers.common.Authorization;
-      }
-
-      processQueue(null);
+      await ensureSessionRefresh();
       return api(originalRequest);
     } catch (refreshError) {
-      processQueue(refreshError);
-
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('token');
+      if (!url.includes('/auth/me')) {
+        notifySessionExpired();
       }
-
-      delete api.defaults.headers.common.Authorization;
-
       return Promise.reject(refreshError);
-    } finally {
-      isRefreshing = false;
     }
   }
 );

@@ -98,6 +98,8 @@ describe('Auth API — /api/v1/auth', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.data).toHaveProperty('user');
       expect(res.body.data).toHaveProperty('barbershop');
+      expect(typeof res.body.data.token).toBe('string');
+      expect(typeof res.body.data.refreshToken).toBe('string');
       expect(res.body.data.user.email).toBe('joao@teste.com');
       expect(res.body.data.barbershop.plan).toBe('basico');
     });
@@ -165,6 +167,8 @@ describe('Auth API — /api/v1/auth', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
+      expect(typeof res.body.data.token).toBe('string');
+      expect(typeof res.body.data.refreshToken).toBe('string');
       expect(res.body.data.user.email).toBe('joao@teste.com');
     });
 

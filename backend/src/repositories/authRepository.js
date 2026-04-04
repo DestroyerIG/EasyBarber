@@ -66,7 +66,7 @@ export const authRepository = {
   async findValidRefreshToken(tokenHash) {
     const result = await pool.query(
       `SELECT rt.id, rt.user_id, u.email, u.role, b.id as barbershop_id, b.plan
-              , b.subscription_status, b.subscription_current_period_end
+              , b.name as barbershop_name, b.subscription_status, b.subscription_current_period_end
        FROM refresh_tokens rt
        JOIN users u ON rt.user_id = u.id
        JOIN barbershops b ON u.barbershop_id = b.id

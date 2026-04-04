@@ -3,9 +3,9 @@
 import {
   createContext,
   useContext,
-  useState,
   useCallback,
   useEffect,
+  useState,
   type ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
@@ -15,10 +15,11 @@ import type { User } from '@/types';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  isAuthenticated: boolean;
   login: (email: string, password: string, options?: AuthRedirectOptions) => Promise<void>;
   register: (data: RegisterData, options?: AuthRedirectOptions) => Promise<void>;
   logout: () => Promise<void>;
-  refreshUser: () => Promise<User | null>;
+  refreshMe: () => Promise<User | null>;
 }
 
 interface AuthRedirectOptions {
@@ -33,14 +34,6 @@ interface RegisterData {
   password: string;
 }
 
-interface AuthPayload {
-  token?: string;
-  accessToken?: string;
-  user?: User;
-}
-
-const TOKEN_KEY = 'token';
-
 const resolvePostAuthRoute = (role: string | undefined, redirectTo?: string) => {
   if (role === 'platform_admin') {
     return '/admin';
@@ -49,36 +42,36 @@ const resolvePostAuthRoute = (role: string | undefined, redirectTo?: string) => 
   return redirectTo || '/dashboard';
 };
 
-const setAuthToken = (token: string | null) => {
-  if (typeof window === 'undefined') return;
-
-  if (token) {
-    localStorage.setItem(TOKEN_KEY, token);
-    api.defaults.headers.common.Authorization = `Bearer ${token}`;
-  } else {
-    localStorage.removeItem(TOKEN_KEY);
-    delete api.defaults.headers.common.Authorization;
+const isUser = (value: unknown): value is User => {
+  if (!value || typeof value !== 'object') {
+    return false;
   }
+
+  const candidate = value as Partial<User>;
+  return (
+    typeof candidate.email === 'string' &&
+    typeof candidate.role === 'string' &&
+    typeof candidate.barbershopName === 'string' &&
+    typeof candidate.plan === 'string'
+  );
 };
 
-const getAuthToken = () => {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem(TOKEN_KEY);
-};
-
-const extractAuthPayload = (data: unknown): AuthPayload => {
+const extractUserFromResponse = (data: unknown): User | null => {
   if (!data || typeof data !== 'object') {
-    return {};
+    return null;
   }
 
   const payload = data as Record<string, unknown>;
 
-  return {
-    token: typeof payload.token === 'string' ? payload.token : undefined,
-    accessToken:
-      typeof payload.accessToken === 'string' ? payload.accessToken : undefined,
-    user: (payload.user as User | undefined) ?? undefined,
-  };
+  if (isUser(payload.user)) {
+    return payload.user;
+  }
+
+  if (isUser(data)) {
+    return data;
+  }
+
+  return null;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -88,12 +81,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  const fetchMe = useCallback(async (): Promise<User | null> => {
+  const refreshMe = useCallback(async (): Promise<User | null> => {
     try {
       const response = await api.get('/auth/me');
-      const userData = (response.data?.user || response.data || null) as User | null;
-      setUser(userData);
-      return userData;
+      const resolvedUser = extractUserFromResponse(response.data);
+      setUser(resolvedUser);
+      return resolvedUser;
     } catch {
       setUser(null);
       return null;
@@ -105,23 +98,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const initAuth = async () => {
       try {
-        const token = getAuthToken();
-
-        if (!token) {
-          if (mounted) setUser(null);
-          return;
-        }
-
-        api.defaults.headers.common.Authorization = `Bearer ${token}`;
-
         const response = await api.get('/auth/me');
         if (!mounted) return;
 
-        const userData = (response.data?.user || response.data || null) as User | null;
-        setUser(userData);
+        setUser(extractUserFromResponse(response.data));
       } catch {
         if (!mounted) return;
-        setAuthToken(null);
         setUser(null);
       } finally {
         if (mounted) setLoading(false);
@@ -135,22 +117,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const onSessionExpired = () => {
+      setUser(null);
+      setLoading(false);
+    };
+
+    window.addEventListener('auth:session-expired', onSessionExpired);
+    return () => {
+      window.removeEventListener('auth:session-expired', onSessionExpired);
+    };
+  }, []);
+
   const login = useCallback(
     async (email: string, password: string, options?: AuthRedirectOptions) => {
       setLoading(true);
 
       try {
         const response = await api.post('/auth/login', { email, password });
-        const payload = extractAuthPayload(response.data);
-        const token = payload.token || payload.accessToken;
-
-        if (!token) {
-          throw new Error('Token não retornado pelo backend no login.');
-        }
-
-        setAuthToken(token);
-
-        const userData = payload.user ?? (await fetchMe());
+        const userData = extractUserFromResponse(response.data) ?? (await refreshMe());
 
         if (!userData) {
           throw new Error('Sessão não foi carregada após o login.');
@@ -158,15 +147,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         setUser(userData);
         router.replace(resolvePostAuthRoute(userData.role, options?.redirectTo));
+        router.refresh();
       } catch (error) {
-        setAuthToken(null);
         setUser(null);
         throw error;
       } finally {
         setLoading(false);
       }
     },
-    [fetchMe, router]
+    [refreshMe, router]
   );
 
   const register = useCallback(
@@ -175,16 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         const response = await api.post('/auth/register', data);
-        const payload = extractAuthPayload(response.data);
-        const token = payload.token || payload.accessToken;
-
-        if (!token) {
-          throw new Error('Token não retornado pelo backend no cadastro.');
-        }
-
-        setAuthToken(token);
-
-        const userData = payload.user ?? (await fetchMe());
+        const userData = extractUserFromResponse(response.data) ?? (await refreshMe());
 
         if (!userData) {
           throw new Error('Sessão não foi carregada após o cadastro.');
@@ -192,15 +172,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         setUser(userData);
         router.replace(resolvePostAuthRoute(userData.role, options?.redirectTo));
+        router.refresh();
       } catch (error) {
-        setAuthToken(null);
         setUser(null);
         throw error;
       } finally {
         setLoading(false);
       }
     },
-    [fetchMe, router]
+    [refreshMe, router]
   );
 
   const logout = useCallback(async () => {
@@ -211,10 +191,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // mantém logout local mesmo se a API falhar
     } finally {
-      setAuthToken(null);
       setUser(null);
       setLoading(false);
       router.replace('/login');
+      router.refresh();
     }
   }, [router]);
 
@@ -223,10 +203,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         loading,
+        isAuthenticated: Boolean(user),
         login,
         register,
         logout,
-        refreshUser: fetchMe,
+        refreshMe,
       }}
     >
       {children}

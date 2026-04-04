@@ -4,10 +4,22 @@ import { registerSchema, loginSchema } from '../validators/schemas/index.js';
 
 export { registerSchema, loginSchema };
 
+const resolveRefreshToken = (req) => {
+  if (req.cookies?.refresh_token) {
+    return req.cookies.refresh_token;
+  }
+
+  if (typeof req.body?.refreshToken === 'string') {
+    return req.body.refreshToken;
+  }
+
+  return null;
+};
+
 export const register = async (req, res, next) => {
   try {
     const data = await authService.register(res, req.body);
-    sendCreated(res, data);
+    return sendCreated(res, data);
   } catch (error) {
     next(error);
   }
@@ -16,7 +28,7 @@ export const register = async (req, res, next) => {
 export const login = async (req, res, next) => {
   try {
     const data = await authService.login(res, req.body);
-    sendSuccess(res, data);
+    return sendSuccess(res, data);
   } catch (error) {
     next(error);
   }
@@ -24,8 +36,9 @@ export const login = async (req, res, next) => {
 
 export const refreshAccessToken = async (req, res, next) => {
   try {
-    const data = await authService.refresh(res, req.cookies?.refresh_token);
-    sendSuccess(res, data);
+    const refreshToken = resolveRefreshToken(req);
+    const data = await authService.refresh(res, refreshToken);
+    return sendSuccess(res, data);
   } catch (error) {
     next(error);
   }
@@ -33,8 +46,9 @@ export const refreshAccessToken = async (req, res, next) => {
 
 export const logout = async (req, res, next) => {
   try {
-    await authService.logout(req.cookies?.refresh_token, res);
-    sendSuccess(res, { message: 'Logout realizado com sucesso' });
+    const refreshToken = resolveRefreshToken(req);
+    await authService.logout(refreshToken, res);
+    return sendSuccess(res, { message: 'Logout realizado com sucesso' });
   } catch (error) {
     next(error);
   }
@@ -43,7 +57,7 @@ export const logout = async (req, res, next) => {
 export const me = async (req, res, next) => {
   try {
     const data = await authService.getMe(req.user);
-    sendSuccess(res, data);
+    return sendSuccess(res, data);
   } catch (error) {
     next(error);
   }
