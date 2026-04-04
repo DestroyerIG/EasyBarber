@@ -39,12 +39,22 @@ const API_V1 = '/api/v1';
 // Segurança básica
 app.use(helmet());
 
-// CORS
+// CORS corrigido para localhost, domínio fixo da Vercel, previews da Vercel e FRONTEND_URL opcional
 const allowedOrigins = [
-  process.env.FRONTEND_URL,
   'http://localhost:3000',
   'http://127.0.0.1:3000',
+  'https://barberpro-saas-2-0.vercel.app',
+  process.env.FRONTEND_URL,
 ].filter(Boolean);
+
+const isAllowedVercelPreview = (origin) => {
+  try {
+    const hostname = new URL(origin).hostname;
+    return hostname.endsWith('.vercel.app');
+  } catch {
+    return false;
+  }
+};
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -55,6 +65,10 @@ app.use(cors({
       return callback(null, true);
     }
 
+    if (isAllowedVercelPreview(origin)) {
+      return callback(null, true);
+    }
+
     return callback(new Error(`Origin não permitida pelo CORS: ${origin}`));
   },
   credentials: true,
@@ -62,7 +76,14 @@ app.use(cors({
 }));
 
 app.use(cookieParser());
-app.post(`${API_V1}/subscriptions/webhook`, express.raw({ type: 'application/json' }), stripeWebhook);
+
+// Stripe webhook precisa vir antes do express.json
+app.post(
+  `${API_V1}/subscriptions/webhook`,
+  express.raw({ type: 'application/json' }),
+  stripeWebhook
+);
+
 app.use(express.json({ limit: '1mb' }));
 
 // Request ID + logging
@@ -79,13 +100,16 @@ app.use((req, res, next) => {
       res.statusCode >= 400 ? 'warn' :
       'info';
 
-    logger[level]({
-      requestId: req.id,
-      method: req.method,
-      url: req.originalUrl,
-      status: res.statusCode,
-      durationMs: duration,
-    }, `${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms`);
+    logger[level](
+      {
+        requestId: req.id,
+        method: req.method,
+        url: req.originalUrl,
+        status: res.statusCode,
+        durationMs: duration,
+      },
+      `${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms`
+    );
   });
 
   next();
@@ -97,15 +121,18 @@ const apiLimiter = rateLimit({
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.method === 'OPTIONS' || req.originalUrl.startsWith(`${API_V1}/subscriptions/webhook`),
+  skip: (req) =>
+    req.method === 'OPTIONS' ||
+    req.originalUrl.startsWith(`${API_V1}/subscriptions/webhook`),
   message: {
     success: false,
     error: {
       code: 'RATE_LIMIT',
-      message: 'Muitas requisições. Tente novamente em alguns minutos.'
-    }
-  }
+      message: 'Muitas requisições. Tente novamente em alguns minutos.',
+    },
+  },
 });
+
 app.use(API_V1, apiLimiter);
 
 // Rate limit específico para login
@@ -119,9 +146,9 @@ const loginLimiter = rateLimit({
     success: false,
     error: {
       code: 'RATE_LIMIT',
-      message: 'Muitas tentativas de login. Tente novamente em 15 minutos.'
-    }
-  }
+      message: 'Muitas tentativas de login. Tente novamente em 15 minutos.',
+    },
+  },
 });
 
 // Rate limit específico para cadastro
@@ -135,9 +162,9 @@ const registerLimiter = rateLimit({
     success: false,
     error: {
       code: 'RATE_LIMIT',
-      message: 'Muitas tentativas de cadastro. Tente novamente em 15 minutos.'
-    }
-  }
+      message: 'Muitas tentativas de cadastro. Tente novamente em 15 minutos.',
+    },
+  },
 });
 
 // Health check
@@ -240,7 +267,7 @@ const start = async () => {
     startReminderCron();
     initWhatsApp();
 
-    server = app.listen(PORT, () => {
+    server = app.listen(PORT, '0.0.0.0', () => {
       logger.info(`Servidor rodando na porta ${PORT}`);
     });
   } catch (error) {
