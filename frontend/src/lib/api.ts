@@ -36,6 +36,19 @@ const processQueue = (error: unknown | null) => {
   failedQueue = [];
 };
 
+api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('token');
+
+    if (token) {
+      config.headers = config.headers ?? {};
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+
+  return config;
+});
+
 api.interceptors.response.use(
   (response: AxiosResponse) => {
     if (
@@ -119,6 +132,13 @@ api.interceptors.response.use(
       return api(originalRequest);
     } catch (refreshError) {
       processQueue(refreshError);
+
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('token');
+      }
+
+      delete api.defaults.headers.common.Authorization;
+
       return Promise.reject(refreshError);
     } finally {
       isRefreshing = false;

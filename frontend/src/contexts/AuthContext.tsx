@@ -33,12 +33,52 @@ interface RegisterData {
   password: string;
 }
 
+interface AuthPayload {
+  token?: string;
+  accessToken?: string;
+  user?: User;
+}
+
+const TOKEN_KEY = 'token';
+
 const resolvePostAuthRoute = (role: string | undefined, redirectTo?: string) => {
   if (role === 'platform_admin') {
     return '/admin';
   }
 
   return redirectTo || '/dashboard';
+};
+
+const setAuthToken = (token: string | null) => {
+  if (typeof window === 'undefined') return;
+
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token);
+    api.defaults.headers.common.Authorization = `Bearer ${token}`;
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+    delete api.defaults.headers.common.Authorization;
+  }
+};
+
+const getAuthToken = () => {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(TOKEN_KEY);
+};
+
+const extractAuthPayload = (data: unknown): AuthPayload => {
+  if (!data || typeof data !== 'object') {
+    return {};
+  }
+
+  const payload = data as Record<string, unknown>;
+
+  return {
+    token: typeof payload.token === 'string' ? payload.token : undefined,
+    accessToken:
+      typeof payload.accessToken === 'string' ? payload.accessToken : undefined,
+    user: (payload.user as User | undefined) ?? undefined,
+  };
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -51,7 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchMe = useCallback(async (): Promise<User | null> => {
     try {
       const response = await api.get('/auth/me');
-      const userData = response.data?.user || response.data || null;
+      const userData = (response.data?.user || response.data || null) as User | null;
       setUser(userData);
       return userData;
     } catch {
@@ -65,13 +105,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const initAuth = async () => {
       try {
+        const token = getAuthToken();
+
+        if (!token) {
+          if (mounted) setUser(null);
+          return;
+        }
+
+        api.defaults.headers.common.Authorization = `Bearer ${token}`;
+
         const response = await api.get('/auth/me');
         if (!mounted) return;
 
-        const userData = response.data?.user || response.data || null;
+        const userData = (response.data?.user || response.data || null) as User | null;
         setUser(userData);
       } catch {
         if (!mounted) return;
+        setAuthToken(null);
         setUser(null);
       } finally {
         if (mounted) setLoading(false);
@@ -90,15 +140,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(true);
 
       try {
-        await api.post('/auth/login', { email, password });
+        const response = await api.post('/auth/login', { email, password });
+        const payload = extractAuthPayload(response.data);
+        const token = payload.token || payload.accessToken;
 
-        const userData = await fetchMe();
+        if (!token) {
+          throw new Error('Token não retornado pelo backend no login.');
+        }
+
+        setAuthToken(token);
+
+        const userData = payload.user ?? (await fetchMe());
 
         if (!userData) {
           throw new Error('Sessão não foi carregada após o login.');
         }
 
+        setUser(userData);
         router.replace(resolvePostAuthRoute(userData.role, options?.redirectTo));
+      } catch (error) {
+        setAuthToken(null);
+        setUser(null);
+        throw error;
       } finally {
         setLoading(false);
       }
@@ -111,15 +174,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(true);
 
       try {
-        await api.post('/auth/register', data);
+        const response = await api.post('/auth/register', data);
+        const payload = extractAuthPayload(response.data);
+        const token = payload.token || payload.accessToken;
 
-        const userData = await fetchMe();
+        if (!token) {
+          throw new Error('Token não retornado pelo backend no cadastro.');
+        }
+
+        setAuthToken(token);
+
+        const userData = payload.user ?? (await fetchMe());
 
         if (!userData) {
           throw new Error('Sessão não foi carregada após o cadastro.');
         }
 
+        setUser(userData);
         router.replace(resolvePostAuthRoute(userData.role, options?.redirectTo));
+      } catch (error) {
+        setAuthToken(null);
+        setUser(null);
+        throw error;
       } finally {
         setLoading(false);
       }
@@ -135,6 +211,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // mantém logout local mesmo se a API falhar
     } finally {
+      setAuthToken(null);
       setUser(null);
       setLoading(false);
       router.replace('/login');
