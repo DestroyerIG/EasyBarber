@@ -70,12 +70,19 @@ export const authService = {
 
       const plan = 'basico';
       const barbershop = await authRepository.createBarbershop(client, {
-        name: barbershopName, ownerName, email, whatsapp, plan,
+        name: barbershopName,
+        ownerName,
+        email,
+        whatsapp,
+        plan,
       });
 
       const passwordHash = await bcrypt.hash(password, 12);
       const user = await authRepository.createUser(client, {
-        barbershopId: barbershop.id, email, passwordHash, role: 'tenant_admin',
+        barbershopId: barbershop.id,
+        email,
+        passwordHash,
+        role: 'tenant_admin',
       });
 
       const accessToken = generateAccessToken({
@@ -95,19 +102,26 @@ export const authService = {
       logger.info({ barbershopId: barbershop.id, email }, 'Nova barbearia registrada');
 
       return {
+        token: accessToken,
         user: {
           email,
           role: 'tenant_admin',
           subscriptionStatus: 'active',
           subscriptionCurrentPeriodEnd: null,
         },
-        barbershop: { id: barbershop.id, name: barbershopName, plan },
+        barbershop: {
+          id: barbershop.id,
+          name: barbershopName,
+          plan,
+        },
       };
     } catch (error) {
       await client.query('ROLLBACK');
+
       if (error.code === '23505') {
         throw new ConflictError('Email já cadastrado');
       }
+
       logger.error({ err: error, email }, 'Erro ao registrar barbearia');
       throw new AppError('Erro ao registrar barbearia. Tente novamente.', 500, 'REGISTER_ERROR');
     } finally {
@@ -120,6 +134,7 @@ export const authService = {
 
     try {
       const user = await authRepository.findUserByEmail(email);
+
       if (!user) {
         logger.warn({ email }, 'Tentativa de login com email inexistente');
         throw new UnauthorizedError('Email ou senha incorretos');
@@ -151,6 +166,7 @@ export const authService = {
       logger.info({ userId: user.id, email }, 'Login realizado');
 
       return {
+        token: accessToken,
         user: {
           email: user.email,
           role: normalizedRole,
@@ -178,6 +194,7 @@ export const authService = {
     }
 
     const client = await authRepository.getClient();
+
     try {
       const normalizedRole = normalizeRole(row.role);
 
@@ -199,6 +216,7 @@ export const authService = {
       setAuthCookies(res, accessToken, newRefreshToken);
 
       return {
+        token: accessToken,
         user: {
           email: row.email,
           role: normalizedRole,
@@ -227,6 +245,7 @@ export const authService = {
 
   async getMe({ userId, barbershopId, email, plan, role }) {
     const user = await authRepository.findUserByEmail(email);
+
     if (!user) {
       throw new UnauthorizedError('Usuário não encontrado');
     }

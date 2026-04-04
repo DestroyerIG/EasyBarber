@@ -15,6 +15,18 @@ type FailedQueueItem = {
   reject: (reason?: unknown) => void;
 };
 
+type ApiSuccessPayload<T = unknown> = {
+  success: true;
+  data: T;
+  meta?: unknown;
+  message?: string;
+};
+
+type RefreshResponse = {
+  token?: string;
+  user?: unknown;
+};
+
 const api = axios.create({
   baseURL: API_URL,
   withCredentials: true,
@@ -54,14 +66,10 @@ api.interceptors.response.use(
     if (
       response.data &&
       typeof response.data === 'object' &&
-      response.data.success === true &&
-      'data' in response.data
+      (response.data as Record<string, unknown>).success === true &&
+      'data' in (response.data as Record<string, unknown>)
     ) {
-      const payload = response.data as {
-        data: unknown;
-        meta?: unknown;
-        message?: string;
-      };
+      const payload = response.data as ApiSuccessPayload;
 
       response.data = payload.data;
 
@@ -127,7 +135,19 @@ api.interceptors.response.use(
     isRefreshing = true;
 
     try {
-      await api.post('/auth/refresh');
+      const refreshResponse = await api.post<RefreshResponse>('/auth/refresh');
+      const newToken = refreshResponse.data?.token;
+
+      if (typeof window !== 'undefined' && newToken) {
+        localStorage.setItem('token', newToken);
+      }
+
+      if (newToken) {
+        api.defaults.headers.common.Authorization = `Bearer ${newToken}`;
+      } else {
+        delete api.defaults.headers.common.Authorization;
+      }
+
       processQueue(null);
       return api(originalRequest);
     } catch (refreshError) {
