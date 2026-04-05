@@ -22,7 +22,7 @@ type RefreshResponse = {
 const api = axios.create({
   baseURL: '/api',
   withCredentials: true,
-  timeout: 15000,
+  timeout: 60000,
 });
 
 let refreshPromise: Promise<void> | null = null;
