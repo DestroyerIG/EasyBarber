@@ -20,7 +20,7 @@ type RefreshResponse = {
 };
 
 const api = axios.create({
-  baseURL: '/api/auth',
+  baseURL: '/api',
   withCredentials: true,
   timeout: 15000,
 });
