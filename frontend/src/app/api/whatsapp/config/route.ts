@@ -5,3 +5,6 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   return proxyRequest(request, '/whatsapp/config', 'PUT');
 }
+export async function POST(request: Request) {
+  return proxyRequest(request, '/whatsapp/config', 'POST');
+}
