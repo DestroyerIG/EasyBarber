@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS users (
     role VARCHAR(20) NOT NULL DEFAULT 'tenant_admin'
         CHECK (role IN ('platform_admin', 'tenant_admin', 'employee')),
     blocked BOOLEAN NOT NULL DEFAULT false,
+    email_verified BOOLEAN NOT NULL DEFAULT false,
+    email_verification_token_hash CHAR(64),
+    email_verification_expires_at TIMESTAMP,
+    email_verified_at TIMESTAMP,
+    verification_sent_at TIMESTAMP,
     blocked_at TIMESTAMP,
     blocked_reason VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -230,6 +235,27 @@ CREATE TABLE IF NOT EXISTS whatsapp_ratings (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Tabela de configurações da barbearia
+CREATE TABLE IF NOT EXISTS barbershop_settings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    barbershop_id UUID NOT NULL UNIQUE REFERENCES barbershops(id) ON DELETE CASCADE,
+    contact_phone VARCHAR(30),
+    address VARCHAR(255),
+    opening_time TIME NOT NULL DEFAULT '09:00:00',
+    closing_time TIME NOT NULL DEFAULT '20:00:00',
+    slot_interval_minutes INTEGER NOT NULL DEFAULT 30
+        CHECK (slot_interval_minutes IN (15, 20, 30, 45, 60)),
+    allow_walkins BOOLEAN NOT NULL DEFAULT true,
+    auto_confirm_appointments BOOLEAN NOT NULL DEFAULT false,
+    email_reminders BOOLEAN NOT NULL DEFAULT true,
+    whatsapp_reminders BOOLEAN NOT NULL DEFAULT true,
+    google_calendar_enabled BOOLEAN NOT NULL DEFAULT false,
+    custom_webhook_url TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CHECK (closing_time > opening_time)
+);
+
 -- Índices para melhorar performance
 
 -- Appointments: busca por barbearia + data (query mais frequente)
@@ -250,6 +276,7 @@ CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token_hash ON refresh_tokens(token
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_email_not_blocked ON users(email) WHERE blocked = false;
 CREATE INDEX IF NOT EXISTS idx_users_barbershop_blocked ON users(barbershop_id, blocked);
+CREATE INDEX IF NOT EXISTS idx_users_email_verification_token_hash ON users(email_verification_token_hash) WHERE email_verification_token_hash IS NOT NULL;
 
 -- Stripe billing
 CREATE INDEX IF NOT EXISTS idx_barbershops_subscription_status ON barbershops(subscription_status);
@@ -263,6 +290,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DE
 -- WhatsApp
 CREATE INDEX IF NOT EXISTS idx_whatsapp_sessions_phone ON whatsapp_sessions(phone);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_ratings_barbershop ON whatsapp_ratings(barbershop_id);
+CREATE INDEX IF NOT EXISTS idx_barbershop_settings_barbershop_id ON barbershop_settings(barbershop_id);
 
 -- Barbers/Services: filtros ativos
 CREATE INDEX IF NOT EXISTS idx_barbers_barbershop_active ON barbers(barbershop_id) WHERE active = true;
@@ -282,7 +310,7 @@ DO $$
 DECLARE
     t TEXT;
 BEGIN
-    FOR t IN SELECT unnest(ARRAY['barbershops','users','barbers','services','clients','appointments','expenses','whatsapp_sessions','whatsapp_bot_config'])
+    FOR t IN SELECT unnest(ARRAY['barbershops','users','barbers','services','clients','appointments','expenses','whatsapp_sessions','whatsapp_bot_config','barbershop_settings'])
     LOOP
         EXECUTE format('
             DROP TRIGGER IF EXISTS trigger_updated_at ON %I;

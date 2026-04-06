@@ -14,6 +14,7 @@ import { ClientModule } from '@/components/ClientModule';
 import { ServiceBarberModule } from '@/components/ServiceBarberModule';
 import { FinanceModule } from '@/components/FinanceModule';
 import { WhatsAppModule } from '@/components/WhatsAppModule';
+import { SettingsModule } from '@/components/SettingsModule';
 import { useToast } from '@/components/Toast';
 import { PricingPlansSection } from '@/components/marketing/PricingPlansSection';
 import { billingApi } from '@/lib/billing';
@@ -21,7 +22,7 @@ import { isPlanId, PLAN_MAP } from '@/lib/plans';
 import { useSubscriptionAccess } from '@/hooks/useSubscriptionAccess';
 import { getApiErrorMessage } from '@/utils/handleApiError';
 import { FeatureGate } from '@/components/billing/FeatureGate';
-import { Settings, ShieldCheck } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 import type { DashboardData, TabId } from '@/types';
 
 export default function DashboardPage() {
@@ -264,18 +265,7 @@ export default function DashboardPage() {
             onManageBilling={openBillingPortal}
             title="Administração avançada indisponível"
           >
-            <div>
-              <h2 className="text-3xl font-bold text-white mb-8">Configurações</h2>
-              <div className="bg-dark-light border border-primary/20 rounded-xl p-8">
-                <div className="flex flex-col items-center justify-center py-12">
-                  <Settings className="text-gray-400 mb-4" size={48} />
-                  <h3 className="text-xl font-semibold text-white mb-2">Configurações</h3>
-                  <p className="text-gray-400 text-center max-w-md">
-                    Configure dados da barbearia, horário de funcionamento, notificações e integrações.
-                  </p>
-                </div>
-              </div>
-            </div>
+            <SettingsModule initialBarbershopName={user?.barbershopName || ''} />
           </FeatureGate>
         )}
       </main>

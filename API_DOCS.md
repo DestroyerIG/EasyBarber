@@ -102,6 +102,39 @@ Body:
 `desiredPlan` é opcional e aceita: `basico`, `profissional`, `premium`.
 No primeiro cadastro, o plano efetivo da conta permanece `basico` até a conclusão do checkout.
 
+Comportamento:
+
+- A conta é criada com e-mail não verificado.
+- O backend gera token seguro de verificação com expiração.
+- O backend envia e-mail de verificação.
+- Este endpoint não autentica mais automaticamente (não retorna token/refreshToken).
+
+Exemplo de resposta (201):
+
+```json
+{
+  "success": true,
+  "data": {
+    "verificationRequired": true,
+    "verificationEmailSent": true,
+    "message": "Cadastro realizado com sucesso. Verifique seu e-mail para ativar a conta.",
+    "user": {
+      "email": "owner@barbearia.com",
+      "role": "tenant_admin",
+      "barbershopName": "Barbearia X",
+      "plan": "basico",
+      "emailVerified": false
+    },
+    "barbershop": {
+      "id": "uuid",
+      "name": "Barbearia X",
+      "plan": "basico",
+      "desiredPlan": "profissional"
+    }
+  }
+}
+```
+
 Validações principais:
 
 - password >= 8 caracteres
@@ -118,6 +151,32 @@ Body:
   "password": "SenhaComMaiuscula1"
 }
 ```
+
+Se o e-mail não estiver verificado e a senha estiver correta, retorna:
+
+- status: `403`
+- code: `EMAIL_NOT_VERIFIED`
+
+### GET /auth/verify-email?token=...
+
+Valida o token de verificação de e-mail e marca a conta como verificada.
+
+Erros comuns:
+
+- `INVALID_VERIFICATION_TOKEN`
+- `EXPIRED_VERIFICATION_TOKEN`
+
+### POST /auth/resend-verification
+
+Body:
+
+```json
+{
+  "email": "owner@barbearia.com"
+}
+```
+
+Retorna sempre resposta genérica para evitar enumeração de contas.
 
 ### POST /auth/refresh
 

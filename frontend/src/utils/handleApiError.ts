@@ -1,7 +1,8 @@
 import axios from 'axios';
 
 type ApiErrorPayload = {
-  error?: string | { message?: string; details?: string[] };
+  error?: string | { code?: string; message?: string; details?: string[] };
+  errorCode?: string;
   message?: string;
   details?: string[];
 };
@@ -47,4 +48,22 @@ export function getApiErrorMessage(error: unknown, fallback = 'Ocorreu um erro i
   if (error instanceof Error) return error.message;
 
   return fallback;
+}
+
+export function getApiErrorCode(error: unknown): string | null {
+  if (!axios.isAxiosError(error)) {
+    return null;
+  }
+
+  const data = error.response?.data as ApiErrorPayload | undefined;
+
+  if (typeof data?.errorCode === 'string' && data.errorCode.trim().length > 0) {
+    return data.errorCode;
+  }
+
+  if (typeof data?.error === 'object' && typeof data.error?.code === 'string') {
+    return data.error.code;
+  }
+
+  return null;
 }

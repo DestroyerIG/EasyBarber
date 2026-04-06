@@ -1,11 +1,14 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
 import { isPlanId, PLAN_MAP, SAAS_PLANS, type PlanId } from '@/lib/plans';
-import { getApiErrorMessage } from '@/utils/handleApiError';
+import api from '@/lib/api';
+import { getApiErrorCode, getApiErrorMessage } from '@/utils/handleApiError';
+import easyBarberLogo from '@/icons/easybarber.png';
 
 type AuthMode = 'login' | 'register';
 
@@ -24,7 +27,11 @@ const resolveInitialPlan = (selectedPlan?: string | null): PlanId => {
 
 export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
   const [loading, setLoading] = useState(false);
+  const [resendingVerification, setResendingVerification] = useState(false);
   const [desiredPlan, setDesiredPlan] = useState<PlanId>(() => resolveInitialPlan(selectedPlan));
+  const [verificationNotice, setVerificationNotice] = useState<string | null>(null);
+  const [verificationEmail, setVerificationEmail] = useState('');
+  const [verificationSent, setVerificationSent] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -57,17 +64,14 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setVerificationNotice(null);
 
     try {
       if (isLogin) {
         await login(formData.email, formData.password);
         showToast('Login realizado com sucesso.', 'success');
       } else {
-        const redirectTo = desiredPlan !== 'basico'
-          ? `/dashboard?checkoutPlan=${desiredPlan}`
-          : '/dashboard';
-
-        await register(
+        const result = await register(
           {
             barbershopName: formData.barbershopName,
             ownerName: formData.ownerName,
@@ -75,16 +79,56 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
             whatsapp: formData.whatsapp,
             password: formData.password,
             desiredPlan,
-          },
-          { redirectTo }
+          }
         );
 
-        showToast('Cadastro concluído com sucesso.', 'success');
+        setVerificationEmail(result.email);
+        setVerificationSent(result.verificationEmailSent);
+        setVerificationNotice(result.message);
+        setFormData((prev) => ({ ...prev, password: '' }));
+
+        showToast(result.message, result.verificationEmailSent ? 'success' : 'info');
       }
     } catch (error: unknown) {
+      const errorCode = getApiErrorCode(error);
+
+      if (isLogin && errorCode === 'EMAIL_NOT_VERIFIED') {
+        setVerificationEmail(formData.email.trim());
+        setVerificationSent(false);
+        setVerificationNotice('Sua conta ainda não foi verificada. Reenvie o link e confirme seu e-mail para entrar.');
+      }
+
       showToast(getApiErrorMessage(error, 'Erro ao processar solicitação'), 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    const email = (verificationEmail || formData.email || '').trim();
+
+    if (!email) {
+      showToast('Informe o e-mail da conta para reenviar a verificação.', 'error');
+      return;
+    }
+
+    setResendingVerification(true);
+
+    try {
+      const response = await api.post('/auth/resend-verification', { email });
+      const message =
+        typeof response.data?.message === 'string'
+          ? response.data.message
+          : 'Se existir uma conta pendente para este e-mail, enviaremos um novo link de verificação.';
+
+      setVerificationEmail(email);
+      setVerificationSent(true);
+      setVerificationNotice(message);
+      showToast(message, 'info');
+    } catch (error: unknown) {
+      showToast(getApiErrorMessage(error, 'Não foi possível reenviar o e-mail de verificação.'), 'error');
+    } finally {
+      setResendingVerification(false);
     }
   };
 
@@ -92,7 +136,12 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(255,122,0,0.25),_rgba(0,0,0,0.9)_45%)] px-4 py-10">
       <div className="mx-auto flex max-w-5xl flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
         <section className="max-w-xl">
-          <p className="text-xs uppercase tracking-[0.24em] text-primary/70">EasyBarber</p>
+          <div className="inline-flex items-center gap-3">
+            <span className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-primary/30 bg-black/40">
+              <Image src={easyBarberLogo} alt="Logo EasyBarber" width={40} height={40} className="h-full w-full object-contain" priority />
+            </span>
+            <p className="text-xs uppercase tracking-[0.24em] text-primary/70">EasyBarber</p>
+          </div>
           <h1 className="mt-3 text-4xl font-black leading-tight sm:text-5xl">
             {isLogin ? 'Acesse sua operação e mantenha o controle da barbearia.' : 'Abra sua conta e transforme sua barbearia em um negócio previsível.'}
           </h1>
@@ -200,9 +249,33 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
               {loading ? 'Processando...' : isLogin ? 'Entrar' : 'Criar conta'}
             </button>
 
+            {verificationNotice && (
+              <div className="rounded-xl border border-primary/30 bg-primary/10 p-4 text-sm text-primary">
+                <p>{verificationNotice}</p>
+                {verificationEmail && (
+                  <p className="mt-2 text-xs text-gray-300">
+                    E-mail de verificação: <strong>{verificationEmail}</strong>
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  disabled={resendingVerification}
+                  className="mt-3 rounded-lg border border-primary/40 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary transition hover:border-primary disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {resendingVerification ? 'Reenviando...' : 'Reenviar e-mail de verificação'}
+                </button>
+                {verificationSent && (
+                  <p className="mt-2 text-xs text-gray-300">
+                    Se não encontrar o e-mail na caixa de entrada, confira a pasta de spam.
+                  </p>
+                )}
+              </div>
+            )}
+
             {!isLogin && desiredPlan !== 'basico' && (
               <p className="text-xs text-gray-400">
-                Ao criar a conta, você será redirecionado para concluir a assinatura {PLAN_MAP[desiredPlan].name}.
+                Após verificar o e-mail e acessar sua conta, finalize a assinatura {PLAN_MAP[desiredPlan].name} no dashboard.
               </p>
             )}
           </form>

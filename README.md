@@ -14,6 +14,7 @@ Também há suporte a execução via Docker Compose com PostgreSQL.
 ## Principais Funcionalidades
 
 - Autenticação com JWT (access + refresh token em cookies httpOnly).
+- Cadastro com verificação obrigatória de e-mail (token com expiração + reenvio de verificação).
 - Gestão de agendamentos, clientes, serviços e barbeiros.
 - Módulo financeiro com resumo diário/mensal e despesas.
 - Bot de WhatsApp via whatsapp-web.js com configuração de mensagens e menu dinâmico.
@@ -30,6 +31,7 @@ Também há suporte a execução via Docker Compose com PostgreSQL.
 - PostgreSQL (driver pg)
 - Zod (validação)
 - jsonwebtoken + bcryptjs
+- nodemailer (SMTP)
 - Pino (logs)
 - stripe
 - whatsapp-web.js
@@ -62,7 +64,7 @@ No frontend, o App Router organiza páginas públicas, dashboard tenant e área 
 ```text
 backend/
   src/
-    config/        # database.sql e migration_v2..v7.sql
+    config/        # database.sql e migration_v2..v9.sql
     controllers/
     middleware/
     repositories/
@@ -87,7 +89,6 @@ Detalhes: PROJECT_STRUCTURE.md
 - Git.
 
 Opcional:
-
 - Docker + Docker Compose para stack containerizada.
 
 ## Variáveis de Ambiente
@@ -103,6 +104,15 @@ LOG_LEVEL=info
 DATABASE_URL=postgresql://postgres:senha@localhost:5432/barberpro
 JWT_SECRET=troque_esta_chave
 FRONTEND_URL=http://localhost:3000
+APP_URL=http://localhost:3000
+EMAIL_VERIFICATION_TTL_MINUTES=60
+
+# SMTP (verificação de e-mail)
+SMTP_HOST=smtp.seudominio.com
+SMTP_PORT=587
+SMTP_USER=usuario_smtp
+SMTP_PASS=senha_smtp
+SMTP_FROM="EasyBarber <no-reply@seudominio.com>"
 
 # Stripe (obrigatório somente para billing em produção)
 STRIPE_SECRET_KEY=sk_test_xxx
@@ -157,6 +167,8 @@ A sequência recomendada para banco novo é:
 4. backend/src/config/migration_v5.sql
 5. backend/src/config/migration_v6.sql
 6. backend/src/config/migration_v7.sql
+7. backend/src/config/migration_v8.sql
+8. backend/src/config/migration_v9.sql
 
 Observação: migration_v2.sql é voltada a upgrade legado e normalmente não é necessária em ambiente novo.
 
@@ -234,10 +246,12 @@ Acesso liberado:
 ## Fluxo Básico de Autenticação
 
 1. Usuário cadastra tenant em /api/v1/auth/register.
-2. Backend define cookies access_token e refresh_token.
-3. Frontend consulta /api/v1/auth/me para montar sessão.
-4. Em expiração de access token, frontend tenta /api/v1/auth/refresh.
-5. Rotas protegidas exigem auth, role e feature permission.
+2. Conta nasce não verificada e o backend envia e-mail com link de confirmação.
+3. Usuário confirma no link /verificar-email?token=... no frontend.
+4. Frontend chama /api/auth/verify-email e a API marca o e-mail como verificado.
+5. Somente após verificação, login em /api/v1/auth/login gera cookies access_token e refresh_token.
+6. Frontend consulta /api/v1/auth/me para montar sessão e usa /api/v1/auth/refresh em expiração do access token.
+7. Rotas protegidas exigem auth, role e feature permission.
 
 ## Módulos Principais
 
@@ -268,6 +282,8 @@ Arquivos SQL em backend/src/config:
 - migration_v5.sql (campos e eventos Stripe)
 - migration_v6.sql (RBAC admin/tenant/employee e audit logs)
 - migration_v7.sql (preferência de plano no onboarding: desired_plan)
+- migration_v8.sql (barbershop settings)
+- migration_v9.sql (verificação de e-mail de conta)
 
 A documentação completa de migrations manuais, validação, rollback e troubleshooting está em POSTGRESQL_SETUP.md.
 
@@ -345,8 +361,9 @@ npm run lint
 As inconsistências operacionais críticas foram corrigidas no estado atual do projeto:
 
 - backend/.env.example usa DB_CONNECT_TIMEOUT.
+- backend/.env.example inclui variáveis SMTP_* e EMAIL_VERIFICATION_TTL_MINUTES para verificação de e-mail.
 - docker-compose.yml usa FRONTEND_URL no backend e NEXT_PUBLIC_API_URL com /api/v1 no frontend.
-- setup.ps1 aplica database.sql + migration_v3..v7.
+- setup.ps1 aplica database.sql + migration_v3..v9.
 - fix-env.ps1 remove variáveis legadas WHATSAPP_API_* e mantém defaults compatíveis com o backend atual.
 
 Observação:

@@ -183,6 +183,29 @@ Checklist:
 - Backend está disponível na URL configurada.
 - FRONTEND_URL no backend está correto para CORS.
 
+## 4.4 Falhas de verificação por e-mail
+
+Sintomas:
+
+- Cadastro concluído, mas e-mail de verificação não chega.
+- Login retorna `EMAIL_NOT_VERIFIED` mesmo com senha correta.
+
+Checklist:
+
+- migration_v9.sql aplicada no banco.
+- Variáveis SMTP_* configuradas no backend/.env.
+- APP_URL/FRONTEND_URL apontando para a URL pública correta do frontend.
+- Caixa de spam/lixo eletrônico verificada.
+
+Validação SQL rápida:
+
+```sql
+SELECT email, email_verified, email_verification_expires_at, verification_sent_at
+FROM users
+ORDER BY created_at DESC
+LIMIT 10;
+```
+
 ## 5. WhatsApp
 
 ## 5.1 QR Code não aparece
@@ -212,7 +235,7 @@ Checklist atual:
 1. backend/.env.example está alinhado com DB_CONNECT_TIMEOUT.
 2. docker-compose.yml usa FRONTEND_URL no backend.
 3. docker-compose.yml usa NEXT_PUBLIC_API_URL com /api/v1 no frontend.
-4. setup.ps1 aplica database.sql + migration_v3..v6.
+4. setup.ps1 aplica database.sql + migration_v3..v9.
 5. fix-env.ps1 não adiciona variáveis legadas WHATSAPP_API_*.
 
 Como proceder:
@@ -226,7 +249,7 @@ Quando o ambiente está inconsistente:
 
 1. Backup (se houver dados).
 2. Recriar banco do zero.
-3. Aplicar database.sql + migration_v3..v6.
+3. Aplicar database.sql + migration_v3..v9.
 4. Revisar backend/.env e frontend/.env.local.
 5. Subir backend e validar /health.
 6. Subir frontend.

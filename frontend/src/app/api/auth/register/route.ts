@@ -2,9 +2,7 @@ import { NextRequest } from 'next/server';
 import {
   clearAuthCookies,
   errorResponse,
-  extractAuthTokens,
   requestBackendAuth,
-  setAuthCookies,
   successResponse,
 } from '@/lib/server/authBff';
 
@@ -39,15 +37,7 @@ export async function POST(request: NextRequest) {
     return errorResponse(upstream.response.status, upstream.payload, 'Falha ao realizar cadastro.');
   }
 
-  const { accessToken, refreshToken } = extractAuthTokens(upstream.payload);
-
-  if (!accessToken || !refreshToken) {
-    const response = errorResponse(502, upstream.payload, 'Contrato de autenticação inválido.');
-    clearAuthCookies(response);
-    return response;
-  }
-
   const response = successResponse(upstream.payload, upstream.response.status);
-  setAuthCookies(response, accessToken, refreshToken);
+  clearAuthCookies(response);
   return response;
 }

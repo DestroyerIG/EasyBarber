@@ -10,6 +10,8 @@ services:
       - ./backend/src/config/migration_v5.sql:/docker-entrypoint-initdb.d/04-migration-v5.sql
       - ./backend/src/config/migration_v6.sql:/docker-entrypoint-initdb.d/05-migration-v6.sql
       - ./backend/src/config/migration_v7.sql:/docker-entrypoint-initdb.d/06-migration-v7.sql
+      - ./backend/src/config/migration_v8.sql:/docker-entrypoint-initdb.d/07-migration-v8.sql
+      - ./backend/src/config/migration_v9.sql:/docker-entrypoint-initdb.d/08-migration-v9.sql
     environment:
       POSTGRES_DB: barberpro
       POSTGRES_USER: barberpro
@@ -34,7 +36,14 @@ services:
       NODE_ENV: production
       PORT: 5000
       FRONTEND_URL: http://localhost:3000
+      APP_URL: http://localhost:3000
       LOG_LEVEL: info
+      EMAIL_VERIFICATION_TTL_MINUTES: 60
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-EasyBarber <no-reply@easybarber.local>}
     ports:
       - "5000:5000"
 

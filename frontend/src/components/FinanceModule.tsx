@@ -20,6 +20,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import easyBarberLogo from '@/icons/easybarber.png';
 
 interface FinanceSummary {
   today: { earnings: number; expenses: number; profit: number };
@@ -34,6 +35,26 @@ interface FinanceModuleProps {
 }
 
 type AutoTableDoc = jsPDF & { lastAutoTable: { finalY: number } };
+
+const loadLogoDataUrl = async () => {
+  try {
+    const response = await fetch(easyBarberLogo.src);
+    if (!response.ok) {
+      return null;
+    }
+
+    const blob = await response.blob();
+
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+};
 
 export const FinanceModule = ({
   reportAccess,
@@ -129,7 +150,7 @@ export const FinanceModule = ({
     }
   };
 
-  const exportToPDF = () => {
+  const exportToPDF = async () => {
     const monthSummary = {
       earnings: summary?.month.earnings || 0,
       expenses: summary?.month.expenses || 0,
@@ -138,13 +159,19 @@ export const FinanceModule = ({
 
     const doc = new jsPDF() as AutoTableDoc;
     const now = format(new Date(), 'dd/MM/yyyy HH:mm');
+    const logoDataUrl = await loadLogoDataUrl();
+    const titleX = logoDataUrl ? 30 : 14;
+
+    if (logoDataUrl) {
+      doc.addImage(logoDataUrl, 'PNG', 14, 12, 10, 10);
+    }
 
     doc.setFontSize(20);
     doc.setTextColor(204, 133, 41);
-    doc.text('EasyBarber SaaS - Relatório Financeiro', 14, 20);
+    doc.text('EasyBarber - Relatório Financeiro', titleX, 20);
     doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text(`Gerado em: ${now}`, 14, 28);
+    doc.text(`Gerado em: ${now}`, titleX, 28);
     doc.setFontSize(14);
     doc.setTextColor(0);
     doc.text('Resumo Mensal', 14, 40);

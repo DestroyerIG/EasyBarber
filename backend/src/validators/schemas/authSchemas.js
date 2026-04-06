@@ -16,3 +16,15 @@ export const loginSchema = z.object({
   email: z.string().email('Email inválido'),
   password: z.string().min(1, 'Senha é obrigatória'),
 });
+
+export const verifyEmailSchema = z.object({
+  token: z
+    .string()
+    .trim()
+    .min(20, 'Token de verificação inválido')
+    .max(512, 'Token de verificação inválido'),
+});
+
+export const resendVerificationSchema = z.object({
+  email: z.string().email('Email inválido').max(255),
+});

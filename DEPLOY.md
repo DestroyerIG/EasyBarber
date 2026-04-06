@@ -37,6 +37,13 @@ DATABASE_URL=postgresql://user:password@host:5432/barberpro
 JWT_SECRET=chave_forte_com_32_ou_mais_caracteres
 NODE_ENV=production
 FRONTEND_URL=https://seu-frontend.com
+APP_URL=https://seu-frontend.com
+EMAIL_VERIFICATION_TTL_MINUTES=60
+SMTP_HOST=smtp.seudominio.com
+SMTP_PORT=587
+SMTP_USER=usuario_smtp
+SMTP_PASS=senha_smtp
+SMTP_FROM="EasyBarber <no-reply@seudominio.com>"
 ```
 
 ### Backend (billing/Stripe)
@@ -109,6 +116,9 @@ npm start
 3. migration_v4.sql
 4. migration_v5.sql
 5. migration_v6.sql
+6. migration_v7.sql
+7. migration_v8.sql
+8. migration_v9.sql
 
 ## 6.2 Comandos (host com psql)
 
@@ -118,6 +128,9 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v3.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v7.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
 ```
 
 ## 6.3 Upgrade legado
@@ -144,9 +157,9 @@ docker compose up -d --build
 
 ### 7.2 Aplicar migrations adicionais
 
-O bootstrap automático do db aplica database.sql + migration_v3..v6 no primeiro bootstrap do volume.
+O bootstrap automático do db aplica database.sql + migration_v3..v9 no primeiro bootstrap do volume.
 
-Se o volume já existia antes dessa configuração, execute migration_v3..v6 manualmente.
+Se o volume já existia antes dessa configuração, execute migration_v3..v9 manualmente.
 
 Com psql local:
 
@@ -155,6 +168,9 @@ psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP
 psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
 psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
 psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
+psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v7.sql
+psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
+psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
 ```
 
 ## 8. Deploy em PaaS (Backend/Frontend separados)
@@ -194,7 +210,7 @@ curl https://sua-api.com/health
 ```
 
 - Smoke tests:
-  - Registro/login.
+  - Registro -> verificação de e-mail -> login.
   - Criação de agendamento.
   - Criação de despesa.
   - Consulta de /api/v1/subscriptions/status.
@@ -206,7 +222,9 @@ curl https://sua-api.com/health
 ## 11. Riscos Comuns
 
 - Banco sem migration_v3 (quebra módulo WhatsApp).
+- Banco sem migration_v9 (quebra verificação de e-mail).
 - FRONTEND_URL incorreta (erro CORS).
+- SMTP_* ausentes ou inválidas (falha de envio de e-mail de verificação).
 - DB_CONNECT_TIMEOUT ausente ou configurado incorretamente no backend.
 - Webhook Stripe sem assinatura válida.
 - Deploy sem backup anterior.
@@ -235,5 +253,5 @@ As seguintes correções já estão aplicadas no repositório:
 - backend/.env.example com DB_CONNECT_TIMEOUT.
 - docker-compose.yml com FRONTEND_URL no backend.
 - docker-compose.yml com NEXT_PUBLIC_API_URL em /api/v1 no frontend.
-- setup.ps1 aplicando database.sql + migration_v3..v6.
+- setup.ps1 aplicando database.sql + migration_v3..v9.
 - fix-env.ps1 sem variáveis legadas WHATSAPP_API_*.

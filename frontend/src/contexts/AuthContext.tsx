@@ -18,7 +18,7 @@ interface AuthContextType {
   loading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string, options?: AuthRedirectOptions) => Promise<void>;
-  register: (data: RegisterData, options?: AuthRedirectOptions) => Promise<void>;
+  register: (data: RegisterData, options?: AuthRedirectOptions) => Promise<RegisterResult>;
   logout: () => Promise<void>;
   refreshMe: () => Promise<User | null>;
 }
@@ -34,6 +34,22 @@ interface RegisterData {
   whatsapp: string;
   password: string;
   desiredPlan: PlanId;
+}
+
+interface RegisterResult {
+  verificationRequired: boolean;
+  verificationEmailSent: boolean;
+  message: string;
+  email: string;
+}
+
+interface RegisterApiPayload {
+  verificationRequired?: boolean;
+  verificationEmailSent?: boolean;
+  message?: string;
+  user?: {
+    email?: string;
+  };
 }
 
 const resolvePostAuthRoute = (role: string | undefined, redirectTo?: string) => {
@@ -161,20 +177,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const register = useCallback(
-    async (data: RegisterData, options?: AuthRedirectOptions) => {
+    async (data: RegisterData, options?: AuthRedirectOptions): Promise<RegisterResult> => {
+      void options;
       setLoading(true);
 
       try {
         const response = await api.post('/auth/register', data);
-        const userData = extractUserFromResponse(response.data) ?? (await refreshMe());
+        const payload = response.data as RegisterApiPayload;
 
-        if (!userData) {
-          throw new Error('Sessão não foi carregada após o cadastro.');
-        }
+        setUser(null);
 
-        setUser(userData);
-        router.replace(resolvePostAuthRoute(userData.role, options?.redirectTo));
-        router.refresh();
+        return {
+          verificationRequired: payload.verificationRequired !== false,
+          verificationEmailSent: payload.verificationEmailSent === true,
+          message:
+            payload.message ||
+            'Cadastro realizado. Verifique seu e-mail para ativar sua conta antes de fazer login.',
+          email: payload.user?.email || data.email,
+        };
       } catch (error) {
         setUser(null);
         throw error;
@@ -182,7 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false);
       }
     },
-    [refreshMe, router]
+    []
   );
 
   const logout = useCallback(async () => {

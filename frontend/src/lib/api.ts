@@ -31,6 +31,8 @@ const shouldSkipRefreshByUrl = (url: string) => {
   return (
     url.includes('/auth/login') ||
     url.includes('/auth/register') ||
+    url.includes('/auth/verify-email') ||
+    url.includes('/auth/resend-verification') ||
     url.includes('/auth/refresh') ||
     url.includes('/auth/logout')
   );
@@ -90,13 +92,19 @@ api.interceptors.response.use(
 
     if (error.response?.data && typeof error.response.data === 'object') {
       const data = error.response.data as {
-        error?: { message?: string; details?: string[] } | string;
+        error?: { code?: string; message?: string; details?: string[] } | string;
         details?: string[];
+        errorCode?: string;
       };
 
       if (typeof data.error === 'object' && data.error?.message) {
         const details = data.error.details;
+        const code = data.error.code;
         (error.response.data as Record<string, unknown>).error = data.error.message;
+
+        if (typeof code === 'string' && code.trim().length > 0) {
+          (error.response.data as Record<string, unknown>).errorCode = code;
+        }
 
         if (details) {
           (error.response.data as Record<string, unknown>).details = details;

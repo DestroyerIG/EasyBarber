@@ -89,7 +89,9 @@ try {
         "backend/src/config/migration_v4.sql",
         "backend/src/config/migration_v5.sql",
         "backend/src/config/migration_v6.sql",
-        "backend/src/config/migration_v7.sql"
+        "backend/src/config/migration_v7.sql",
+        "backend/src/config/migration_v8.sql",
+        "backend/src/config/migration_v9.sql"
     )
 
     foreach ($sqlFile in $sqlFiles) {
@@ -136,8 +138,15 @@ PORT=5000
 DATABASE_URL=$databaseUrl
 JWT_SECRET=$jwtSecret
 NODE_ENV=development
-    LOG_LEVEL=info
-    FRONTEND_URL=http://localhost:3000
+LOG_LEVEL=info
+FRONTEND_URL=http://localhost:3000
+APP_URL=http://localhost:3000
+EMAIL_VERIFICATION_TTL_MINUTES=60
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM="EasyBarber <no-reply@easybarber.local>"
 "@ | Out-File -FilePath $envFile -Encoding UTF8
 
     Write-Host ".env backend criado com sucesso!" -ForegroundColor Green

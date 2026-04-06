@@ -1,9 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import { LogOut, Menu, X } from 'lucide-react';
 import { ThemeToggle } from '@/components/ui';
 import type { TabId, TabItem } from '@/types';
+import easyBarberLogo from '@/icons/easybarber.png';
 
 const tabs: TabItem[] = [
     { id: 'dashboard', label: 'Dashboard' },
@@ -42,7 +44,12 @@ export function Navbar({ activeTab, onTabChange, onLogout }: NavbarProps) {
                     >
                         {menuOpen ? <X size={24} /> : <Menu size={24} />}
                     </button>
-                    <h1 className="text-2xl font-bold text-primary">💈 EasyBarber</h1>
+                    <div className="flex items-center gap-2">
+                        <span className="inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg border border-primary/30 bg-black/40">
+                            <Image src={easyBarberLogo} alt="Logo EasyBarber" width={36} height={36} className="h-full w-full object-contain" priority />
+                        </span>
+                        <h1 className="text-2xl font-bold text-primary">EasyBarber</h1>
+                    </div>
                 </div>
 
                 {/* Desktop navigation */}

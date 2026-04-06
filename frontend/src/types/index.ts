@@ -83,6 +83,7 @@ export interface User {
     role: string;
     barbershopName: string;
     plan: string;
+    emailVerified?: boolean;
     subscriptionStatus?: 'active' | 'trialing' | 'past_due' | 'canceled' | 'incomplete';
     subscriptionCurrentPeriodEnd?: string | null;
 }
@@ -148,6 +149,9 @@ export interface LoginResponse {
 }
 
 export interface RegisterResponse {
+    verificationRequired: boolean;
+    verificationEmailSent: boolean;
+    message: string;
     user: User;
     barbershop: {
         id: string;

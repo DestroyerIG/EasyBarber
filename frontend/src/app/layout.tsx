@@ -3,6 +3,7 @@ import { ToastProvider } from '@/components/Toast'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { Space_Grotesk, Plus_Jakarta_Sans } from 'next/font/google'
+import easyBarberLogo from '@/icons/easybarber.png'
 
 const plusJakartaSans = Plus_Jakarta_Sans({
   subsets: ['latin'],
@@ -24,7 +25,9 @@ export const metadata = {
     type: 'website',
   },
   icons: {
-    icon: '/favicon.ico',
+    icon: easyBarberLogo.src,
+    shortcut: easyBarberLogo.src,
+    apple: easyBarberLogo.src,
   },
 }
 

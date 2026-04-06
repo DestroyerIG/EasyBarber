@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Menu, X } from 'lucide-react';
-import easyBarberLogo from '@/icons/EasyBarber.png';
+import easyBarberLogo from '@/icons/easybarber.png';
 
 const navItems = [
   { href: '#inicio', label: 'Início' },

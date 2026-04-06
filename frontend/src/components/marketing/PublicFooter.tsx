@@ -1,3 +1,6 @@
+import Image from 'next/image';
+import easyBarberLogo from '@/icons/easybarber.png';
+
 const defaultContactUrl =
   'https://wa.me/5583991347023?text=Ol%C3%A1%2C%20quero%20conhecer%20o%20EasyBarber';
 
@@ -8,7 +11,12 @@ export function PublicFooter() {
     <footer className="border-t border-white/10 bg-black/80">
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 lg:grid-cols-4 lg:px-8">
         <div className="lg:col-span-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">EasyBarber</p>
+          <div className="inline-flex items-center gap-3">
+            <span className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-primary/30 bg-black/40">
+              <Image src={easyBarberLogo} alt="Logo EasyBarber" width={40} height={40} className="h-full w-full object-contain" priority />
+            </span>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">EasyBarber</p>
+          </div>
           <h3 className="mt-3 text-2xl font-black">Sistema para barbearias com foco em performance comercial.</h3>
           <p className="mt-3 max-w-lg text-sm text-gray-400">
             Centralize agendamentos, clientes, financeiro e equipe em uma plataforma confiável,

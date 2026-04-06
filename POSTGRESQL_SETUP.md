@@ -17,6 +17,9 @@ Arquivos SQL atuais:
 - backend/src/config/migration_v4.sql
 - backend/src/config/migration_v5.sql
 - backend/src/config/migration_v6.sql
+- backend/src/config/migration_v7.sql
+- backend/src/config/migration_v8.sql
+- backend/src/config/migration_v9.sql
 
 ## 2. Pré-requisitos
 
@@ -85,12 +88,16 @@ Executar nesta ordem:
 3. migration_v4.sql
 4. migration_v5.sql
 5. migration_v6.sql
+6. migration_v7.sql
+7. migration_v8.sql
+8. migration_v9.sql
 
 Justificativa:
 
 - database.sql cria o schema base.
 - migration_v3.sql adiciona colunas e tabela necessárias ao módulo WhatsApp atual.
-- migration_v4..v6 consolidam índices e recursos de billing/admin.
+- migration_v4..v8 consolidam índices e recursos de billing/admin/settings.
+- migration_v9 adiciona colunas de verificação de e-mail de conta.
 
 ### Cenário B: Upgrade legado
 
@@ -101,6 +108,9 @@ Se o banco vier de versão antiga (pré-v3), executar:
 3. migration_v4.sql
 4. migration_v5.sql
 5. migration_v6.sql
+6. migration_v7.sql
+7. migration_v8.sql
+8. migration_v9.sql
 
 Importante:
 
@@ -117,6 +127,9 @@ psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v7.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
 ```
 
 ### Windows PowerShell (a partir da raiz do projeto)
@@ -127,6 +140,9 @@ psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backe
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v4.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v5.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v6.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v7.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v8.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v9.sql
 ```
 
 ### Com URL de conexão
@@ -137,7 +153,7 @@ psql "postgresql://postgres:senha@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -
 
 ## 7. Execução com Docker Compose
 
-No docker-compose.yml atual, o container db aplica automaticamente database.sql + migration_v3..v6 no primeiro bootstrap do volume.
+No docker-compose.yml atual, o container db aplica automaticamente database.sql + migration_v3..v9 no primeiro bootstrap do volume.
 
 Se o volume já existia antes dessa configuração, execute as migrations manualmente.
 
@@ -148,6 +164,9 @@ psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP
 psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
 psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
 psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
+psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v7.sql
+psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
+psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
 ```
 
 ### Sem psql local (pipe para container db)
@@ -159,6 +178,9 @@ cat backend/src/config/migration_v3.sql | docker compose exec -T db psql -U barb
 cat backend/src/config/migration_v4.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
 cat backend/src/config/migration_v5.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
 cat backend/src/config/migration_v6.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
+cat backend/src/config/migration_v7.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
+cat backend/src/config/migration_v8.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
+cat backend/src/config/migration_v9.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
 ```
 
 Windows PowerShell:
@@ -168,6 +190,9 @@ Get-Content .\backend\src\config\migration_v3.sql | docker compose exec -T db ps
 Get-Content .\backend\src\config\migration_v4.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
 Get-Content .\backend\src\config\migration_v5.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
 Get-Content .\backend\src\config\migration_v6.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
+Get-Content .\backend\src\config\migration_v7.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
+Get-Content .\backend\src\config\migration_v8.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
+Get-Content .\backend\src\config\migration_v9.sql | docker compose exec -T db psql -U barberpro -d barberpro -v ON_ERROR_STOP=1
 ```
 
 ## 8. Como Validar se Migrou com Sucesso
@@ -200,7 +225,24 @@ FROM pg_constraint
 WHERE conname = 'chk_users_role';
 ```
 
-### 8.4 Verificar total de tabelas
+### 8.4 Verificar colunas de verificação de e-mail (migration_v9)
+
+```sql
+SELECT column_name
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = 'users'
+  AND column_name IN (
+    'email_verified',
+    'email_verification_token_hash',
+    'email_verification_expires_at',
+    'email_verified_at',
+    'verification_sent_at'
+  )
+ORDER BY column_name;
+```
+
+### 8.5 Verificar total de tabelas
 
 ```sql
 SELECT COUNT(*)
@@ -225,6 +267,9 @@ psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v7.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
 ```
 
 ### Windows PowerShell
@@ -239,6 +284,9 @@ psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backe
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v4.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v5.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v6.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v7.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v8.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v9.sql
 ```
 
 ## 10. Backup Antes de Migrar (Recomendado)

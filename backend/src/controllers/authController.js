@@ -1,8 +1,13 @@
 import { authService } from '../services/authService.js';
 import { sendSuccess, sendCreated } from '../utils/response.js';
-import { registerSchema, loginSchema } from '../validators/schemas/index.js';
+import {
+  registerSchema,
+  loginSchema,
+  verifyEmailSchema,
+  resendVerificationSchema,
+} from '../validators/schemas/index.js';
 
-export { registerSchema, loginSchema };
+export { registerSchema, loginSchema, verifyEmailSchema, resendVerificationSchema };
 
 const resolveRefreshToken = (req) => {
   if (req.cookies?.refresh_token) {
@@ -57,6 +62,24 @@ export const logout = async (req, res, next) => {
 export const me = async (req, res, next) => {
   try {
     const data = await authService.getMe(req.user);
+    return sendSuccess(res, data);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyEmail = async (req, res, next) => {
+  try {
+    const data = await authService.verifyEmail(req.query.token);
+    return sendSuccess(res, data);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resendVerification = async (req, res, next) => {
+  try {
+    const data = await authService.resendVerificationEmail(req.body.email);
     return sendSuccess(res, data);
   } catch (error) {
     next(error);

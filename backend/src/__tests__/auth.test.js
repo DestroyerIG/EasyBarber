@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import crypto from 'crypto';
 
 // ===================== MOCKS =====================
 
@@ -45,6 +46,10 @@ const mockAuthRepository = {
   findUserByEmail: jest.fn(),
   createBarbershop: jest.fn(),
   createUser: jest.fn(),
+  setEmailVerificationToken: jest.fn(),
+  findUserByEmailVerificationTokenHash: jest.fn(),
+  clearEmailVerificationToken: jest.fn(),
+  markEmailAsVerified: jest.fn(),
   saveRefreshToken: jest.fn(),
   revokeUserRefreshTokens: jest.fn(),
   findValidRefreshToken: jest.fn(),
@@ -54,6 +59,14 @@ const mockAuthRepository = {
 
 jest.unstable_mockModule('../repositories/authRepository.js', () => ({
   authRepository: mockAuthRepository,
+}));
+
+const mockEmailService = {
+  sendAccountVerificationEmail: jest.fn(),
+};
+
+jest.unstable_mockModule('../services/emailService.js', () => ({
+  emailService: mockEmailService,
 }));
 
 // ===================== IMPORTS (após mocks) =====================
@@ -69,6 +82,10 @@ const request = supertest(app);
 const resetMocks = () => {
   jest.clearAllMocks();
   mockClientQuery.mockResolvedValue({ rows: [] });
+  mockEmailService.sendAccountVerificationEmail.mockResolvedValue({
+    delivered: true,
+    mode: 'smtp',
+  });
 };
 
 // ===================== TESTS =====================
@@ -90,25 +107,36 @@ describe('Auth API — /api/v1/auth', () => {
       mockClientQuery.mockResolvedValue({ rows: [] });
       mockAuthRepository.createBarbershop.mockResolvedValue({ id: 'barbershop-uuid' });
       mockAuthRepository.createUser.mockResolvedValue({ id: 'user-uuid' });
-      mockAuthRepository.saveRefreshToken.mockResolvedValue();
+      mockAuthRepository.setEmailVerificationToken.mockResolvedValue();
 
       const res = await request.post('/api/v1/auth/register').send(validBody);
 
       expect(res.status).toBe(201);
       expect(res.body.success).toBe(true);
+      expect(res.body.data.verificationRequired).toBe(true);
+      expect(res.body.data.verificationEmailSent).toBe(true);
       expect(res.body.data).toHaveProperty('user');
       expect(res.body.data).toHaveProperty('barbershop');
-      expect(typeof res.body.data.token).toBe('string');
-      expect(typeof res.body.data.refreshToken).toBe('string');
+      expect(res.body.data).not.toHaveProperty('token');
+      expect(res.body.data).not.toHaveProperty('refreshToken');
       expect(res.body.data.user.email).toBe('joao@teste.com');
       expect(res.body.data.barbershop.plan).toBe('basico');
+      expect(mockAuthRepository.setEmailVerificationToken).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          userId: 'user-uuid',
+          tokenHash: expect.any(String),
+          expiresAt: expect.any(Date),
+        })
+      );
+      expect(mockEmailService.sendAccountVerificationEmail).toHaveBeenCalled();
     });
 
     it('deve registrar desiredPlan sem alterar o plano inicial efetivo', async () => {
       mockClientQuery.mockResolvedValue({ rows: [] });
       mockAuthRepository.createBarbershop.mockResolvedValue({ id: 'barbershop-uuid' });
       mockAuthRepository.createUser.mockResolvedValue({ id: 'user-uuid' });
-      mockAuthRepository.saveRefreshToken.mockResolvedValue();
+      mockAuthRepository.setEmailVerificationToken.mockResolvedValue();
 
       const res = await request.post('/api/v1/auth/register').send({
         ...validBody,
@@ -117,6 +145,7 @@ describe('Auth API — /api/v1/auth', () => {
 
       expect(res.status).toBe(201);
       expect(res.body.success).toBe(true);
+      expect(res.body.data.verificationRequired).toBe(true);
       expect(res.body.data.barbershop.plan).toBe('basico');
       expect(res.body.data.barbershop.desiredPlan).toBe('premium');
       expect(mockAuthRepository.createBarbershop).toHaveBeenCalledWith(
@@ -175,6 +204,7 @@ describe('Auth API — /api/v1/auth', () => {
         id: 'user-uuid',
         email: 'joao@teste.com',
         password_hash: hashedPassword,
+        email_verified: true,
         barbershop_id: 'barbershop-uuid',
         barbershop_name: 'Barbearia Teste',
         plan: 'basico',
@@ -216,6 +246,7 @@ describe('Auth API — /api/v1/auth', () => {
         id: 'user-uuid',
         email: 'joao@teste.com',
         password_hash: hashedPassword,
+        email_verified: true,
         barbershop_id: 'barbershop-uuid',
         plan: 'basico',
         role: 'admin',
@@ -228,6 +259,30 @@ describe('Auth API — /api/v1/auth', () => {
 
       expect(res.status).toBe(401);
       expect(res.body.success).toBe(false);
+    });
+
+    it('deve retornar 403 quando o email ainda não foi verificado', async () => {
+      const bcrypt = await import('bcryptjs');
+      const hashedPassword = await bcrypt.default.hash('Senha123!', 12);
+
+      mockAuthRepository.findUserByEmail.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        password_hash: hashedPassword,
+        email_verified: false,
+        barbershop_id: 'barbershop-uuid',
+        plan: 'basico',
+        role: 'tenant_admin',
+      });
+
+      const res = await request.post('/api/v1/auth/login').send({
+        email: 'joao@teste.com',
+        password: 'Senha123!',
+      });
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('EMAIL_NOT_VERIFIED');
     });
 
     it('deve retornar 400 com body vazio', async () => {
@@ -259,6 +314,7 @@ describe('Auth API — /api/v1/auth', () => {
       mockAuthRepository.findUserByEmail.mockResolvedValue({
         id: 'user-uuid',
         email: 'joao@teste.com',
+        email_verified: true,
         barbershop_name: 'Barbearia Teste',
         plan: 'basico',
         role: 'admin',
@@ -268,6 +324,112 @@ describe('Auth API — /api/v1/auth', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
+    });
+  });
+
+  // --- VERIFY EMAIL ---
+  describe('GET /api/v1/auth/verify-email', () => {
+    const validToken = 'verify-token-valid-1234567890abcdef';
+    const validTokenHash = crypto.createHash('sha256').update(validToken).digest('hex');
+
+    it('deve confirmar o e-mail com token válido', async () => {
+      mockAuthRepository.findUserByEmailVerificationTokenHash.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        email_verification_token_hash: validTokenHash,
+        email_verification_expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      });
+
+      mockAuthRepository.markEmailAsVerified.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        email_verified: true,
+        email_verified_at: new Date().toISOString(),
+      });
+
+      const res = await request.get('/api/v1/auth/verify-email').query({ token: validToken });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.user.emailVerified).toBe(true);
+      expect(mockAuthRepository.markEmailAsVerified).toHaveBeenCalledWith(
+        expect.anything(),
+        'user-uuid'
+      );
+    });
+
+    it('deve falhar para token expirado', async () => {
+      mockAuthRepository.findUserByEmailVerificationTokenHash.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        email_verification_token_hash: validTokenHash,
+        email_verification_expires_at: new Date(Date.now() - 1000).toISOString(),
+      });
+
+      mockAuthRepository.clearEmailVerificationToken.mockResolvedValue();
+
+      const res = await request.get('/api/v1/auth/verify-email').query({ token: validToken });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('EXPIRED_VERIFICATION_TOKEN');
+      expect(mockAuthRepository.clearEmailVerificationToken).toHaveBeenCalledWith(
+        expect.anything(),
+        'user-uuid'
+      );
+    });
+
+    it('deve falhar para token inválido ou reutilizado', async () => {
+      mockAuthRepository.findUserByEmailVerificationTokenHash.mockResolvedValue(null);
+
+      const res = await request.get('/api/v1/auth/verify-email').query({ token: validToken });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('INVALID_VERIFICATION_TOKEN');
+    });
+  });
+
+  // --- RESEND VERIFICATION ---
+  describe('POST /api/v1/auth/resend-verification', () => {
+    it('deve gerar novo token e reenviar e-mail para conta não verificada', async () => {
+      mockAuthRepository.findUserByEmail.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        email_verified: false,
+        email_verification_token_hash: 'hash-antigo',
+        barbershop_name: 'Barbearia Teste',
+      });
+      mockAuthRepository.setEmailVerificationToken.mockResolvedValue();
+
+      const res = await request.post('/api/v1/auth/resend-verification').send({
+        email: 'joao@teste.com',
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.message).toMatch(/Se existir uma conta pendente/i);
+      expect(mockAuthRepository.setEmailVerificationToken).toHaveBeenCalled();
+      const [dbClient, payload] = mockAuthRepository.setEmailVerificationToken.mock.calls[0];
+      expect(dbClient).toBeDefined();
+      expect(payload.userId).toBe('user-uuid');
+      expect(payload.tokenHash).toBeDefined();
+      expect(payload.tokenHash).not.toBe('hash-antigo');
+      expect(mockEmailService.sendAccountVerificationEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it('deve manter resposta genérica quando e-mail não existe', async () => {
+      mockAuthRepository.findUserByEmail.mockResolvedValue(null);
+
+      const res = await request.post('/api/v1/auth/resend-verification').send({
+        email: 'naoexiste@teste.com',
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.message).toMatch(/Se existir uma conta pendente/i);
+      expect(mockAuthRepository.setEmailVerificationToken).not.toHaveBeenCalled();
+      expect(mockEmailService.sendAccountVerificationEmail).not.toHaveBeenCalled();
     });
   });
 

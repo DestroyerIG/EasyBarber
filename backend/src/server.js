@@ -176,6 +176,21 @@ const registerLimiter = rateLimit({
   },
 });
 
+const resendVerificationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
+  message: {
+    success: false,
+    error: {
+      code: 'RATE_LIMIT',
+      message: 'Muitas tentativas de reenvio. Tente novamente em alguns minutos.',
+    },
+  },
+});
+
 // Health check
 app.get('/health', async (req, res) => {
   try {
@@ -196,6 +211,7 @@ app.get('/health', async (req, res) => {
 // Auth com limitadores específicos
 app.use(`${API_V1}/auth/login`, loginLimiter);
 app.use(`${API_V1}/auth/register`, registerLimiter);
+app.use(`${API_V1}/auth/resend-verification`, resendVerificationLimiter);
 
 // Rotas v1
 app.use(`${API_V1}/auth`, authRoutes);

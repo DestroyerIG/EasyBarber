@@ -5,7 +5,17 @@ import { requireFeature } from '../middleware/subscriptionGuard.js';
 import { validate } from '../middleware/validate.js';
 import { getServices, createService, updateService, deleteService } from '../controllers/serviceController.js';
 import { getBarbers, createBarber, updateBarber, deleteBarber } from '../controllers/barberController.js';
-import { createServiceSchema, updateServiceSchema, createBarberSchema, updateBarberSchema } from '../validators/schemas/index.js';
+import {
+	createServiceSchema,
+	updateServiceSchema,
+	createBarberSchema,
+	updateBarberSchema,
+	updateBarbershopSettingsSchema,
+} from '../validators/schemas/index.js';
+import {
+	getBarbershopSettings,
+	updateBarbershopSettings,
+} from '../controllers/barbershopSettingsController.js';
 
 const router = express.Router();
 
@@ -18,5 +28,8 @@ router.get('/barbers', authMiddleware, requireTenantRoles, requireFeature('servi
 router.post('/barbers', authMiddleware, requireTenantRoles, requireFeature('services'), validate({ body: createBarberSchema }), createBarber);
 router.put('/barbers/:id', authMiddleware, requireTenantRoles, requireFeature('services'), validate({ body: updateBarberSchema }), updateBarber);
 router.delete('/barbers/:id', authMiddleware, requireTenantRoles, requireFeature('services'), deleteBarber);
+
+router.get('/settings', authMiddleware, requireTenantRoles, requireFeature('advanced_admin'), getBarbershopSettings);
+router.put('/settings', authMiddleware, requireTenantRoles, requireFeature('advanced_admin'), validate({ body: updateBarbershopSettingsSchema }), updateBarbershopSettings);
 
 export default router;

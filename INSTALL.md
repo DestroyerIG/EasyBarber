@@ -57,6 +57,13 @@ LOG_LEVEL=info
 DATABASE_URL=postgresql://postgres:senha@localhost:5432/barberpro
 JWT_SECRET=troque_esta_chave
 FRONTEND_URL=http://localhost:3000
+APP_URL=http://localhost:3000
+EMAIL_VERIFICATION_TTL_MINUTES=60
+SMTP_HOST=smtp.seudominio.com
+SMTP_PORT=587
+SMTP_USER=usuario_smtp
+SMTP_PASS=senha_smtp
+SMTP_FROM="EasyBarber <no-reply@seudominio.com>"
 ```
 
 ### Frontend
@@ -103,6 +110,9 @@ Sequência recomendada para ambiente novo:
 3. backend/src/config/migration_v4.sql
 4. backend/src/config/migration_v5.sql
 5. backend/src/config/migration_v6.sql
+6. backend/src/config/migration_v7.sql
+7. backend/src/config/migration_v8.sql
+8. backend/src/config/migration_v9.sql
 
 Linux/macOS:
 
@@ -112,6 +122,9 @@ psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v7.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
 ```
 
 Windows PowerShell:
@@ -122,6 +135,9 @@ psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backe
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v4.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v5.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v6.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v7.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v8.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v9.sql
 ```
 
 Observação:
@@ -186,7 +202,7 @@ npm run lint
 docker compose up -d
 ```
 
-O compose atual aplica database.sql + migration_v3..v6 no primeiro bootstrap do volume.
+O compose atual aplica database.sql + migration_v3..v9 no primeiro bootstrap do volume.
 Se o volume do PostgreSQL já existia antes dessa configuração, aplique as migrations manualmente ou recrie o volume.
 
 ## 10. Ordem Correta de Setup (Resumo)
@@ -197,7 +213,7 @@ Se o volume do PostgreSQL já existia antes dessa configuração, aplique as mig
 4. Criar banco e aplicar SQL/migrations.
 5. Subir backend.
 6. Subir frontend.
-7. Validar /health e fluxo de login.
+7. Validar /health, fluxo de cadastro, verificação de e-mail e login.
 
 ## Documentos Relacionados
 
