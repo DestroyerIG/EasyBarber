@@ -15,6 +15,7 @@ const HOP_BY_HOP_HEADERS = new Set([
   'content-length',
   'host',
   'accept-encoding',
+  'content-encoding',
 ]);
 
 function buildBackendUrl(request: Request, path: string) {
