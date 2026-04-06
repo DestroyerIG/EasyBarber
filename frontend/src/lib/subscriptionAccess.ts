@@ -47,7 +47,7 @@ const FEATURE_REQUIREMENTS: Record<FeatureKey, PlanId> = {
   reports: 'profissional',
   exports: 'profissional',
   whatsapp_automation: 'profissional',
-  advanced_admin: 'premium',
+  advanced_admin: 'basico',
   billing: 'basico',
   subscription_status: 'basico',
 };
