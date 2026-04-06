@@ -5,6 +5,7 @@ import { subscriptionRepository } from '../repositories/subscriptionRepository.j
 
 const PLAN_IDS = ['basico', 'profissional', 'premium'];
 const VALID_STATUSES = new Set(['active', 'trialing', 'past_due', 'canceled', 'incomplete']);
+const TRIAL_PERIOD_DAYS = 7;
 
 const ensurePlan = (plan) => {
   if (!PLAN_IDS.includes(plan)) {
@@ -80,6 +81,25 @@ const ensureCustomer = async (stripe, barbershop) => {
   return customer.id;
 };
 
+const hasPriorStripeSubscription = async (stripe, customerId, barbershop) => {
+  if (barbershop.stripe_subscription_id) {
+    return true;
+  }
+
+  // Sem customer persistido ainda, a barbearia ainda não teve assinatura no Stripe.
+  if (!barbershop.stripe_customer_id) {
+    return false;
+  }
+
+  const subscriptions = await stripe.subscriptions.list({
+    customer: customerId,
+    status: 'all',
+    limit: 1,
+  });
+
+  return subscriptions.data.length > 0;
+};
+
 const updateFromStripeSubscription = async ({
   barbershopId,
   subscription,
@@ -117,7 +137,18 @@ export const subscriptionService = {
     }
 
     const customerId = await ensureCustomer(stripe, barbershop);
+    const hasPriorSubscription = await hasPriorStripeSubscription(stripe, customerId, barbershop);
     const frontendBaseUrl = getFrontendBaseUrl();
+    const subscriptionData = {
+      metadata: {
+        barbershopId,
+        plan,
+      },
+    };
+
+    if (!hasPriorSubscription) {
+      subscriptionData.trial_period_days = TRIAL_PERIOD_DAYS;
+    }
 
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
@@ -131,12 +162,7 @@ export const subscriptionService = {
         barbershopId,
         plan,
       },
-      subscription_data: {
-        metadata: {
-          barbershopId,
-          plan,
-        },
-      },
+      subscription_data: subscriptionData,
       locale: 'pt-BR',
     });
 

@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
+import type { PlanId } from '@/lib/plans';
 import type { User } from '@/types';
 
 interface AuthContextType {
@@ -32,6 +33,7 @@ interface RegisterData {
   email: string;
   whatsapp: string;
   password: string;
+  desiredPlan: PlanId;
 }
 
 const resolvePostAuthRoute = (role: string | undefined, redirectTo?: string) => {

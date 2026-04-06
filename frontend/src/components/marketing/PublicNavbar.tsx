@@ -2,7 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Menu, X } from 'lucide-react';
+import easyBarberLogo from '@/icons/EasyBarber.png';
 
 const navItems = [
   { href: '#inicio', label: 'Início' },
@@ -12,7 +14,7 @@ const navItems = [
 ];
 
 const defaultContactUrl =
-  'https://wa.me/5500000000000?text=Ol%C3%A1%2C%20quero%20conhecer%20o%20EasyBarber';
+  'https://wa.me/5583991347023?text=Ol%C3%A1%2C%20quero%20conhecer%20o%20EasyBarber';
 
 export function PublicNavbar() {
   const [open, setOpen] = useState(false);
@@ -22,9 +24,11 @@ export function PublicNavbar() {
     <header className="sticky top-0 z-50 border-b border-white/10 bg-black/70 backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 lg:px-8">
         <Link href="/" className="flex items-center gap-2" aria-label="EasyBarber página inicial">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-black font-black">E</span>
+          <span className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-primary/30 bg-black/40">
+            <Image src={easyBarberLogo} alt="Logo EasyBarber" width={40} height={40} className="h-full w-full object-contain" priority />
+          </span>
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-primary/70">SaaS para Barbearias</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-primary/70">Gestão para Barbearias</p>
             <p className="text-xl font-black leading-none">EasyBarber</p>
           </div>
         </Link>

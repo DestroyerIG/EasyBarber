@@ -4,6 +4,7 @@ export interface SaaSPlan {
   id: PlanId;
   name: string;
   price: number;
+  trialDays: number;
   description: string;
   recommended?: boolean;
   ctaLabel: string;
@@ -15,6 +16,7 @@ export const SAAS_PLANS: SaaSPlan[] = [
     id: 'basico',
     name: 'Básico',
     price: 49,
+    trialDays: 7,
     description: 'Para barbearias enxutas que precisam organizar a operação sem complexidade.',
     ctaLabel: 'Começar no Básico',
     features: [
@@ -29,6 +31,7 @@ export const SAAS_PLANS: SaaSPlan[] = [
     id: 'profissional',
     name: 'Profissional',
     price: 99,
+    trialDays: 7,
     description: 'Plano ideal para crescimento com mais equipe, previsibilidade e performance.',
     recommended: true,
     ctaLabel: 'Assinar Profissional',
@@ -45,6 +48,7 @@ export const SAAS_PLANS: SaaSPlan[] = [
     id: 'premium',
     name: 'Premium',
     price: 199,
+    trialDays: 7,
     description: 'Para operações em expansão que exigem escala, controle e visão estratégica.',
     ctaLabel: 'Escalar com Premium',
     features: [

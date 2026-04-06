@@ -153,6 +153,7 @@ export interface RegisterResponse {
         id: string;
         name: string;
         plan: string;
+        desiredPlan?: string;
     };
 }
 

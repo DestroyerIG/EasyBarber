@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS barbershops (
     whatsapp VARCHAR(20) NOT NULL,
     plan VARCHAR(50) NOT NULL DEFAULT 'basico'
         CHECK (plan IN ('basico', 'profissional', 'premium')),
+    desired_plan VARCHAR(50) NOT NULL DEFAULT 'basico'
+        CHECK (desired_plan IN ('basico', 'profissional', 'premium')),
     stripe_customer_id VARCHAR(255) UNIQUE,
     stripe_subscription_id VARCHAR(255) UNIQUE,
     stripe_price_id VARCHAR(255),

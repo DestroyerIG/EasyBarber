@@ -15,13 +15,26 @@ export const authRepository = {
     return result.rows[0] || null;
   },
 
-  async createBarbershop(client, { name, ownerName, email, whatsapp, plan }) {
-    const result = await client.query(
-      `INSERT INTO barbershops (name, owner_name, email, whatsapp, plan) 
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [name, ownerName, email, whatsapp, plan]
-    );
-    return result.rows[0];
+  async createBarbershop(client, { name, ownerName, email, whatsapp, plan, desiredPlan }) {
+    try {
+      const result = await client.query(
+        `INSERT INTO barbershops (name, owner_name, email, whatsapp, plan, desired_plan) 
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [name, ownerName, email, whatsapp, plan, desiredPlan]
+      );
+      return result.rows[0];
+    } catch (error) {
+      if (error?.code === '42703') {
+        const legacyResult = await client.query(
+          `INSERT INTO barbershops (name, owner_name, email, whatsapp, plan) 
+           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+          [name, ownerName, email, whatsapp, plan]
+        );
+        return legacyResult.rows[0];
+      }
+
+      throw error;
+    }
   },
 
   async createUser(client, { barbershopId, email, passwordHash, role }) {

@@ -15,11 +15,11 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata = {
-  title: 'EasyBarber - Gestão SaaS para Barbearias',
-  description: 'EasyBarber é a plataforma SaaS para agendamentos, clientes, financeiro e crescimento previsível da sua barbearia.',
-  keywords: 'easybarber, barbearia, agendamento online, gestão financeira, saas para barbearias',
+  title: 'EasyBarber - Gestão para Barbearias',
+  description: 'EasyBarber é a plataforma para agendamentos, clientes, financeiro e crescimento previsível da sua barbearia.',
+  keywords: 'easybarber, barbearia, agendamento online, gestão financeira, sistema para barbearias',
   openGraph: {
-    title: 'EasyBarber - Gestão SaaS para Barbearias',
+    title: 'EasyBarber - Gestão para Barbearias',
     description: 'Controle total da operação da sua barbearia com agendamentos, equipe, clientes e financeiro em um só lugar.',
     type: 'website',
   },

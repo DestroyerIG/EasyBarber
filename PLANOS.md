@@ -62,6 +62,12 @@ A cobrança usa price IDs do Stripe:
 
 Ou seja, preço e moeda são controlados no Stripe Dashboard.
 
+Regra de trial:
+
+- Todos os planos podem ter 7 dias grátis.
+- O trial de 7 dias é concedido somente na primeira assinatura da barbearia.
+- Se a barbearia já tiver histórico de assinatura Stripe, novos checkouts são criados sem trial.
+
 ## 6. Endpoints Relacionados
 
 - POST /api/v1/subscriptions/checkout-session

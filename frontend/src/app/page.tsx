@@ -14,7 +14,7 @@ import { PublicFooter } from '@/components/marketing/PublicFooter';
 import { PricingPlansSection } from '@/components/marketing/PricingPlansSection';
 
 const defaultContactUrl =
-  'https://wa.me/5500000000000?text=Ol%C3%A1%2C%20quero%20conhecer%20o%20EasyBarber';
+  'https://wa.me/5583991347023?text=Ol%C3%A1%2C%20quero%20conhecer%20o%20EasyBarber';
 
 const benefits = [
   {
@@ -89,7 +89,7 @@ export default function HomePage() {
       <main id="main-content">
         <section id="inicio" className="mx-auto grid max-w-7xl gap-10 px-4 pb-20 pt-16 lg:grid-cols-2 lg:items-center lg:px-8">
           <div className="animate-fade-in">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">SaaS de gestão para barbearias</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Sistema de gestão para barbearias</p>
             <h1 className="mt-5 text-4xl font-black leading-tight sm:text-5xl lg:text-6xl">
               Gerencie sua barbearia com mais controle, automação e crescimento previsível.
             </h1>
@@ -155,7 +155,7 @@ export default function HomePage() {
         <section id="recursos" className="mx-auto max-w-7xl px-4 py-16 lg:px-8">
           <div className="mb-10 max-w-3xl">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Recursos</p>
-            <h2 className="mt-3 text-3xl font-black sm:text-4xl">Funcionalidades criadas para uma operação SaaS de verdade</h2>
+            <h2 className="mt-3 text-3xl font-black sm:text-4xl">Funcionalidades criadas para uma gestão de verdade</h2>
             <p className="mt-4 text-gray-400">
               Da agenda ao faturamento recorrente, o EasyBarber foi pensado para reduzir ruído operacional e aumentar conversão.
             </p>

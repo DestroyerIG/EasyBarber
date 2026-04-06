@@ -1,5 +1,5 @@
 const defaultContactUrl =
-  'https://wa.me/5500000000000?text=Ol%C3%A1%2C%20quero%20conhecer%20o%20EasyBarber';
+  'https://wa.me/5583991347023?text=Ol%C3%A1%2C%20quero%20conhecer%20o%20EasyBarber';
 
 export function PublicFooter() {
   const contactUrl = process.env.NEXT_PUBLIC_WHATSAPP_CONTACT_URL || defaultContactUrl;
@@ -9,7 +9,7 @@ export function PublicFooter() {
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 lg:grid-cols-4 lg:px-8">
         <div className="lg:col-span-2">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">EasyBarber</p>
-          <h3 className="mt-3 text-2xl font-black">SaaS para barbearias com foco em performance comercial.</h3>
+          <h3 className="mt-3 text-2xl font-black">Sistema para barbearias com foco em performance comercial.</h3>
           <p className="mt-3 max-w-lg text-sm text-gray-400">
             Centralize agendamentos, clientes, financeiro e equipe em uma plataforma confiável,
             moderna e pronta para escalar seu negócio.
@@ -36,7 +36,7 @@ export function PublicFooter() {
             </li>
             <li>
               <a href="mailto:contato@easybarber.com" className="hover:text-white">
-                contato@easybarber.com
+                contato@easyconnectcg.com.br
               </a>
             </li>
             <li>Seg a Sex, 9h às 18h</li>
@@ -46,7 +46,13 @@ export function PublicFooter() {
 
       <div className="border-t border-white/10">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-2 px-4 py-4 text-xs text-gray-500 lg:flex-row lg:px-8">
-          <p>© {new Date().getFullYear()} EasyBarber. Todos os direitos reservados.</p>
+          <p>
+            © {new Date().getFullYear()} EasyBarber. Todos os direitos reservados. Desenvolvido pela{' '}
+            <a href="https://easyconnectcg.com.br" target="_blank" rel="noreferrer" className="hover:text-gray-300">
+              EasyConnect
+            </a>
+            .
+          </p>
           <div className="flex items-center gap-4">
             <a href="#" className="hover:text-gray-300">Termos</a>
             <a href="#" className="hover:text-gray-300">Privacidade</a>

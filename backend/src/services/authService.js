@@ -104,13 +104,21 @@ export const authService = {
     return COMMON_PASSWORDS.has(password.toLowerCase());
   },
 
-  async register(res, { barbershopName, ownerName, email, whatsapp, password }) {
+  async register(res, {
+    barbershopName,
+    ownerName,
+    email,
+    whatsapp,
+    password,
+    desiredPlan,
+  }) {
     const client = await authRepository.getClient();
 
     try {
       await client.query('BEGIN');
 
       const plan = 'basico';
+      const onboardingDesiredPlan = desiredPlan || plan;
 
       const barbershop = await authRepository.createBarbershop(client, {
         name: barbershopName,
@@ -118,6 +126,7 @@ export const authService = {
         email,
         whatsapp,
         plan,
+        desiredPlan: onboardingDesiredPlan,
       });
 
       const passwordHash = await bcrypt.hash(password, 12);
@@ -145,7 +154,10 @@ export const authService = {
 
       setAuthCookies(res, accessToken, refreshToken);
 
-      logger.info({ barbershopId: barbershop.id, email }, 'Nova barbearia registrada');
+      logger.info(
+        { barbershopId: barbershop.id, email, desiredPlan: onboardingDesiredPlan },
+        'Nova barbearia registrada'
+      );
 
       const normalizedRole = normalizeRole('tenant_admin');
 
@@ -164,6 +176,7 @@ export const authService = {
           id: barbershop.id,
           name: barbershopName,
           plan,
+          desiredPlan: onboardingDesiredPlan,
         },
       };
     } catch (error) {

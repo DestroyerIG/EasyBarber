@@ -104,6 +104,30 @@ describe('Auth API — /api/v1/auth', () => {
       expect(res.body.data.barbershop.plan).toBe('basico');
     });
 
+    it('deve registrar desiredPlan sem alterar o plano inicial efetivo', async () => {
+      mockClientQuery.mockResolvedValue({ rows: [] });
+      mockAuthRepository.createBarbershop.mockResolvedValue({ id: 'barbershop-uuid' });
+      mockAuthRepository.createUser.mockResolvedValue({ id: 'user-uuid' });
+      mockAuthRepository.saveRefreshToken.mockResolvedValue();
+
+      const res = await request.post('/api/v1/auth/register').send({
+        ...validBody,
+        desiredPlan: 'premium',
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.barbershop.plan).toBe('basico');
+      expect(res.body.data.barbershop.desiredPlan).toBe('premium');
+      expect(mockAuthRepository.createBarbershop).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          plan: 'basico',
+          desiredPlan: 'premium',
+        })
+      );
+    });
+
     it('deve retornar 400 ao enviar dados inválidos (sem email)', async () => {
       const res = await request.post('/api/v1/auth/register').send({
         barbershopName: 'Teste',

@@ -22,7 +22,7 @@ interface PricingPlansSectionProps {
 export function PricingPlansSection({
   sectionId = 'planos',
   title = 'Planos para cada fase da sua barbearia',
-  subtitle = 'Escolha um plano e evolua seu negócio com previsibilidade comercial e operação organizada.',
+  subtitle = 'Na primeira assinatura, qualquer plano inclui 7 dias grátis para você testar com previsibilidade comercial e operação organizada.',
   currentPlan,
   subscriptionStatus,
   showHeader = true,
@@ -97,6 +97,9 @@ export function PricingPlansSection({
                 <p className="mt-4 text-4xl font-black text-primary">
                   R$ {plan.price}
                   <span className="text-sm font-medium text-gray-400">/mês</span>
+                </p>
+                <p className="mt-2 inline-flex items-center rounded-full border border-emerald-400/35 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium leading-snug text-emerald-200 sm:text-xs">
+                  Teste gratuito por {plan.trialDays} dias com acesso completo — sem compromisso.
                 </p>
               </div>
 

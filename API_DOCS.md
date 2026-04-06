@@ -94,9 +94,13 @@ Body:
   "ownerName": "Responsável",
   "email": "owner@barbearia.com",
   "whatsapp": "11999999999",
-  "password": "SenhaComMaiuscula1"
+  "password": "SenhaComMaiuscula1",
+  "desiredPlan": "profissional"
 }
 ```
+
+`desiredPlan` é opcional e aceita: `basico`, `profissional`, `premium`.
+No primeiro cadastro, o plano efetivo da conta permanece `basico` até a conclusão do checkout.
 
 Validações principais:
 
@@ -351,6 +355,11 @@ Planos aceitos:
 - profissional
 - premium
 
+Regra de trial (7 dias grátis):
+
+- O trial de 7 dias é aplicado somente na primeira assinatura da barbearia.
+- Em trocas de plano ou novas contratações após já existir histórico de assinatura Stripe para a barbearia, o checkout é criado sem trial.
+
 ## 7. Endpoints Admin
 
 Prefixo: /admin
@@ -399,6 +408,10 @@ Status de assinatura também impacta acesso:
 - past_due: acesso parcial
 - incomplete/canceled: acesso muito restrito
 
+Observação:
+
+- O status trialing ocorre quando a primeira assinatura da barbearia está em período de teste.
+
 ## 9. Exemplos Rápidos com curl
 
 ### Health
@@ -417,7 +430,8 @@ curl -X POST http://localhost:5000/api/v1/auth/register \
     "ownerName":"Admin Dev",
     "email":"dev@example.com",
     "whatsapp":"11999999999",
-    "password":"SenhaForte1"
+    "password":"SenhaForte1",
+    "desiredPlan":"premium"
   }'
 ```
 

@@ -1,10 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
-import { isPlanId, PLAN_MAP } from '@/lib/plans';
+import { isPlanId, PLAN_MAP, SAAS_PLANS, type PlanId } from '@/lib/plans';
 import { getApiErrorMessage } from '@/utils/handleApiError';
 
 type AuthMode = 'login' | 'register';
@@ -14,8 +14,17 @@ interface AuthFormProps {
   selectedPlan?: string | null;
 }
 
+const resolveInitialPlan = (selectedPlan?: string | null): PlanId => {
+  if (selectedPlan && isPlanId(selectedPlan)) {
+    return selectedPlan;
+  }
+
+  return 'basico';
+};
+
 export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
   const [loading, setLoading] = useState(false);
+  const [desiredPlan, setDesiredPlan] = useState<PlanId>(() => resolveInitialPlan(selectedPlan));
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -28,10 +37,21 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
   const { showToast } = useToast();
 
   const isLogin = mode === 'login';
-  const normalizedPlan = selectedPlan && isPlanId(selectedPlan) ? selectedPlan : null;
+
+  useEffect(() => {
+    setDesiredPlan(resolveInitialPlan(selectedPlan));
+  }, [selectedPlan]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  };
+
+  const handlePlanChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedValue = e.target.value;
+
+    if (isPlanId(selectedValue)) {
+      setDesiredPlan(selectedValue);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -43,8 +63,8 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
         await login(formData.email, formData.password);
         showToast('Login realizado com sucesso.', 'success');
       } else {
-        const redirectTo = normalizedPlan && normalizedPlan !== 'basico'
-          ? `/dashboard?checkoutPlan=${normalizedPlan}`
+        const redirectTo = desiredPlan !== 'basico'
+          ? `/dashboard?checkoutPlan=${desiredPlan}`
           : '/dashboard';
 
         await register(
@@ -54,6 +74,7 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
             email: formData.email,
             whatsapp: formData.whatsapp,
             password: formData.password,
+            desiredPlan,
           },
           { redirectTo }
         );
@@ -81,9 +102,9 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
               : 'Estrutura SaaS pronta para vender mais, reduzir no-show e operar com eficiência.'}
           </p>
 
-          {normalizedPlan && !isLogin && (
+          {!isLogin && (
             <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-2 text-sm text-primary">
-              Plano selecionado: <strong>{PLAN_MAP[normalizedPlan].name}</strong>
+              Plano desejado: <strong>{PLAN_MAP[desiredPlan].name}</strong>
             </div>
           )}
         </section>
@@ -126,6 +147,27 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
                   required
                   className="input"
                 />
+
+                <div>
+                  <label htmlFor="desiredPlan" className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
+                    Plano de assinatura
+                  </label>
+                  <select
+                    id="desiredPlan"
+                    name="desiredPlan"
+                    value={desiredPlan}
+                    onChange={handlePlanChange}
+                    className="input mt-1"
+                    aria-label="Plano de assinatura desejado"
+                  >
+                    {SAAS_PLANS.map((plan) => (
+                      <option key={plan.id} value={plan.id}>
+                        {plan.name} - R$ {plan.price}/mês
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-xs text-gray-400">{PLAN_MAP[desiredPlan].description}</p>
+                </div>
               </>
             )}
 
@@ -157,6 +199,12 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
             >
               {loading ? 'Processando...' : isLogin ? 'Entrar' : 'Criar conta'}
             </button>
+
+            {!isLogin && desiredPlan !== 'basico' && (
+              <p className="text-xs text-gray-400">
+                Ao criar a conta, você será redirecionado para concluir a assinatura {PLAN_MAP[desiredPlan].name}.
+              </p>
+            )}
           </form>
 
           <p className="mt-5 text-center text-sm text-gray-400">

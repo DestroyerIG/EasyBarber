@@ -17,7 +17,7 @@ Também há suporte a execução via Docker Compose com PostgreSQL.
 - Gestão de agendamentos, clientes, serviços e barbeiros.
 - Módulo financeiro com resumo diário/mensal e despesas.
 - Bot de WhatsApp via whatsapp-web.js com configuração de mensagens e menu dinâmico.
-- Assinaturas com Stripe (checkout, portal e webhook).
+- Assinaturas com Stripe (checkout, portal e webhook), com 7 dias grátis apenas na primeira assinatura da barbearia.
 - Painel administrativo de plataforma com bloqueio de contas/usuários e auditoria.
 - Controle de acesso por plano e status de assinatura.
 
@@ -62,7 +62,7 @@ No frontend, o App Router organiza páginas públicas, dashboard tenant e área 
 ```text
 backend/
   src/
-    config/        # database.sql e migration_v2..v6.sql
+    config/        # database.sql e migration_v2..v7.sql
     controllers/
     middleware/
     repositories/
@@ -156,6 +156,7 @@ A sequência recomendada para banco novo é:
 3. backend/src/config/migration_v4.sql
 4. backend/src/config/migration_v5.sql
 5. backend/src/config/migration_v6.sql
+6. backend/src/config/migration_v7.sql
 
 Observação: migration_v2.sql é voltada a upgrade legado e normalmente não é necessária em ambiente novo.
 
@@ -266,6 +267,7 @@ Arquivos SQL em backend/src/config:
 - migration_v4.sql (índices de performance)
 - migration_v5.sql (campos e eventos Stripe)
 - migration_v6.sql (RBAC admin/tenant/employee e audit logs)
+- migration_v7.sql (preferência de plano no onboarding: desired_plan)
 
 A documentação completa de migrations manuais, validação, rollback e troubleshooting está em POSTGRESQL_SETUP.md.
 
@@ -344,7 +346,7 @@ As inconsistências operacionais críticas foram corrigidas no estado atual do p
 
 - backend/.env.example usa DB_CONNECT_TIMEOUT.
 - docker-compose.yml usa FRONTEND_URL no backend e NEXT_PUBLIC_API_URL com /api/v1 no frontend.
-- setup.ps1 aplica database.sql + migration_v3..v6.
+- setup.ps1 aplica database.sql + migration_v3..v7.
 - fix-env.ps1 remove variáveis legadas WHATSAPP_API_* e mantém defaults compatíveis com o backend atual.
 
 Observação:
