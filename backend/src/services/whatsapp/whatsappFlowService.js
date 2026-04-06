@@ -220,34 +220,62 @@ const handleMenuChoice = async (phone, choice, barbershopId, config, menuOptions
 
   if (selected.type === 'system') {
     switch (selected.handler) {
+
+      // ── AGENDAR ──────────────────────────────────────────────────────────
       case 'schedule': {
-        await updateSession(phone, barbershopId, STEPS.CHOOSE_SERVICE, {});
         const services = await pool.query(
-          'SELECT * FROM services WHERE barbershop_id = $1 AND active = true',
+          'SELECT * FROM services WHERE barbershop_id = $1 AND active = true ORDER BY name',
           [barbershopId]
         );
+
+        logger.info({ barbershopId, count: services.rows.length }, '[schedule] Serviços encontrados');
+
+        if (!services.rows.length) {
+          return {
+            message:
+              '⚠️ Nenhum serviço cadastrado no momento.\n\n0️⃣ Voltar ao menu de atendimento',
+          };
+        }
+
+        await updateSession(phone, barbershopId, STEPS.CHOOSE_SERVICE, {});
+
         let message = '💈 Escolha o serviço:\n\n';
         services.rows.forEach((service, index) => {
-          message += `${index + 1}️⃣ ${service.name} - R$ ${service.price}\n`;
+          message += `${index + 1}️⃣ ${service.name} - R$ ${parseFloat(service.price).toFixed(2)}\n`;
         });
         message += '\n0️⃣ Voltar ao menu de atendimento';
         return { message };
       }
+
+      // ── VER SERVIÇOS ─────────────────────────────────────────────────────
       case 'view_services': {
         const services = await pool.query(
-          'SELECT * FROM services WHERE barbershop_id = $1 AND active = true',
+          'SELECT * FROM services WHERE barbershop_id = $1 AND active = true ORDER BY name',
           [barbershopId]
         );
+
+        logger.info({ barbershopId, count: services.rows.length }, '[view_services] Serviços encontrados');
+
+        if (!services.rows.length) {
+          await updateSession(phone, barbershopId, STEPS.VIEW_SERVICES, {});
+          return {
+            message:
+              '⚠️ Nenhum serviço cadastrado no momento.\n\n0️⃣ Voltar ao menu de atendimento',
+          };
+        }
+
         let message = '📋 Nossos serviços:\n\n';
         services.rows.forEach(service => {
           message += `💈 ${service.name}\n`;
-          message += `💰 R$ ${service.price}\n`;
+          message += `💰 R$ ${parseFloat(service.price).toFixed(2)}\n`;
           message += `⏱️ ${service.duration_minutes} minutos\n\n`;
         });
+
         await updateSession(phone, barbershopId, STEPS.VIEW_SERVICES, {});
         message += '0️⃣ Voltar ao menu de atendimento';
         return { message };
       }
+
       case 'cancel':
         return await handleCancelAppointment(phone, barbershopId, config);
       case 'reschedule':
@@ -285,7 +313,7 @@ const handleServiceChoice = async (phone, choice, barbershopId, data, config) =>
     [barbershopId]
   );
 
-  if (serviceIndex < 0 || serviceIndex >= services.rows.length) {
+  if (isNaN(serviceIndex) || serviceIndex < 0 || serviceIndex >= services.rows.length) {
     return { message: formatMessage(config.invalid_option_message) };
   }
 
@@ -333,6 +361,10 @@ const listBarbers = async (barbershopId) => {
     [barbershopId]
   );
 
+  if (!barbers.rows.length) {
+    return { message: '⚠️ Nenhum barbeiro disponível no momento.\n\n0️⃣ Voltar ao menu de atendimento' };
+  }
+
   let message = '👨‍🦱 *Escolha o barbeiro:*\n\n';
   barbers.rows.forEach((barber, index) => {
     message += `${index + 1}️⃣ ${barber.name}\n`;
@@ -350,7 +382,7 @@ const handleBarberChoice = async (phone, choice, barbershopId, data, config) => 
     [barbershopId]
   );
 
-  if (barberIndex < 0 || barberIndex >= barbers.rows.length) {
+  if (isNaN(barberIndex) || barberIndex < 0 || barberIndex >= barbers.rows.length) {
     return { message: formatMessage(config.invalid_option_message) + '\n\n0️⃣ Voltar ao menu de atendimento' };
   }
 
@@ -386,7 +418,7 @@ const handleDateChoice = async (phone, choice, barbershopId, data, config) => {
   if (choice === '0') return await goBackToMainMenu(phone, barbershopId);
 
   const dateIndex = parseInt(choice) - 1;
-  if (dateIndex < 0 || dateIndex >= 7) {
+  if (isNaN(dateIndex) || dateIndex < 0 || dateIndex >= 7) {
     return { message: formatMessage(config.invalid_option_message) + '\n\n0️⃣ Voltar ao menu de atendimento' };
   }
 
@@ -442,7 +474,7 @@ const handleTimeChoice = async (phone, choice, barbershopId, data, config) => {
   if (choice === '0') return await goBackToMainMenu(phone, barbershopId);
 
   const timeIndex = parseInt(choice) - 1;
-  if (timeIndex < 0 || timeIndex >= data.availableSlots.length) {
+  if (isNaN(timeIndex) || timeIndex < 0 || timeIndex >= data.availableSlots.length) {
     return { message: formatMessage(config.invalid_option_message) + '\n\n0️⃣ Voltar ao menu de atendimento' };
   }
 
@@ -502,7 +534,10 @@ const handleTimeChoice = async (phone, choice, barbershopId, data, config) => {
     servicePrice: data.servicePrice,
   });
 
-  logger.info({ phone, barbershopId, serviceId: data.serviceId, barberId: data.barberId, date: data.date, time: selectedTime }, 'Agendamento criado via WhatsApp bot');
+  logger.info(
+    { phone, barbershopId, serviceId: data.serviceId, barberId: data.barberId, date: data.date, time: selectedTime },
+    'Agendamento criado via WhatsApp bot'
+  );
 
   return { message };
 };
