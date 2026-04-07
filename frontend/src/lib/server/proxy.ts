@@ -57,6 +57,35 @@ function buildHeaders(request: Request) {
   return headers;
 }
 
+async function readBody(
+  request: Request,
+  method: string
+): Promise<BodyInit | undefined> {
+  if (method === 'GET' || method === 'HEAD') {
+    return undefined;
+  }
+
+  const contentLength = request.headers.get('content-length');
+  if (!contentLength || contentLength === '0') {
+    return undefined;
+  }
+
+  const contentType = request.headers.get('content-type') || '';
+
+  if (contentType.includes('application/json')) {
+    return await request.text();
+  }
+
+  if (
+    contentType.includes('application/x-www-form-urlencoded') ||
+    contentType.includes('text/plain')
+  ) {
+    return await request.text();
+  }
+
+  return await request.arrayBuffer();
+}
+
 export async function proxyRequest(
   request: Request,
   path: string,
@@ -67,32 +96,47 @@ export async function proxyRequest(
 
   try {
     const headers = buildHeaders(request);
+    const body = await readBody(request, requestMethod);
+
+    if (body === undefined) {
+      headers.delete('content-type');
+      headers.delete('content-length');
+    }
 
     const backendResponse = await fetch(backendUrl, {
       method: requestMethod,
       headers,
-      body:
-        requestMethod === 'GET' || requestMethod === 'HEAD'
-          ? undefined
-          : request.body,
+      body,
+      cache: 'no-store',
+      redirect: 'manual',
     });
 
-    const text = await backendResponse.text();
+    const responseText = await backendResponse.text();
 
     const responseHeaders = new Headers();
     copyResponseHeaders(backendResponse.headers, responseHeaders);
 
-    return new NextResponse(text, {
+    return new NextResponse(responseText, {
       status: backendResponse.status,
+      statusText: backendResponse.statusText,
       headers: responseHeaders,
     });
   } catch (error) {
-    console.error('Proxy error:', error);
+    console.error('Proxy request failed', {
+      backendUrl,
+      method: requestMethod,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
 
     return NextResponse.json(
       {
         success: false,
         message: 'Erro ao comunicar com o backend',
+        error: {
+          code: 'PROXY_REQUEST_FAILED',
+          details: error instanceof Error ? error.message : String(error),
+        },
       },
       { status: 503 }
     );
