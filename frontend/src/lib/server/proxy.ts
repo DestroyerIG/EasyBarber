@@ -56,17 +56,22 @@ function buildOutgoingHeaders(request: Request) {
     outgoingHeaders.set(key, value);
   });
 
-  // garante repasse explícito do cookie para o backend
   const cookie = request.headers.get('cookie');
   if (cookie) {
     outgoingHeaders.set('cookie', cookie);
   }
 
-  // headers úteis para backend/logs/proxy awareness
   const requestUrl = new URL(request.url);
   outgoingHeaders.set('x-forwarded-host', requestUrl.host);
-  outgoingHeaders.set('x-forwarded-proto', requestUrl.protocol.replace(':', ''));
-  outgoingHeaders.set('x-forwarded-for', request.headers.get('x-forwarded-for') || '127.0.0.1');
+  outgoingHeaders.set(
+    'x-forwarded-proto',
+    requestUrl.protocol.replace(':', '')
+  );
+
+  const forwardedFor = request.headers.get('x-forwarded-for');
+  if (forwardedFor) {
+    outgoingHeaders.set('x-forwarded-for', forwardedFor);
+  }
 
   return outgoingHeaders;
 }
@@ -112,12 +117,12 @@ export async function proxyRequest(
       signal: controller.signal,
     });
 
-    const responseBody = await backendResponse.arrayBuffer();
+    const responseText = await backendResponse.text();
 
     const responseHeaders = new Headers();
     copyResponseHeaders(backendResponse.headers, responseHeaders);
 
-    return new NextResponse(responseBody, {
+    return new NextResponse(responseText, {
       status: backendResponse.status,
       statusText: backendResponse.statusText,
       headers: responseHeaders,
