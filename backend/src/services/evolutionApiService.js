@@ -45,10 +45,6 @@ const ensureConfigured = () => {
 
 const normalizePath = (path) => (path.startsWith('/') ? path : `/${path}`);
 
-/**
- * 🔥 CORREÇÃO PRINCIPAL AQUI
- * Remove Authorization Bearer — Evolution geralmente usa só `apikey`
- */
 const buildHeaders = () => {
   const { apiKey } = getConfig();
 
@@ -186,24 +182,30 @@ export const getEvolutionConfig = () => {
   };
 };
 
+// ✅ CORRIGIDO: healthCheck agora só valida as variáveis de ambiente.
+// A Evolution API não expõe /health, então tentamos verificar a conectividade
+// listando as instâncias — rota que sempre existe na Evolution API.
 export const healthCheck = async () => {
   try {
     ensureConfigured();
 
     await requestWithFallback(
       [
-        { method: 'GET', path: '/health', expectedStatuses: [200] },
-        { method: 'GET', path: '/manager/health', expectedStatuses: [200] },
+        { method: 'GET', path: '/instance/fetchInstances', expectedStatuses: [200, 201] },
+        { method: 'GET', path: '/instance/list', expectedStatuses: [200, 201] },
       ],
       'healthCheck'
     );
 
     return { ok: true };
   } catch (error) {
-    return {
-      ok: false,
-      error,
-    };
+    // Se for erro de configuração (sem URL/KEY), retorna unavailable
+    if (error instanceof EvolutionApiError && error.code === 'EVOLUTION_CONFIG_ERROR') {
+      return { ok: false, error };
+    }
+
+    // Para qualquer outro erro (rede, timeout, etc), também retorna unavailable
+    return { ok: false, error };
   }
 };
 
@@ -268,9 +270,10 @@ export const getInstanceStatus = async () => {
     );
 
     const instances = unwrapInstancesList(payload);
+    const { instanceName: name } = getConfig();
     const current = instances.find((item) => {
-      const name = item?.name || item?.instanceName || item?.instance?.instanceName;
-      return name === instanceName;
+      const n = item?.name || item?.instanceName || item?.instance?.instanceName;
+      return n === name;
     });
 
     return current || null;
