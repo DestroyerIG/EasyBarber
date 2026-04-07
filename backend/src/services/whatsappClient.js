@@ -1,117 +1,235 @@
-import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth } = pkg;
-import QRCode from 'qrcode';
-import { handleIncomingMessage } from './whatsapp/index.js';
+import {
+    healthCheck,
+    getInstanceStatus,
+    createInstance,
+    connectInstance,
+    getQrCode,
+    logoutInstance,
+    sendTextMessage,
+    getEvolutionConfig,
+    EvolutionApiError,
+} from './evolutionApiService.js';
 import logger from '../utils/logger.js';
 
-// Estado global do cliente
-let client = null;
-let connectionStatus = 'disconnected';
-let qrCodeData = null;
-let lastError = null;
+const STATUS = {
+    UNAVAILABLE: 'unavailable',
+    DISCONNECTED: 'disconnected',
+    PAIRING: 'pairing',
+    CONNECTED: 'connected',
+    ERROR: 'error',
+};
+
+const waState = {
+    status: STATUS.DISCONNECTED,
+    qrCode: null,
+    error: null,
+    connectedNumber: null,
+    connectedName: null,
+    provider: 'evolution',
+    lastSyncAt: null,
+};
+
+const isEvolutionProvider = () =>
+    (process.env.WHATSAPP_PROVIDER || 'evolution').toLowerCase() === 'evolution';
+
+const getNested = (obj, path) => {
+    return path.reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj);
+};
+
+const toDataUrlIfNeeded = (value) => {
+    if (!value || typeof value !== 'string') return null;
+    if (value.startsWith('data:image/')) return value;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    return `data:image/png;base64,${trimmed}`;
+};
+
+const extractQrCode = (payload) => {
+    const candidates = [
+        payload?.qr,
+        payload?.qrcode,
+        payload?.qrCode,
+        payload?.code,
+        payload?.base64,
+        getNested(payload, ['data', 'qr']),
+        getNested(payload, ['data', 'qrcode']),
+        getNested(payload, ['data', 'base64']),
+        getNested(payload, ['instance', 'qr']),
+        getNested(payload, ['instance', 'qrcode']),
+        getNested(payload, ['qrcode', 'base64']),
+        getNested(payload, ['qrcode', 'code']),
+    ];
+
+    for (const candidate of candidates) {
+        const parsed = toDataUrlIfNeeded(candidate);
+        if (parsed) return parsed;
+    }
+
+    return null;
+};
+
+const extractConnectionState = (payload) => {
+    const candidates = [
+        payload?.status,
+        payload?.state,
+        payload?.connectionStatus,
+        payload?.instance?.state,
+        payload?.instance?.status,
+        payload?.instance?.connectionStatus,
+        getNested(payload, ['data', 'state']),
+        getNested(payload, ['data', 'status']),
+        getNested(payload, ['data', 'connectionStatus']),
+    ];
+
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim()) {
+            return candidate.toLowerCase();
+        }
+    }
+
+    return null;
+};
+
+const extractIdentity = (payload) => {
+    const number = [
+        payload?.number,
+        payload?.phone,
+        payload?.wid,
+        payload?.instance?.number,
+        payload?.instance?.phone,
+        getNested(payload, ['instance', 'ownerJid']),
+        getNested(payload, ['data', 'number']),
+        getNested(payload, ['data', 'phone']),
+    ].find((value) => typeof value === 'string' && value.trim());
+
+    const name = [
+        payload?.name,
+        payload?.pushName,
+        payload?.instance?.name,
+        payload?.instance?.profileName,
+        getNested(payload, ['data', 'name']),
+        getNested(payload, ['data', 'pushName']),
+    ].find((value) => typeof value === 'string' && value.trim());
+
+    return {
+        number: number ? number.replace(/\D/g, '') : null,
+        name: name || null,
+    };
+};
+
+const normalizeStatus = (rawState, qrCode) => {
+    const state = (rawState || '').toLowerCase();
+
+    const connectedStates = ['open', 'connected', 'online', 'ready', 'authenticated', 'islogged'];
+    const pairingStates = ['qr', 'qrcode', 'pairing', 'scan_qr', 'connecting', 'inchat'];
+    const disconnectedStates = ['close', 'closed', 'disconnected', 'logout', 'loggedout', 'offline'];
+
+    if (connectedStates.some((item) => state.includes(item))) {
+        return STATUS.CONNECTED;
+    }
+
+    if (pairingStates.some((item) => state.includes(item)) || qrCode) {
+        return STATUS.PAIRING;
+    }
+
+    if (disconnectedStates.some((item) => state.includes(item))) {
+        return STATUS.DISCONNECTED;
+    }
+
+    if (!state && qrCode) {
+        return STATUS.PAIRING;
+    }
+
+    return STATUS.DISCONNECTED;
+};
+
+const updateState = (patch) => {
+    Object.assign(waState, patch, { lastSyncAt: new Date().toISOString() });
+};
+
+const updateUnavailableState = (error) => {
+    updateState({
+        status: STATUS.UNAVAILABLE,
+        qrCode: null,
+        connectedNumber: null,
+        connectedName: null,
+        error: error?.message || 'Evolution API indisponivel',
+    });
+};
+
+const syncStateFromEvolution = async ({ includeQr = false } = {}) => {
+    if (!isEvolutionProvider()) {
+        updateState({
+            status: STATUS.ERROR,
+            error: 'WHATSAPP_PROVIDER deve ser evolution',
+            qrCode: null,
+            connectedNumber: null,
+            connectedName: null,
+        });
+        return waState;
+    }
+
+    const health = await healthCheck();
+    if (!health.ok) {
+        updateUnavailableState(health.error);
+        return waState;
+    }
+
+    let statusPayload = null;
+
+    try {
+        statusPayload = await getInstanceStatus();
+    } catch (error) {
+        if (error instanceof EvolutionApiError && error.status === 404) {
+            updateState({
+                status: STATUS.DISCONNECTED,
+                qrCode: null,
+                connectedNumber: null,
+                connectedName: null,
+                error: null,
+            });
+            return waState;
+        }
+
+        updateUnavailableState(error);
+        return waState;
+    }
+
+    const qrCode = includeQr ? extractQrCode(statusPayload) : waState.qrCode;
+    const identity = extractIdentity(statusPayload);
+    const status = normalizeStatus(extractConnectionState(statusPayload), qrCode);
+
+    updateState({
+        status,
+        qrCode,
+        connectedNumber: status === STATUS.CONNECTED ? identity.number : null,
+        connectedName: status === STATUS.CONNECTED ? identity.name : null,
+        error: null,
+    });
+
+    return waState;
+};
 
 export const initWhatsApp = async () => {
-    if (!process.env.WHATSAPP_ENABLED || process.env.WHATSAPP_ENABLED !== 'true') {
-        logger.info('WhatsApp Bot desativado (WHATSAPP_ENABLED != true)');
+    if (!isEvolutionProvider()) {
+        logger.warn('WhatsApp provider invalido. Configure WHATSAPP_PROVIDER=evolution');
+        updateState({
+            status: STATUS.ERROR,
+            error: 'Provider de WhatsApp invalido',
+            qrCode: null,
+            connectedNumber: null,
+            connectedName: null,
+        });
         return;
     }
 
-    logger.info('Inicializando WhatsApp Bot...');
-    connectionStatus = 'connecting';
-    lastError = null;
+    logger.info({ config: getEvolutionConfig() }, 'Inicializando provider WhatsApp via Evolution API');
 
     try {
-        client = new Client({
-            authStrategy: new LocalAuth({
-                dataPath: './whatsapp-auth'
-            }),
-            puppeteer: {
-                headless: true,
-                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
-                    '--no-first-run',
-                    '--no-zygote',
-                    '--single-process',
-                    '--disable-gpu'
-                ]
-            }
-        });
-
-        client.on('qr', async (qr) => {
-            logger.info('QR Code gerado - escaneie com WhatsApp');
-            connectionStatus = 'qr';
-
-            try {
-                qrCodeData = await QRCode.toDataURL(qr, {
-                    width: 300,
-                    margin: 2,
-                    color: { dark: '#000000', light: '#FFFFFF' }
-                });
-            } catch (err) {
-                logger.error({ err }, 'Erro ao gerar QR Code imagem');
-            }
-        });
-
-        client.on('loading_screen', (percent) => {
-            connectionStatus = 'connecting';
-            logger.debug({ percent }, 'Carregando WhatsApp');
-        });
-
-        client.on('authenticated', () => {
-            logger.info('WhatsApp autenticado');
-            connectionStatus = 'connecting';
-        });
-
-        client.on('ready', () => {
-            logger.info('WhatsApp Bot conectado e pronto');
-            connectionStatus = 'connected';
-            qrCodeData = null;
-
-            const info = client.info;
-            if (info) {
-                logger.info({ number: info.wid.user, name: info.pushname }, 'WhatsApp conectado');
-            }
-        });
-
-        client.on('disconnected', (reason) => {
-            logger.warn({ reason }, 'WhatsApp desconectado');
-            connectionStatus = 'disconnected';
-            qrCodeData = null;
-            client = null;
-        });
-
-        client.on('auth_failure', (msg) => {
-            logger.error({ msg }, 'Falha na autenticação do WhatsApp');
-            connectionStatus = 'disconnected';
-            lastError = 'Falha na autenticação: ' + msg;
-        });
-
-        client.on('message', async (message) => {
-            try {
-                if (message.from.includes('@g.us') || message.from === 'status@broadcast') {
-                    return;
-                }
-
-                const phone = message.from.replace('@c.us', '');
-                const text = message.body;
-
-                logger.debug({ phone }, 'Mensagem recebida');
-
-                await handleIncomingMessage(phone, text);
-            } catch (error) {
-                logger.error({ err: error }, 'Erro ao processar mensagem recebida');
-            }
-        });
-
-        await client.initialize();
+        await syncStateFromEvolution({ includeQr: true });
     } catch (error) {
-        logger.error({ err: error }, 'Erro ao inicializar WhatsApp');
-        lastError = error.message;
-        connectionStatus = 'disconnected';
+        logger.error({ err: error }, 'Falha ao inicializar provider WhatsApp');
+        updateUnavailableState(error);
     }
 };
 
@@ -120,57 +238,142 @@ export const initWhatsApp = async () => {
  */
 export const getWhatsAppStatus = () => {
     return {
-        status: connectionStatus,
-        qrCode: qrCodeData,
-        error: lastError,
-        connectedNumber: connectionStatus === 'connected' && client?.info
-            ? client.info.wid.user
-            : null,
-        connectedName: connectionStatus === 'connected' && client?.info
-            ? client.info.pushname
-            : null
+        status: waState.status,
+        qrCode: waState.qrCode,
+        error: waState.error,
+        connectedNumber: waState.connectedNumber,
+        connectedName: waState.connectedName,
+        provider: waState.provider,
     };
 };
 
 /**
  * Retorna a instância do cliente WhatsApp
  */
-export const getWhatsAppClient = () => client;
+export const getWhatsAppClient = () => null;
+
+export const connectWhatsApp = async () => {
+    try {
+        const health = await healthCheck();
+        if (!health.ok) {
+            updateUnavailableState(health.error);
+            return false;
+        }
+
+        await createInstance();
+        await connectInstance();
+
+        let qrPayload = null;
+        try {
+            qrPayload = await getQrCode();
+        } catch (error) {
+            logger.warn({ err: error }, 'Nao foi possivel obter QR imediatamente apos connect');
+        }
+
+        const qrCode = extractQrCode(qrPayload);
+        await syncStateFromEvolution({ includeQr: !qrCode });
+
+        if (qrCode) {
+            updateState({
+                status: STATUS.PAIRING,
+                qrCode,
+                connectedNumber: null,
+                connectedName: null,
+                error: null,
+            });
+        }
+
+        return true;
+    } catch (error) {
+        logger.error({ err: error }, 'Erro ao conectar instancia Evolution');
+        if (error instanceof EvolutionApiError && error.code === 'EVOLUTION_CONFIG_ERROR') {
+            updateState({ status: STATUS.ERROR, qrCode: null, error: error.message, connectedName: null, connectedNumber: null });
+        } else {
+            updateUnavailableState(error);
+        }
+        return false;
+    }
+};
+
+export const getWhatsAppQrCode = async () => {
+    try {
+        const payload = await getQrCode();
+        const qrCode = extractQrCode(payload);
+
+        if (!qrCode) {
+            await syncStateFromEvolution({ includeQr: true });
+            return getWhatsAppStatus().qrCode;
+        }
+
+        updateState({
+            status: STATUS.PAIRING,
+            qrCode,
+            connectedNumber: null,
+            connectedName: null,
+            error: null,
+        });
+
+        return qrCode;
+    } catch (error) {
+        logger.warn({ err: error }, 'Erro ao buscar QR Code na Evolution API');
+        await syncStateFromEvolution({ includeQr: true });
+        return getWhatsAppStatus().qrCode;
+    }
+};
+
+export const disconnectWhatsApp = async () => {
+    try {
+        await logoutInstance();
+        await syncStateFromEvolution({ includeQr: false });
+        updateState({
+            status: STATUS.DISCONNECTED,
+            qrCode: null,
+            connectedName: null,
+            connectedNumber: null,
+            error: null,
+        });
+        return true;
+    } catch (error) {
+        logger.error({ err: error }, 'Erro ao desconectar instancia Evolution');
+        if (error instanceof EvolutionApiError) {
+            updateUnavailableState(error);
+        }
+        return false;
+    }
+};
+
+export const sendWhatsAppText = async (phone, message) => {
+    try {
+        await sendTextMessage({ phone, text: message });
+        if (waState.status !== STATUS.CONNECTED) {
+            await syncStateFromEvolution({ includeQr: false });
+        }
+        return true;
+    } catch (error) {
+        logger.error({ err: error, phone }, 'Falha ao enviar mensagem via Evolution API');
+        if (error instanceof EvolutionApiError) {
+            if (error.code === 'EVOLUTION_NETWORK_ERROR' || error.code === 'EVOLUTION_TIMEOUT') {
+                updateUnavailableState(error);
+            } else {
+                updateState({ status: STATUS.ERROR, error: error.message, qrCode: null, connectedName: null, connectedNumber: null });
+            }
+        }
+        return false;
+    }
+};
 
 /**
  * Desconecta o cliente WhatsApp
  */
 export const logoutWhatsApp = async () => {
-    if (client) {
-        try {
-            await client.logout();
-            connectionStatus = 'disconnected';
-            qrCodeData = null;
-            logger.info('WhatsApp desconectado pelo usuário');
-            return true;
-        } catch (error) {
-            logger.error({ err: error }, 'Erro ao desconectar WhatsApp');
-            return false;
-        }
-    }
-    return false;
+    return disconnectWhatsApp();
 };
 
 /**
  * Reinicia o cliente WhatsApp (reconectar)
  */
 export const restartWhatsApp = async () => {
-    if (client) {
-        try {
-            await client.destroy();
-        } catch (e) {
-            // ignore
-        }
-        client = null;
-    }
-    connectionStatus = 'disconnected';
-    qrCodeData = null;
-    lastError = null;
-    // Não usar await aqui para não bloquear a resposta HTTP
-    initWhatsApp();
+    return connectWhatsApp();
 };
+
+export const refreshWhatsAppStatus = async () => syncStateFromEvolution({ includeQr: false });

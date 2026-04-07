@@ -67,7 +67,13 @@ DB_IDLE_TIMEOUT=30000
 DB_CONNECT_TIMEOUT=5000
 DB_STATEMENT_TIMEOUT=30000
 DB_CA_CERT=<certificado-ca>
-WHATSAPP_ENABLED=true
+# WhatsApp provider (Evolution API externa)
+WHATSAPP_PROVIDER=evolution
+EVOLUTION_API_URL=https://sua-evolution.onrender.com
+EVOLUTION_API_KEY=sua_chave
+EVOLUTION_INSTANCE_NAME=easybarber
+EVOLUTION_WEBHOOK_URL=https://sua-api.com/api/v1/whatsapp/webhook
+EVOLUTION_API_TIMEOUT_MS=10000
 WHATSAPP_SESSION_TIMEOUT_MS=1800000
 ```
 
@@ -187,6 +193,13 @@ psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP
 - Publicar pasta frontend.
 - Definir NEXT_PUBLIC_API_URL para URL pública da API com /api/v1.
 
+### Evolution API (serviço separado)
+
+- Publicar Evolution API em serviço próprio (ex.: Render), separado do backend EasyBarber.
+- Configurar instância e API key no serviço da Evolution.
+- Configurar EVOLUTION_WEBHOOK_URL apontando para o backend EasyBarber: /api/v1/whatsapp/webhook.
+- Garantir conectividade de rede: backend EasyBarber precisa alcançar a URL pública da Evolution.
+
 ## 9. Configuração de Webhook Stripe
 
 No painel Stripe:
@@ -214,10 +227,13 @@ curl https://sua-api.com/health
   - Criação de agendamento.
   - Criação de despesa.
   - Consulta de /api/v1/subscriptions/status.
+  - WhatsApp: GET /api/v1/whatsapp/status retornando status coerente.
+  - WhatsApp: POST /api/v1/whatsapp/connect e GET /api/v1/whatsapp/qrcode com resposta sem crash.
 
 - Frontend:
   - Login e navegação dashboard.
   - Consumo de dados sem erro de CORS.
+  - Aba WhatsApp exibindo estados: unavailable, disconnected, pairing, connected, error.
 
 ## 11. Riscos Comuns
 
@@ -227,6 +243,8 @@ curl https://sua-api.com/health
 - SMTP_* ausentes ou inválidas (falha de envio de e-mail de verificação).
 - DB_CONNECT_TIMEOUT ausente ou configurado incorretamente no backend.
 - Webhook Stripe sem assinatura válida.
+- EVOLUTION_API_URL ou EVOLUTION_API_KEY inválidas.
+- Evolution API offline sem monitoramento ativo.
 - Deploy sem backup anterior.
 
 ## 12. Rollback

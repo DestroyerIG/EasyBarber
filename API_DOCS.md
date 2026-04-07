@@ -354,9 +354,10 @@ Webhook local (sem auth):
 Rotas protegidas (Feature: whatsapp_automation):
 
 - GET /whatsapp/status
-- GET /whatsapp/qr
-- POST /whatsapp/logout
-- POST /whatsapp/restart
+- POST /whatsapp/connect
+- GET /whatsapp/qrcode
+- POST /whatsapp/disconnect
+- POST /whatsapp/send
 - GET /whatsapp/config
 - PUT /whatsapp/config
 - POST /whatsapp/config/reset
@@ -366,6 +367,20 @@ Rotas protegidas (Feature: whatsapp_automation):
 - DELETE /whatsapp/config/menu/:id
 - PUT /whatsapp/config/menu-reorder
 - POST /whatsapp/config/menu/reset
+
+Compatibilidade legada (temporária):
+
+- GET /whatsapp/qr (alias de /whatsapp/qrcode)
+- POST /whatsapp/logout (alias de /whatsapp/disconnect)
+- POST /whatsapp/restart (alias de /whatsapp/connect)
+
+Estados de status esperados:
+
+- unavailable
+- disconnected
+- pairing
+- connected
+- error
 
 Body exemplo para menu custom:
 

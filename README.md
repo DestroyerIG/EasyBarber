@@ -17,7 +17,7 @@ Também há suporte a execução via Docker Compose com PostgreSQL.
 - Cadastro com verificação obrigatória de e-mail (token com expiração + reenvio de verificação).
 - Gestão de agendamentos, clientes, serviços e barbeiros.
 - Módulo financeiro com resumo diário/mensal e despesas.
-- Bot de WhatsApp via whatsapp-web.js com configuração de mensagens e menu dinâmico.
+- Bot de WhatsApp via Evolution API v1 (serviço externo) com configuração de mensagens e menu dinâmico.
 - Assinaturas com Stripe (checkout, portal e webhook), com 7 dias grátis apenas na primeira assinatura da barbearia.
 - Painel administrativo de plataforma com bloqueio de contas/usuários e auditoria.
 - Controle de acesso por plano e status de assinatura.
@@ -34,7 +34,7 @@ Também há suporte a execução via Docker Compose com PostgreSQL.
 - nodemailer (SMTP)
 - Pino (logs)
 - stripe
-- whatsapp-web.js
+- Integração HTTP com Evolution API v1 (serviço externo)
 
 ### Frontend
 
@@ -50,6 +50,15 @@ Também há suporte a execução via Docker Compose com PostgreSQL.
 No backend, o fluxo principal segue:
 
 Controller -> Service -> Repository -> PostgreSQL
+
+Fluxo da automação WhatsApp:
+
+Frontend -> Backend EasyBarber -> Evolution API v1 (serviço externo)
+
+Importante:
+
+- A Evolution API não roda dentro do backend principal.
+- O frontend nunca chama a Evolution API diretamente.
 
 Componentes de apoio:
 
@@ -121,8 +130,13 @@ STRIPE_PRICE_ID_BASICO=price_xxx
 STRIPE_PRICE_ID_PROFISSIONAL=price_xxx
 STRIPE_PRICE_ID_PREMIUM=price_xxx
 
-# WhatsApp (opcional)
-WHATSAPP_ENABLED=false
+# WhatsApp Provider (Evolution API v1 externa)
+WHATSAPP_PROVIDER=evolution
+EVOLUTION_API_URL=https://sua-evolution.onrender.com
+EVOLUTION_API_KEY=chave_da_evolution
+EVOLUTION_INSTANCE_NAME=easybarber
+EVOLUTION_WEBHOOK_URL=https://sua-api.com/api/v1/whatsapp/webhook
+EVOLUTION_API_TIMEOUT_MS=10000
 WHATSAPP_SESSION_TIMEOUT_MS=1800000
 ```
 

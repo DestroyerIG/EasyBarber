@@ -2,22 +2,20 @@
  * Envio de mensagens, formatação de templates e construção de menus.
  */
 
-import { getWhatsAppClient } from '../whatsappClient.js';
+import { sendWhatsAppText } from '../whatsappClient.js';
 import logger from '../../utils/logger.js';
 
 /**
- * Envia mensagem via whatsapp-web.js.
+ * Envia mensagem via provider configurado (Evolution API).
  */
 export const sendWhatsAppMessage = async (phone, message) => {
   try {
-    const client = getWhatsAppClient();
-    if (!client) {
-      logger.warn('WhatsApp não conectado. Mensagem não enviada.');
+    const sent = await sendWhatsAppText(phone, message);
+    if (!sent) {
+      logger.warn({ phone }, 'Mensagem nao enviada pelo provider WhatsApp');
       return false;
     }
 
-    const chatId = `${phone}@c.us`;
-    await client.sendMessage(chatId, message);
     logger.debug({ phone }, 'Mensagem enviada');
     return true;
   } catch (error) {

@@ -1,58 +1,247 @@
 import express from 'express';
-import { handleWebhook } from '../services/whatsapp/index.js';
-import { getWhatsAppStatus, logoutWhatsApp, restartWhatsApp } from '../services/whatsappClient.js';
+import { handleWebhook, handleIncomingMessage } from '../services/whatsapp/index.js';
+import {
+    getWhatsAppStatus,
+    connectWhatsApp,
+    disconnectWhatsApp,
+    getWhatsAppQrCode,
+    sendWhatsAppText,
+    refreshWhatsAppStatus,
+    logoutWhatsApp,
+    restartWhatsApp,
+} from '../services/whatsappClient.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { requireTenantRoles } from '../middleware/rbac.js';
 import { requireFeature } from '../middleware/subscriptionGuard.js';
 import pool from '../config/database.js';
-import { sendSuccess, sendCreated } from '../utils/response.js';
+import { sendSuccess, sendCreated, sendError } from '../utils/response.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
 const waProtected = [authMiddleware, requireTenantRoles, requireFeature('whatsapp_automation')];
 
-// Simulador local (mantido para testes no frontend)
-router.post('/webhook', handleWebhook);
+const extractWebhookText = (payload) => {
+    const directText = [
+        payload?.message,
+        payload?.text,
+        payload?.body,
+        payload?.data?.message,
+        payload?.data?.text,
+        payload?.data?.body,
+        payload?.data?.message?.conversation,
+        payload?.data?.message?.extendedTextMessage?.text,
+        payload?.data?.message?.imageMessage?.caption,
+        payload?.data?.message?.videoMessage?.caption,
+    ].find((value) => typeof value === 'string' && value.trim());
+
+    return directText ? directText.trim() : null;
+};
+
+const extractWebhookPhone = (payload) => {
+    const jid = [
+        payload?.key?.remoteJid,
+        payload?.data?.key?.remoteJid,
+        payload?.data?.remoteJid,
+        payload?.remoteJid,
+        payload?.jid,
+        payload?.from,
+        payload?.data?.from,
+        payload?.sender,
+        payload?.phone,
+    ].find((value) => typeof value === 'string' && value.trim());
+
+    if (!jid) return null;
+    if (jid.includes('@g.us') || jid === 'status@broadcast') return null;
+
+    return jid.split('@')[0].replace(/\D/g, '') || null;
+};
+
+const mapWebhookIncomingMessage = (payload) => {
+    const eventName = String(payload?.event || payload?.type || '').toLowerCase();
+    const relevantEvent = !eventName || eventName.includes('message') || eventName.includes('upsert');
+    if (!relevantEvent) {
+        return null;
+    }
+
+    const phone = extractWebhookPhone(payload);
+    const text = extractWebhookText(payload);
+
+    if (!phone || !text) {
+        return null;
+    }
+
+    return { phone, text };
+};
+
+// Webhook local (simulador) + Evolution webhook
+router.post('/webhook', async (req, res, next) => {
+    try {
+        const payload = req.body || {};
+
+        // Compatibilidade com simulador local atual
+        if (payload.phone && (payload.message || payload.text)) {
+            return handleWebhook(req, res);
+        }
+
+        const incoming = mapWebhookIncomingMessage(payload);
+        if (!incoming) {
+            logger.debug({ event: payload?.event || payload?.type }, 'Webhook Evolution ignorado sem payload de mensagem util');
+            return sendSuccess(res, { received: true, processed: false });
+        }
+
+        await handleIncomingMessage(incoming.phone, incoming.text);
+        return sendSuccess(res, { received: true, processed: true });
+    } catch (error) {
+        return next(error);
+    }
+});
 
 // Status da conexão WhatsApp
-router.get('/status', ...waProtected, (req, res) => {
-    const status = getWhatsAppStatus();
-    sendSuccess(res, status);
+router.get('/status', ...waProtected, async (req, res, next) => {
+    try {
+        await refreshWhatsAppStatus();
+        return sendSuccess(res, getWhatsAppStatus());
+    } catch (error) {
+        return next(error);
+    }
+});
+
+// Iniciar conexão com a instância
+router.post('/connect', ...waProtected, async (req, res, next) => {
+    try {
+        const connected = await connectWhatsApp();
+        const status = getWhatsAppStatus();
+
+        if (!connected && status.status === 'unavailable') {
+            return sendError(res, 503, 'WHATSAPP_PROVIDER_UNAVAILABLE', status.error || 'Evolution API indisponivel');
+        }
+
+        return sendSuccess(res, status);
+    } catch (error) {
+        return next(error);
+    }
 });
 
 // QR Code para pareamento
-router.get('/qr', ...waProtected, (req, res) => {
-    const status = getWhatsAppStatus();
-    if (status.status === 'qr' && status.qrCode) {
-        sendSuccess(res, { qrCode: status.qrCode });
-    } else if (status.status === 'connected') {
-        sendSuccess(res, { message: 'WhatsApp já está conectado', status: 'connected' });
-    } else {
-        sendSuccess(res, { message: 'QR Code ainda não disponível', status: status.status });
+router.get('/qrcode', ...waProtected, async (req, res, next) => {
+    try {
+        const status = getWhatsAppStatus();
+        if (status.status === 'unavailable') {
+            return sendSuccess(res, {
+                status: 'unavailable',
+                qrCode: null,
+                message: status.error || 'Evolution API indisponivel',
+            });
+        }
+
+        const qrCode = await getWhatsAppQrCode();
+        const refreshed = getWhatsAppStatus();
+
+        if (!qrCode) {
+            return sendSuccess(res, {
+                status: refreshed.status,
+                qrCode: null,
+                message: refreshed.status === 'connected'
+                    ? 'Instancia ja conectada'
+                    : 'QR Code ainda nao disponivel',
+            });
+        }
+
+        return sendSuccess(res, {
+            status: refreshed.status,
+            qrCode,
+        });
+    } catch (error) {
+        return next(error);
     }
 });
 
 // Desconectar WhatsApp
+router.post('/disconnect', ...waProtected, async (req, res, next) => {
+    try {
+        const success = await disconnectWhatsApp();
+        if (success) {
+            return sendSuccess(res, {
+                message: 'WhatsApp desconectado com sucesso',
+                status: getWhatsAppStatus(),
+            });
+        } else {
+            return sendError(res, 502, 'WHATSAPP_DISCONNECT_FAILED', 'Nao foi possivel desconectar');
+        }
+    } catch (error) {
+        return next(error);
+    }
+});
+
+// Envio manual de mensagem
+router.post('/send', ...waProtected, async (req, res, next) => {
+    try {
+        const { phone, message } = req.body || {};
+
+        if (!phone || !message) {
+            return sendError(res, 400, 'WHATSAPP_SEND_INVALID_PAYLOAD', 'Campos phone e message sao obrigatorios');
+        }
+
+        const sent = await sendWhatsAppText(phone, message);
+        if (!sent) {
+            const status = getWhatsAppStatus();
+            return sendError(res, 502, 'WHATSAPP_SEND_FAILED', status.error || 'Falha ao enviar mensagem');
+        }
+
+        return sendSuccess(res, {
+            sent: true,
+            phone: String(phone).replace(/\D/g, ''),
+        });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+// Alias legados para manter compatibilidade temporaria com frontend antigo
+router.get('/qr', ...waProtected, async (req, res, next) => {
+    try {
+        const status = getWhatsAppStatus();
+        if (status.status === 'unavailable') {
+            return sendSuccess(res, {
+                status: 'unavailable',
+                qrCode: null,
+                message: status.error || 'Evolution API indisponivel',
+            });
+        }
+
+        const qrCode = await getWhatsAppQrCode();
+        const refreshed = getWhatsAppStatus();
+
+        return sendSuccess(res, {
+            status: refreshed.status,
+            qrCode: qrCode || null,
+        });
+    } catch (error) {
+        return next(error);
+    }
+});
+
 router.post('/logout', ...waProtected, async (req, res, next) => {
     try {
         const success = await logoutWhatsApp();
         if (success) {
-            sendSuccess(res, { message: 'WhatsApp desconectado com sucesso' });
-        } else {
-            res.status(400).json({ success: false, error: { code: 'WHATSAPP_LOGOUT_FAILED', message: 'Não foi possível desconectar' } });
+            return sendSuccess(res, {
+                message: 'WhatsApp desconectado com sucesso',
+                status: getWhatsAppStatus(),
+            });
         }
+        return sendError(res, 502, 'WHATSAPP_LOGOUT_FAILED', 'Nao foi possivel desconectar');
     } catch (error) {
-        next(error);
+        return next(error);
     }
 });
 
-// Reconectar WhatsApp
 router.post('/restart', ...waProtected, async (req, res, next) => {
     try {
         await restartWhatsApp();
-        sendSuccess(res, { message: 'WhatsApp reiniciando...' });
+        return sendSuccess(res, getWhatsAppStatus());
     } catch (error) {
-        next(error);
+        return next(error);
     }
 });
 

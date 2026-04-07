@@ -6,39 +6,48 @@ Guia técnico do módulo de WhatsApp do projeto.
 
 Implementação atual:
 
-- whatsapp-web.js
-- QR code local
-- Sessão persistida em backend/whatsapp-auth
+- Backend EasyBarber consumindo Evolution API v1 por HTTP.
+- Evolution API hospedada como serviço externo (ex.: Render).
+- Frontend acessando apenas endpoints internos do backend EasyBarber.
 
-Não depende de API externa de WhatsApp.
+Arquitetura obrigatória:
+
+Frontend -> Backend EasyBarber -> Evolution API v1 (externa)
 
 ## 2. Pré-requisitos
 
 - Backend rodando.
 - Banco com migration_v3.sql aplicada.
-- Variável WHATSAPP_ENABLED=true no backend/.env.
+- Evolution API v1 rodando em URL pública.
+- Variáveis da Evolution configuradas no backend/.env.
 
 Exemplo:
 
 ```env
-WHATSAPP_ENABLED=true
+WHATSAPP_PROVIDER=evolution
+EVOLUTION_API_URL=https://sua-evolution.onrender.com
+EVOLUTION_API_KEY=sua_chave
+EVOLUTION_INSTANCE_NAME=easybarber
+EVOLUTION_WEBHOOK_URL=https://sua-api.com/api/v1/whatsapp/webhook
+EVOLUTION_API_TIMEOUT_MS=10000
 WHATSAPP_SESSION_TIMEOUT_MS=1800000
 ```
 
 ## 3. Fluxo de Conexão
 
-1. Inicie backend.
-2. Abra dashboard.
-3. Vá para módulo WhatsApp.
-4. Consulte status e QR code.
-5. Escaneie QR no celular.
+1. Inicie backend EasyBarber.
+2. Abra dashboard e acesse módulo WhatsApp.
+3. Chame conexão via endpoint interno /whatsapp/connect.
+4. Consulte /whatsapp/status.
+5. Se status for pairing, consulte /whatsapp/qrcode e escaneie no celular.
 
 Status possíveis retornados pela API:
 
+- unavailable
 - disconnected
-- connecting
-- qr
+- pairing
 - connected
+- error
 
 ## 4. Endpoints
 
@@ -46,14 +55,15 @@ Prefixo: /api/v1/whatsapp
 
 Público:
 
-- POST /webhook (simulador/local)
+- POST /webhook (simulador local + webhook da Evolution)
 
 Protegidos (auth + tenant role + feature whatsapp_automation):
 
 - GET /status
-- GET /qr
-- POST /logout
-- POST /restart
+- POST /connect
+- GET /qrcode
+- POST /disconnect
+- POST /send
 - GET /config
 - PUT /config
 - POST /config/reset
@@ -63,6 +73,12 @@ Protegidos (auth + tenant role + feature whatsapp_automation):
 - DELETE /config/menu/:id
 - PUT /config/menu-reorder
 - POST /config/menu/reset
+
+Compatibilidade legada temporária:
+
+- GET /qr (alias)
+- POST /logout (alias)
+- POST /restart (alias)
 
 ## 5. Configuração de Mensagens
 
@@ -116,11 +132,16 @@ Na configuração atual:
 
 ## 10. Troubleshooting Rápido
 
-### QR não aparece
+### Status unavailable
 
-- Verifique WHATSAPP_ENABLED=true.
-- Verifique logs do backend.
-- Verifique se migration_v3 foi aplicada.
+- Verifique EVOLUTION_API_URL e EVOLUTION_API_KEY.
+- Verifique se a Evolution API está online.
+
+### QR não aparece (pairing)
+
+- Verifique EVOLUTION_INSTANCE_NAME.
+- Consulte GET /qrcode diretamente.
+- Verifique logs do backend e do serviço Evolution.
 
 ### Erro ao salvar configuração
 
@@ -128,16 +149,17 @@ Na configuração atual:
 
 ### Bot desconecta
 
-- Reinicie via endpoint /restart.
+- Reconecte via endpoint /connect.
 - Refaça pareamento QR.
 
 ### Mensagens não enviadas
 
 - Verifique status connected.
-- Verifique conectividade do celular pareado.
+- Teste envio via endpoint /send.
+- Verifique indisponibilidade da Evolution API.
 
 ## 11. Segurança Operacional
 
-- Não exponha backend/whatsapp-auth em repositório público.
 - Controle acesso ao painel de WhatsApp por role e assinatura.
-- Evite habilitar bot em múltiplas instâncias com mesma sessão sem estratégia de coordenação.
+- Não exponha EVOLUTION_API_KEY.
+- Evite apontar múltiplos backends para a mesma instância sem coordenação.

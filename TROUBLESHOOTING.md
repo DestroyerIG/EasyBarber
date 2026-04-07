@@ -208,15 +208,40 @@ LIMIT 10;
 
 ## 5. WhatsApp
 
-## 5.1 QR Code não aparece
+## 5.1 Status unavailable
+
+Sintoma:
+
+- /api/v1/whatsapp/status retorna unavailable.
+- UI mostra API indisponivel.
 
 Checklist:
 
-- WHATSAPP_ENABLED=true no backend/.env.
-- Migração v3 aplicada (colunas e tabela do bot).
-- Backend sem erro no log de inicialização.
+- EVOLUTION_API_URL e EVOLUTION_API_KEY configuradas no backend/.env.
+- Serviço Evolution API online e acessível pela rede do backend.
+- WHATSAPP_PROVIDER=evolution.
 
-## 5.2 Endpoints de WhatsApp retornando erro de schema
+## 5.2 Status pairing sem QR Code
+
+Sintoma:
+
+- /api/v1/whatsapp/status retorna pairing, mas sem qrCode.
+
+Ações:
+
+- Chamar GET /api/v1/whatsapp/qrcode.
+- Verificar se a instância existe e foi criada com nome de EVOLUTION_INSTANCE_NAME.
+- Verificar se a Evolution API está retornando payload de QR no endpoint da versão em uso.
+
+## 5.3 Webhook não processa mensagens
+
+Checklist:
+
+- EVOLUTION_WEBHOOK_URL aponta para https://<backend>/api/v1/whatsapp/webhook.
+- Endpoint público acessível externamente.
+- Evento de mensagens habilitado na Evolution.
+
+## 5.4 Endpoints de WhatsApp retornando erro de schema
 
 Causa comum:
 

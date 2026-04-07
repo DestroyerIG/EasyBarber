@@ -188,9 +188,12 @@ export interface MenuOption {
 }
 
 export interface WhatsAppStatus {
-    connected: boolean;
-    qr?: string;
-    phone?: string;
+    status: 'unavailable' | 'disconnected' | 'pairing' | 'connected' | 'error';
+    qrCode: string | null;
+    connectedNumber: string | null;
+    connectedName: string | null;
+    error: string | null;
+    provider?: string;
 }
 
 export type TabId = 'dashboard' | 'agendamentos' | 'financeiro' | 'clientes' | 'servicos' | 'planos' | 'configuracoes' | 'whatsapp';

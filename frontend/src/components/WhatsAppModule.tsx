@@ -21,24 +21,32 @@ import {
   CheckCircle,
   QrCode,
   WifiOff,
+  AlertTriangle,
   LogOut,
   RefreshCw,
   List,
 } from 'lucide-react';
 
 interface WhatsAppStatus {
-  status: 'disconnected' | 'qr' | 'connecting' | 'connected';
+  status: 'unavailable' | 'disconnected' | 'pairing' | 'connected' | 'error';
   qrCode: string | null;
   connectedNumber: string | null;
   connectedName: string | null;
   error: string | null;
+  provider?: string;
 }
+
+const DEFAULT_WA_STATUS: WhatsAppStatus = {
+  status: 'disconnected',
+  qrCode: null,
+  connectedNumber: null,
+  connectedName: null,
+  error: null,
+};
 
 export const WhatsAppModule = () => {
   const [activeTab, setActiveTab] = useState<'simulador' | 'config' | 'mensagens' | 'menu'>('config');
-  const [waStatus, setWaStatus] = useState<WhatsAppStatus>({
-    status: 'disconnected', qrCode: null, connectedNumber: null, connectedName: null, error: null,
-  });
+  const [waStatus, setWaStatus] = useState<WhatsAppStatus>(DEFAULT_WA_STATUS);
   const [botConfig, setBotConfig] = useState<BotConfig>({
     welcome_header: '', ask_name_message: '', attendant_message: '',
     confirmation_message: '', reminder_message: '', invalid_option_message: '', session_expired_message: '',
@@ -58,8 +66,39 @@ export const WhatsAppModule = () => {
   const fetchStatus = useCallback(async () => {
     try {
       const response = await api.get('/whatsapp/status');
-      setWaStatus(response.data);
-    } catch { /* ignore */ } finally {
+      const payload = response.data as Partial<WhatsAppStatus>;
+      const allowedStatus = ['unavailable', 'disconnected', 'pairing', 'connected', 'error'];
+      const normalizedStatus = allowedStatus.includes(String(payload.status))
+        ? (payload.status as WhatsAppStatus['status'])
+        : 'error';
+
+      const mergedStatus: WhatsAppStatus = {
+        ...DEFAULT_WA_STATUS,
+        ...payload,
+        status: normalizedStatus,
+      };
+
+      if (mergedStatus.status === 'pairing' && !mergedStatus.qrCode) {
+        try {
+          const qrResponse = await api.get('/whatsapp/qrcode');
+          const qrPayload = qrResponse.data as Partial<WhatsAppStatus> & { qrCode?: string | null };
+          mergedStatus.qrCode = qrPayload.qrCode || null;
+          if (qrPayload.status && allowedStatus.includes(String(qrPayload.status))) {
+            mergedStatus.status = qrPayload.status as WhatsAppStatus['status'];
+          }
+        } catch {
+          // manter fallback do status principal
+        }
+      }
+
+      setWaStatus(mergedStatus);
+    } catch {
+      setWaStatus({
+        ...DEFAULT_WA_STATUS,
+        status: 'unavailable',
+        error: 'Nao foi possivel consultar a Evolution API no momento.',
+      });
+    } finally {
       setStatusLoading(false);
     }
   }, []);
@@ -99,16 +138,16 @@ export const WhatsAppModule = () => {
     if (activeTab === 'menu') fetchMenuOptions();
   }, [activeTab, fetchConfig, fetchMenuOptions]);
 
-  const handleLogout = async () => {
+  const handleDisconnect = async () => {
     setActionLoading(true);
-    try { await api.post('/whatsapp/logout'); showToast('WhatsApp desconectado', 'success'); fetchStatus(); }
+    try { await api.post('/whatsapp/disconnect'); showToast('WhatsApp desconectado', 'success'); fetchStatus(); }
     catch { showToast('Erro ao desconectar', 'error'); }
     finally { setActionLoading(false); }
   };
 
-  const handleRestart = async () => {
+  const handleConnect = async () => {
     setActionLoading(true);
-    try { await api.post('/whatsapp/restart'); showToast('Reconectando WhatsApp...', 'success'); fetchStatus(); }
+    try { await api.post('/whatsapp/connect'); showToast('Conexao iniciada. Aguardando status...', 'success'); fetchStatus(); }
     catch { showToast('Erro ao reconectar', 'error'); }
     finally { setActionLoading(false); }
   };
@@ -187,9 +226,10 @@ export const WhatsAppModule = () => {
   const getStatusConfig = () => {
     switch (waStatus.status) {
       case 'connected': return { icon: <CheckCircle size={20} />, label: 'Conectado', sublabel: waStatus.connectedName || waStatus.connectedNumber || '', color: 'text-green-500', bg: 'bg-green-500/10', border: 'border-green-500/20', barColor: 'bg-green-500', pulse: true };
-      case 'qr': return { icon: <QrCode size={20} />, label: 'Aguardando QR Code', sublabel: 'Escaneie o código com seu WhatsApp', color: 'text-amber-500', bg: 'bg-amber-500/10', border: 'border-amber-500/20', barColor: 'bg-amber-500', pulse: false };
-      case 'connecting': return { icon: <Loader2 size={20} className="animate-spin" />, label: 'Conectando...', sublabel: 'Carregando sessão do WhatsApp', color: 'text-blue-500', bg: 'bg-blue-500/10', border: 'border-blue-500/20', barColor: 'bg-blue-500', pulse: false };
-      default: return { icon: <WifiOff size={20} />, label: 'Desconectado', sublabel: waStatus.error || 'Clique em reconectar para iniciar', color: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/20', barColor: 'bg-red-500', pulse: false };
+      case 'pairing': return { icon: <QrCode size={20} />, label: 'Aguardando pareamento', sublabel: 'Escaneie o QR Code no WhatsApp', color: 'text-amber-500', bg: 'bg-amber-500/10', border: 'border-amber-500/20', barColor: 'bg-amber-500', pulse: false };
+      case 'unavailable': return { icon: <WifiOff size={20} />, label: 'API indisponivel', sublabel: waStatus.error || 'Evolution API fora do ar', color: 'text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/20', barColor: 'bg-slate-500', pulse: false };
+      case 'error': return { icon: <AlertTriangle size={20} />, label: 'Erro', sublabel: waStatus.error || 'Falha inesperada no provider', color: 'text-orange-500', bg: 'bg-orange-500/10', border: 'border-orange-500/20', barColor: 'bg-orange-500', pulse: false };
+      default: return { icon: <WifiOff size={20} />, label: 'Desconectado', sublabel: waStatus.error || 'Clique em conectar para iniciar', color: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/20', barColor: 'bg-red-500', pulse: false };
     }
   };
 
@@ -245,13 +285,13 @@ export const WhatsAppModule = () => {
             </div>
             <div className="mt-4 flex gap-2">
               {waStatus.status === 'connected' && (
-                <button onClick={handleLogout} disabled={actionLoading} className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] uppercase font-bold tracking-wider bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg transition-all disabled:opacity-50">
+                <button onClick={handleDisconnect} disabled={actionLoading} className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] uppercase font-bold tracking-wider bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg transition-all disabled:opacity-50">
                   {actionLoading ? <Loader2 size={12} className="animate-spin" /> : <LogOut size={12} />} Desconectar
                 </button>
               )}
-              {waStatus.status === 'disconnected' && (
-                <button onClick={handleRestart} disabled={actionLoading} className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] uppercase font-bold tracking-wider bg-primary/10 text-primary hover:bg-primary/20 rounded-lg transition-all disabled:opacity-50">
-                  {actionLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Reconectar
+              {(waStatus.status === 'disconnected' || waStatus.status === 'error' || waStatus.status === 'pairing') && (
+                <button onClick={handleConnect} disabled={actionLoading} className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] uppercase font-bold tracking-wider bg-primary/10 text-primary hover:bg-primary/20 rounded-lg transition-all disabled:opacity-50">
+                  {actionLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Conectar
                 </button>
               )}
             </div>
@@ -264,7 +304,7 @@ export const WhatsAppModule = () => {
                 { icon: ShieldCheck, text: 'Agendamento Automático (24/7)' },
                 { icon: Clock, text: 'Lembretes Automáticos (2h antes)' },
                 { icon: User, text: 'Captura de novos clientes' },
-                { icon: Wifi, text: 'Conexão local via wwebjs' },
+                { icon: Wifi, text: 'Conexao via Evolution API externa' },
               ].map(({ icon: Icon, text }) => (
                 <li key={text} className="flex items-start gap-3">
                   <Icon size={16} className="text-primary mt-1" />
@@ -282,7 +322,7 @@ export const WhatsAppModule = () => {
               waStatus={waStatus}
               statusLoading={statusLoading}
               actionLoading={actionLoading}
-              onRestart={handleRestart}
+              onConnect={handleConnect}
             />
           )}
           {activeTab === 'menu' && (

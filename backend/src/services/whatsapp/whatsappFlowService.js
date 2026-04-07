@@ -41,7 +41,7 @@ const safeExtractId = (queryResult, context) => {
 // ==================== FLUXO PRINCIPAL ====================
 
 /**
- * Handler para mensagens recebidas via whatsapp-web.js.
+ * Handler para mensagens recebidas pelo provedor WhatsApp.
  */
 export const handleIncomingMessage = async (phone, text) => {
   try {

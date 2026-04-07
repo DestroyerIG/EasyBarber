@@ -26,6 +26,11 @@ jest.unstable_mockModule('../services/whatsappClient.js', () => ({
   initWhatsApp: jest.fn(),
   getWhatsAppStatus: jest.fn(),
   getWhatsAppClient: jest.fn(),
+  connectWhatsApp: jest.fn(),
+  disconnectWhatsApp: jest.fn(),
+  getWhatsAppQrCode: jest.fn(),
+  sendWhatsAppText: jest.fn(),
+  refreshWhatsAppStatus: jest.fn(),
   logoutWhatsApp: jest.fn(),
   restartWhatsApp: jest.fn(),
 }));
