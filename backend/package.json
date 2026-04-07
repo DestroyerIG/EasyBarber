@@ -5,12 +5,13 @@
   "main": "src/server.js",
   "type": "module",
   "scripts": {
-    "dev": "nodemon src/server.js",
-    "start": "node src/server.js",
-    "seed:test-users": "node src/scripts/seedTestUsers.js",
-    "test": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --detectOpenHandles",
-    "test:watch": "node --experimental-vm-modules node_modules/.bin/jest --watch --forceExit"
-  },
+  "build": "npx puppeteer browsers install chrome",
+  "dev": "nodemon src/server.js",
+  "start": "node src/server.js",
+  "seed:test-users": "node src/scripts/seedTestUsers.js",
+  "test": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --detectOpenHandles",
+  "test:watch": "node --experimental-vm-modules node_modules/.bin/jest --watch --forceExit"
+},
   "keywords": [],
   "author": "",
   "license": "ISC",
