@@ -36,12 +36,41 @@ const getNested = (obj, path) => {
     return path.reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj);
 };
 
-const toDataUrlIfNeeded = (value) => {
+const isLikelyRenderableImageBase64 = (value) => {
+    if (!value || typeof value !== 'string') return false;
+
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+
+    if (trimmed.startsWith('data:image/')) {
+        return true;
+    }
+
+    const imagePrefixes = [
+        'iVBOR',   // PNG
+        '/9j/',    // JPEG
+        'R0lGOD',  // GIF
+        'UklGR',   // WEBP
+    ];
+
+    return imagePrefixes.some((prefix) => trimmed.startsWith(prefix));
+};
+
+const normalizeQrCandidate = (value) => {
     if (!value || typeof value !== 'string') return null;
-    if (value.startsWith('data:image/')) return value;
+
     const trimmed = value.trim();
     if (!trimmed) return null;
-    return `data:image/png;base64,${trimmed}`;
+
+    if (trimmed.startsWith('data:image/')) {
+        return trimmed;
+    }
+
+    if (isLikelyRenderableImageBase64(trimmed)) {
+        return `data:image/png;base64,${trimmed}`;
+    }
+
+    return null;
 };
 
 const extractQrCode = (payload) => {
@@ -53,18 +82,27 @@ const extractQrCode = (payload) => {
         payload?.base64,
         getNested(payload, ['data', 'qr']),
         getNested(payload, ['data', 'qrcode']),
+        getNested(payload, ['data', 'qrCode']),
         getNested(payload, ['data', 'base64']),
         getNested(payload, ['instance', 'qr']),
         getNested(payload, ['instance', 'qrcode']),
+        getNested(payload, ['instance', 'qrCode']),
         getNested(payload, ['qrcode', 'base64']),
         getNested(payload, ['qrcode', 'code']),
+        getNested(payload, ['qrcode', 'string']),
+        getNested(payload, ['data', 'qrcode', 'base64']),
+        getNested(payload, ['data', 'qrcode', 'code']),
+        getNested(payload, ['data', 'qrcode', 'string']),
     ];
 
     for (const candidate of candidates) {
-        const parsed = toDataUrlIfNeeded(candidate);
-        if (parsed) return parsed;
+        const parsed = normalizeQrCandidate(candidate);
+        if (parsed) {
+            return parsed;
+        }
     }
 
+    logger.warn({ payload }, 'Evolution retornou payload de QR sem imagem renderizavel');
     return null;
 };
 
@@ -121,7 +159,7 @@ const normalizeStatus = (rawState, qrCode) => {
     const state = (rawState || '').toLowerCase();
 
     const connectedStates = ['open', 'connected', 'online', 'ready', 'authenticated', 'islogged'];
-    const pairingStates = ['qr', 'qrcode', 'pairing', 'scan_qr', 'connecting', 'inchat'];
+    const pairingStates = ['qr', 'qrcode', 'pairing', 'scan_qr', 'connecting'];
     const disconnectedStates = ['close', 'closed', 'disconnected', 'logout', 'loggedout', 'offline'];
 
     if (connectedStates.some((item) => state.includes(item))) {
@@ -266,6 +304,7 @@ export const connectWhatsApp = async () => {
         let qrPayload = null;
         try {
             qrPayload = await getQrCode();
+            logger.debug({ qrPayload }, 'Payload bruto de QR recebido apos connect');
         } catch (error) {
             logger.warn({ err: error }, 'Nao foi possivel obter QR imediatamente apos connect');
         }
@@ -287,7 +326,13 @@ export const connectWhatsApp = async () => {
     } catch (error) {
         logger.error({ err: error }, 'Erro ao conectar instancia Evolution');
         if (error instanceof EvolutionApiError && error.code === 'EVOLUTION_CONFIG_ERROR') {
-            updateState({ status: STATUS.ERROR, qrCode: null, error: error.message, connectedName: null, connectedNumber: null });
+            updateState({
+                status: STATUS.ERROR,
+                qrCode: null,
+                error: error.message,
+                connectedName: null,
+                connectedNumber: null,
+            });
         } else {
             updateUnavailableState(error);
         }
@@ -298,6 +343,8 @@ export const connectWhatsApp = async () => {
 export const getWhatsAppQrCode = async () => {
     try {
         const payload = await getQrCode();
+        logger.debug({ payload }, 'Payload bruto de QR recebido em getWhatsAppQrCode');
+
         const qrCode = extractQrCode(payload);
 
         if (!qrCode) {
@@ -355,7 +402,13 @@ export const sendWhatsAppText = async (phone, message) => {
             if (error.code === 'EVOLUTION_NETWORK_ERROR' || error.code === 'EVOLUTION_TIMEOUT') {
                 updateUnavailableState(error);
             } else {
-                updateState({ status: STATUS.ERROR, error: error.message, qrCode: null, connectedName: null, connectedNumber: null });
+                updateState({
+                    status: STATUS.ERROR,
+                    error: error.message,
+                    qrCode: null,
+                    connectedName: null,
+                    connectedNumber: null,
+                });
             }
         }
         return false;

@@ -45,15 +45,17 @@ const ensureConfigured = () => {
 
 const normalizePath = (path) => (path.startsWith('/') ? path : `/${path}`);
 
+/**
+ * 🔥 CORREÇÃO PRINCIPAL AQUI
+ * Remove Authorization Bearer — Evolution geralmente usa só `apikey`
+ */
 const buildHeaders = () => {
   const { apiKey } = getConfig();
-  const headers = {
+
+  return {
     'Content-Type': 'application/json',
     apikey: apiKey,
-    Authorization: `Bearer ${apiKey}`,
   };
-
-  return headers;
 };
 
 const parseResponseBody = async (response) => {
@@ -87,7 +89,11 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(`${baseURL}${normalizePath(path)}`, {
+    const url = `${baseURL}${normalizePath(path)}`;
+
+    logger.debug({ method, url }, 'Evolution API request');
+
+    const response = await fetch(url, {
       method,
       headers: buildHeaders(),
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -98,6 +104,14 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
 
     if (!expectedStatuses.includes(response.status)) {
       const message = extractErrorMessage(payload) || `Evolution API respondeu com status ${response.status}`;
+
+      logger.error({
+        status: response.status,
+        payload,
+        url,
+        method,
+      }, 'Erro na Evolution API');
+
       throw new EvolutionApiError(message, {
         status: response.status,
         details: payload,
@@ -106,6 +120,12 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
 
     return payload;
   } catch (error) {
+    console.error('❌ Evolution request error:', {
+      message: error.message,
+      status: error.status,
+      details: error.details,
+    });
+
     if (error.name === 'AbortError') {
       throw new EvolutionApiError('Timeout ao chamar Evolution API', {
         code: 'EVOLUTION_TIMEOUT',
@@ -134,7 +154,10 @@ const requestWithFallback = async (candidates, operationName) => {
       lastError = error;
 
       if (error instanceof EvolutionApiError && [404, 405, 501].includes(error.status || 0)) {
-        logger.debug({ operationName, method: candidate.method, path: candidate.path }, 'Endpoint fallback da Evolution API');
+        logger.debug(
+          { operationName, method: candidate.method, path: candidate.path },
+          'Endpoint fallback da Evolution API'
+        );
         continue;
       }
 
@@ -301,24 +324,10 @@ export const sendTextMessage = async ({ phone, text }) => {
   }
 
   const payloads = [
-    {
-      number: normalizedPhone,
-      text: String(text),
-    },
-    {
-      number: normalizedPhone,
-      textMessage: { text: String(text) },
-    },
-    {
-      instanceName,
-      number: normalizedPhone,
-      text: String(text),
-    },
-    {
-      instanceName,
-      number: normalizedPhone,
-      textMessage: { text: String(text) },
-    },
+    { number: normalizedPhone, text: String(text) },
+    { number: normalizedPhone, textMessage: { text: String(text) } },
+    { instanceName, number: normalizedPhone, text: String(text) },
+    { instanceName, number: normalizedPhone, textMessage: { text: String(text) } },
   ];
 
   const candidates = [];
