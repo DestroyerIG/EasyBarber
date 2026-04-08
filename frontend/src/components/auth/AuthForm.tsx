@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
 import { isPlanId, PLAN_MAP, SAAS_PLANS, type PlanId } from '@/lib/plans';
@@ -21,8 +22,16 @@ const resolveInitialPlan = (selectedPlan?: string | null): PlanId => {
   if (selectedPlan && isPlanId(selectedPlan)) {
     return selectedPlan;
   }
-
   return 'basico';
+};
+
+const isTimeoutError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const err = error as Record<string, unknown>;
+  if (err.code === 'ECONNABORTED') return true;
+  if (err.code === 'ERR_NETWORK') return true;
+  if (typeof err.message === 'string' && err.message.toLowerCase().includes('timeout')) return true;
+  return false;
 };
 
 export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
@@ -42,6 +51,7 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
 
   const { login, register } = useAuth();
   const { showToast } = useToast();
+  const router = useRouter();
 
   const isLogin = mode === 'login';
 
@@ -55,7 +65,6 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
 
   const handlePlanChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedValue = e.target.value;
-
     if (isPlanId(selectedValue)) {
       setDesiredPlan(selectedValue);
     }
@@ -71,31 +80,63 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
         await login(formData.email, formData.password);
         showToast('Login realizado com sucesso.', 'success');
       } else {
-        const result = await register(
-          {
-            barbershopName: formData.barbershopName,
-            ownerName: formData.ownerName,
-            email: formData.email,
-            whatsapp: formData.whatsapp,
-            password: formData.password,
-            desiredPlan,
-          }
-        );
+        const result = await register({
+          barbershopName: formData.barbershopName,
+          ownerName: formData.ownerName,
+          email: formData.email,
+          whatsapp: formData.whatsapp,
+          password: formData.password,
+          desiredPlan,
+        });
 
-        setVerificationEmail(result.email);
-        setVerificationSent(result.verificationEmailSent);
-        setVerificationNotice(result.message);
-        setFormData((prev) => ({ ...prev, password: '' }));
+        // ✅ Redireciona para tela de verificação após cadastro bem-sucedido
+        if (result.verificationRequired) {
+          router.push(
+            `/verificar-email?email=${encodeURIComponent(result.email || formData.email)}`
+          );
+          return;
+        }
 
-        showToast(result.message, result.verificationEmailSent ? 'success' : 'info');
+        // Fallback: cadastro sem verificação obrigatória
+        showToast(result.message, 'success');
       }
     } catch (error: unknown) {
       const errorCode = getApiErrorCode(error);
 
+      // Login com e-mail não verificado
       if (isLogin && errorCode === 'EMAIL_NOT_VERIFIED') {
         setVerificationEmail(formData.email.trim());
         setVerificationSent(false);
-        setVerificationNotice('Sua conta ainda não foi verificada. Reenvie o link e confirme seu e-mail para entrar.');
+        setVerificationNotice(
+          'Sua conta ainda não foi verificada. Reenvie o link e confirme seu e-mail para entrar.'
+        );
+        showToast(getApiErrorMessage(error, 'Erro ao processar solicitação'), 'error');
+        return;
+      }
+
+      // Timeout — servidor hibernado (Render free tier)
+      if (!isLogin && isTimeoutError(error)) {
+        setVerificationEmail(formData.email.trim());
+        setVerificationSent(false);
+        setVerificationNotice(
+          'O servidor demorou para responder. Caso já tenha tentado antes, seu cadastro pode ter sido criado — tente reenviar o e-mail de verificação ou faça login.'
+        );
+        showToast(
+          'Tempo esgotado. Verifique se o cadastro foi criado tentando fazer login ou reenviar a verificação.',
+          'info'
+        );
+        return;
+      }
+
+      // E-mail já cadastrado (409)
+      if (!isLogin && errorCode === 'CONFLICT') {
+        setVerificationEmail(formData.email.trim());
+        setVerificationSent(false);
+        setVerificationNotice(
+          'Este e-mail já possui uma conta cadastrada. Caso não tenha verificado seu e-mail, reenvie o link abaixo.'
+        );
+        showToast('E-mail já cadastrado.', 'error');
+        return;
       }
 
       showToast(getApiErrorMessage(error, 'Erro ao processar solicitação'), 'error');
@@ -126,7 +167,10 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
       setVerificationNotice(message);
       showToast(message, 'info');
     } catch (error: unknown) {
-      showToast(getApiErrorMessage(error, 'Não foi possível reenviar o e-mail de verificação.'), 'error');
+      showToast(
+        getApiErrorMessage(error, 'Não foi possível reenviar o e-mail de verificação.'),
+        'error'
+      );
     } finally {
       setResendingVerification(false);
     }
@@ -138,12 +182,21 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
         <section className="max-w-xl">
           <div className="inline-flex items-center gap-3">
             <span className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-primary/30 bg-black/40">
-              <Image src={easyBarberLogo} alt="Logo EasyBarber" width={40} height={40} className="h-full w-full object-contain" priority />
+              <Image
+                src={easyBarberLogo}
+                alt="Logo EasyBarber"
+                width={40}
+                height={40}
+                className="h-full w-full object-contain"
+                priority
+              />
             </span>
             <p className="text-xs uppercase tracking-[0.24em] text-primary/70">EasyBarber</p>
           </div>
           <h1 className="mt-3 text-4xl font-black leading-tight sm:text-5xl">
-            {isLogin ? 'Acesse sua operação e mantenha o controle da barbearia.' : 'Abra sua conta e transforme sua barbearia em um negócio previsível.'}
+            {isLogin
+              ? 'Acesse sua operação e mantenha o controle da barbearia.'
+              : 'Abra sua conta e transforme sua barbearia em um negócio previsível.'}
           </h1>
           <p className="mt-4 text-gray-300">
             {isLogin
@@ -166,7 +219,11 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4" aria-label={isLogin ? 'Formulário de login' : 'Formulário de cadastro'}>
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-4"
+            aria-label={isLogin ? 'Formulário de login' : 'Formulário de cadastro'}
+          >
             {!isLogin && (
               <>
                 <input
@@ -198,7 +255,10 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
                 />
 
                 <div>
-                  <label htmlFor="desiredPlan" className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
+                  <label
+                    htmlFor="desiredPlan"
+                    className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400"
+                  >
                     Plano de assinatura
                   </label>
                   <select
@@ -233,7 +293,9 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
             <input
               type="password"
               name="password"
-              placeholder={isLogin ? 'Senha' : 'Senha (mín. 8 caracteres, maiúscula e número)'}
+              placeholder={
+                isLogin ? 'Senha' : 'Senha (mín. 8 caracteres, maiúscula e número)'
+              }
               value={formData.password}
               onChange={handleChange}
               required
@@ -249,12 +311,13 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
               {loading ? 'Processando...' : isLogin ? 'Entrar' : 'Criar conta'}
             </button>
 
+            {/* Aviso de verificação — aparece só em casos de erro/timeout/conflito */}
             {verificationNotice && (
               <div className="rounded-xl border border-primary/30 bg-primary/10 p-4 text-sm text-primary">
                 <p>{verificationNotice}</p>
                 {verificationEmail && (
                   <p className="mt-2 text-xs text-gray-300">
-                    E-mail de verificação: <strong>{verificationEmail}</strong>
+                    E-mail: <strong>{verificationEmail}</strong>
                   </p>
                 )}
                 <button
@@ -267,7 +330,7 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
                 </button>
                 {verificationSent && (
                   <p className="mt-2 text-xs text-gray-300">
-                    Se não encontrar o e-mail na caixa de entrada, confira a pasta de spam.
+                    Se não encontrar na caixa de entrada, confira a pasta de spam.
                   </p>
                 )}
               </div>
@@ -275,7 +338,8 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
 
             {!isLogin && desiredPlan !== 'basico' && (
               <p className="text-xs text-gray-400">
-                Após verificar o e-mail e acessar sua conta, finalize a assinatura {PLAN_MAP[desiredPlan].name} no dashboard.
+                Após verificar o e-mail e acessar sua conta, finalize a assinatura{' '}
+                {PLAN_MAP[desiredPlan].name} no dashboard.
               </p>
             )}
           </form>
