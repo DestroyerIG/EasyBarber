@@ -70,7 +70,11 @@ export const me = async (req, res, next) => {
 
 export const verifyEmail = async (req, res, next) => {
   try {
-    const data = await authService.verifyEmail(req.query.token);
+    const data = await authService.verifyEmail({
+      token: req.query.token,
+      tokenHash: req.query.tokenHash,
+      type: req.query.type,
+    });
     return sendSuccess(res, data);
   } catch (error) {
     next(error);

@@ -22,7 +22,7 @@ type RefreshResponse = {
 const api = axios.create({
   baseURL: '/api',
   withCredentials: true,
-  timeout: 60000,
+  timeout: 150000, // 150s — comporta o wake-up do Render free tier (~120s)
 });
 
 let refreshPromise: Promise<void> | null = null;

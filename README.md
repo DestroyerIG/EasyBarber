@@ -14,7 +14,7 @@ Também há suporte a execução via Docker Compose com PostgreSQL.
 ## Principais Funcionalidades
 
 - Autenticação com JWT (access + refresh token em cookies httpOnly).
-- Cadastro com verificação obrigatória de e-mail (token com expiração + reenvio de verificação).
+- Cadastro com verificação obrigatória de e-mail, com Supabase Auth como fonte primária em modo `dual/supabase` e fallback legado em `legacy`.
 - Gestão de agendamentos, clientes, serviços e barbeiros.
 - Módulo financeiro com resumo diário/mensal e despesas.
 - Bot de WhatsApp via Evolution API v1 (serviço externo) com configuração de mensagens e menu dinâmico.
@@ -31,6 +31,7 @@ Também há suporte a execução via Docker Compose com PostgreSQL.
 - PostgreSQL (driver pg)
 - Zod (validação)
 - jsonwebtoken + bcryptjs
+- @supabase/supabase-js (cadastro/verificação de e-mail)
 - nodemailer (SMTP)
 - Pino (logs)
 - stripe
@@ -73,7 +74,7 @@ No frontend, o App Router organiza páginas públicas, dashboard tenant e área 
 ```text
 backend/
   src/
-    config/        # database.sql e migration_v2..v9.sql
+    config/        # database.sql e migration_v2..v10.sql
     controllers/
     middleware/
     repositories/
@@ -114,9 +115,15 @@ DATABASE_URL=postgresql://postgres:senha@localhost:5432/barberpro
 JWT_SECRET=troque_esta_chave
 FRONTEND_URL=http://localhost:3000
 APP_URL=http://localhost:3000
+AUTH_PROVIDER_MODE=dual
 EMAIL_VERIFICATION_TTL_MINUTES=60
 
-# SMTP (verificação de e-mail)
+# Supabase Auth (cadastro/verificação)
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_ANON_KEY=<anon-key>
+AUTH_SUPABASE_REDIRECT_TO=http://localhost:3000/auth/confirm
+
+# SMTP (fallback legado em AUTH_PROVIDER_MODE=legacy)
 SMTP_HOST=smtp.seudominio.com
 SMTP_PORT=587
 SMTP_USER=usuario_smtp
@@ -183,6 +190,7 @@ A sequência recomendada para banco novo é:
 6. backend/src/config/migration_v7.sql
 7. backend/src/config/migration_v8.sql
 8. backend/src/config/migration_v9.sql
+9. backend/src/config/migration_v10.sql
 
 Observação: migration_v2.sql é voltada a upgrade legado e normalmente não é necessária em ambiente novo.
 
@@ -260,10 +268,10 @@ Acesso liberado:
 ## Fluxo Básico de Autenticação
 
 1. Usuário cadastra tenant em /api/v1/auth/register.
-2. Conta nasce não verificada e o backend envia e-mail com link de confirmação.
-3. Usuário confirma no link /verificar-email?token=... no frontend.
-4. Frontend chama /api/auth/verify-email e a API marca o e-mail como verificado.
-5. Somente após verificação, login em /api/v1/auth/login gera cookies access_token e refresh_token.
+2. Em `AUTH_PROVIDER_MODE=dual|supabase`, o cadastro é iniciado primeiro no Supabase Auth e salvo como pendência interna.
+3. Usuário confirma no link do Supabase (callback em /auth/confirm), que aciona /api/auth/verify-email.
+4. A API valida `token_hash` no Supabase, sincroniza `email_verified_at`, `supabase_user_id`, `auth_provider='supabase'` e cria/sincroniza usuário interno.
+5. Somente após verificação, login em /api/v1/auth/login (bcrypt + JWT interno) gera cookies access_token e refresh_token.
 6. Frontend consulta /api/v1/auth/me para montar sessão e usa /api/v1/auth/refresh em expiração do access token.
 7. Rotas protegidas exigem auth, role e feature permission.
 
@@ -298,6 +306,7 @@ Arquivos SQL em backend/src/config:
 - migration_v7.sql (preferência de plano no onboarding: desired_plan)
 - migration_v8.sql (barbershop settings)
 - migration_v9.sql (verificação de e-mail de conta)
+- migration_v10.sql (vínculo de identidade Supabase + pendências de cadastro)
 
 A documentação completa de migrations manuais, validação, rollback e troubleshooting está em POSTGRESQL_SETUP.md.
 
@@ -375,9 +384,9 @@ npm run lint
 As inconsistências operacionais críticas foram corrigidas no estado atual do projeto:
 
 - backend/.env.example usa DB_CONNECT_TIMEOUT.
-- backend/.env.example inclui variáveis SMTP_* e EMAIL_VERIFICATION_TTL_MINUTES para verificação de e-mail.
+- backend/.env.example inclui AUTH_PROVIDER_MODE, SUPABASE_* e SMTP_* (fallback legado).
 - docker-compose.yml usa FRONTEND_URL no backend e NEXT_PUBLIC_API_URL com /api/v1 no frontend.
-- setup.ps1 aplica database.sql + migration_v3..v9.
+- setup.ps1 aplica database.sql + migration_v3..v10.
 - fix-env.ps1 remove variáveis legadas WHATSAPP_API_* e mantém defaults compatíveis com o backend atual.
 
 Observação:

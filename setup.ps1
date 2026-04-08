@@ -91,7 +91,8 @@ try {
         "backend/src/config/migration_v6.sql",
         "backend/src/config/migration_v7.sql",
         "backend/src/config/migration_v8.sql",
-        "backend/src/config/migration_v9.sql"
+        "backend/src/config/migration_v9.sql",
+        "backend/src/config/migration_v10.sql"
     )
 
     foreach ($sqlFile in $sqlFiles) {
@@ -141,7 +142,11 @@ NODE_ENV=development
 LOG_LEVEL=info
 FRONTEND_URL=http://localhost:3000
 APP_URL=http://localhost:3000
+AUTH_PROVIDER_MODE=dual
 EMAIL_VERIFICATION_TTL_MINUTES=60
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+AUTH_SUPABASE_REDIRECT_TO=http://localhost:3000/auth/confirm
 SMTP_HOST=
 SMTP_PORT=587
 SMTP_USER=

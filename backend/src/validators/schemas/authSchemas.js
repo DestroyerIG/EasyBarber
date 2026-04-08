@@ -17,13 +17,38 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Senha é obrigatória'),
 });
 
-export const verifyEmailSchema = z.object({
-  token: z
-    .string()
-    .trim()
-    .min(20, 'Token de verificação inválido')
-    .max(512, 'Token de verificação inválido'),
-});
+const verificationTokenSchema = z
+  .string()
+  .trim()
+  .min(20, 'Token de verificação inválido')
+  .max(512, 'Token de verificação inválido');
+
+export const verifyEmailSchema = z
+  .object({
+    token: verificationTokenSchema.optional(),
+    token_hash: verificationTokenSchema.optional(),
+    tokenHash: verificationTokenSchema.optional(),
+    type: z
+      .string()
+      .trim()
+      .min(3, 'Tipo de token inválido')
+      .max(32, 'Tipo de token inválido')
+      .optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.token && !data.token_hash && !data.tokenHash) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Token de verificação inválido',
+        path: ['token'],
+      });
+    }
+  })
+  .transform((data) => ({
+    token: data.token,
+    tokenHash: data.token_hash || data.tokenHash,
+    type: data.type,
+  }));
 
 export const resendVerificationSchema = z.object({
   email: z.string().email('Email inválido').max(255),

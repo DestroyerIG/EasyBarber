@@ -43,7 +43,8 @@ backend/
 
 - database.js: pool PostgreSQL.
 - database.sql: schema base.
-- migration_v2.sql .. migration_v9.sql: evoluções de schema.
+- migration_v2.sql .. migration_v10.sql: evoluções de schema.
+- authProviderMode.js: feature flag de provedor de identidade (`legacy|dual|supabase`).
 - planPermissions.js: matriz de acesso por plano/status.
 - stripe.js: cliente Stripe e helpers de billing.
 
@@ -149,6 +150,7 @@ Rotas principais:
 - /login
 - /cadastro
 - /verificar-email
+- /auth/confirm
 - /dashboard
 - /admin
 - /admin/metrics
@@ -205,11 +207,12 @@ Scripts SQL localizados em:
 - backend/src/config/migration_v7.sql
 - backend/src/config/migration_v8.sql
 - backend/src/config/migration_v9.sql
+- backend/src/config/migration_v10.sql
 
 Detalhes de execução e validação: POSTGRESQL_SETUP.md
 
 ## 6. Observações de Manutenção
 
-- setup.ps1 aplica database.sql + migration_v3..v9 no fluxo atual.
-- O bootstrap do Docker aplica database.sql + migration_v3..v9 no primeiro volume; se o volume já existia, aplicar migrations manualmente.
+- setup.ps1 aplica database.sql + migration_v3..v10 no fluxo atual.
+- O bootstrap do Docker aplica database.sql + migration_v3..v10 no primeiro volume; se o volume já existia, aplicar migrations manualmente.
 - O backend usa /api/v1 como versão canônica e mantém redirecionamento 301 para /api legado.

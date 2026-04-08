@@ -104,9 +104,9 @@ No primeiro cadastro, o plano efetivo da conta permanece `basico` até a conclus
 
 Comportamento:
 
-- A conta é criada com e-mail não verificado.
-- O backend gera token seguro de verificação com expiração.
-- O backend envia e-mail de verificação.
+- `AUTH_PROVIDER_MODE=legacy`: cria conta interna imediatamente e envia verificação por token legado.
+- `AUTH_PROVIDER_MODE=dual` (padrão) e `supabase`: inicia cadastro primeiro no Supabase Auth (signUp) e cria pendência interna.
+- Em `dual/supabase`, usuário interno definitivo só é criado/sincronizado após confirmação de e-mail.
 - Este endpoint não autentica mais automaticamente (não retorna token/refreshToken).
 
 Exemplo de resposta (201):
@@ -157,9 +157,34 @@ Se o e-mail não estiver verificado e a senha estiver correta, retorna:
 - status: `403`
 - code: `EMAIL_NOT_VERIFIED`
 
-### GET /auth/verify-email?token=...
+Observação:
 
-Valida o token de verificação de e-mail e marca a conta como verificada.
+- Nesta fase, o login continua interno (`bcrypt + JWT próprio`).
+- O Supabase não é usado como provedor de login.
+
+### GET /auth/verify-email
+
+Aceita dois formatos de confirmação:
+
+1. Legado:
+
+```text
+/auth/verify-email?token=...
+```
+
+2. Supabase callback:
+
+```text
+/auth/verify-email?token_hash=...&type=email
+```
+
+No fluxo Supabase, o endpoint valida `token_hash` no Supabase Auth, obtém o e-mail e sincroniza o banco interno:
+
+- `users.email_verified_at`
+- `users.supabase_user_id`
+- `users.auth_provider = 'supabase'`
+
+Quando necessário, também cria o usuário interno definitivo a partir da pendência de cadastro.
 
 Erros comuns:
 

@@ -192,8 +192,11 @@ Sintomas:
 
 Checklist:
 
-- migration_v9.sql aplicada no banco.
-- Variáveis SMTP_* configuradas no backend/.env.
+- migration_v9.sql e migration_v10.sql aplicadas no banco.
+- AUTH_PROVIDER_MODE configurado corretamente (`dual`, `supabase` ou `legacy`).
+- SUPABASE_URL e SUPABASE_ANON_KEY configuradas para `dual/supabase`.
+- AUTH_SUPABASE_REDIRECT_TO apontando para `/auth/confirm` no frontend público.
+- Variáveis SMTP_* configuradas somente quando usar fallback legado (`AUTH_PROVIDER_MODE=legacy`).
 - APP_URL/FRONTEND_URL apontando para a URL pública correta do frontend.
 - Caixa de spam/lixo eletrônico verificada.
 
@@ -260,7 +263,7 @@ Checklist atual:
 1. backend/.env.example está alinhado com DB_CONNECT_TIMEOUT.
 2. docker-compose.yml usa FRONTEND_URL no backend.
 3. docker-compose.yml usa NEXT_PUBLIC_API_URL com /api/v1 no frontend.
-4. setup.ps1 aplica database.sql + migration_v3..v9.
+4. setup.ps1 aplica database.sql + migration_v3..v10.
 5. fix-env.ps1 não adiciona variáveis legadas WHATSAPP_API_*.
 
 Como proceder:
@@ -274,7 +277,7 @@ Quando o ambiente está inconsistente:
 
 1. Backup (se houver dados).
 2. Recriar banco do zero.
-3. Aplicar database.sql + migration_v3..v9.
+3. Aplicar database.sql + migration_v3..v10.
 4. Revisar backend/.env e frontend/.env.local.
 5. Subir backend e validar /health.
 6. Subir frontend.

@@ -58,7 +58,13 @@ DATABASE_URL=postgresql://postgres:senha@localhost:5432/barberpro
 JWT_SECRET=troque_esta_chave
 FRONTEND_URL=http://localhost:3000
 APP_URL=http://localhost:3000
+AUTH_PROVIDER_MODE=dual
 EMAIL_VERIFICATION_TTL_MINUTES=60
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_ANON_KEY=<anon-key>
+AUTH_SUPABASE_REDIRECT_TO=http://localhost:3000/auth/confirm
+
+# fallback legado (AUTH_PROVIDER_MODE=legacy)
 SMTP_HOST=smtp.seudominio.com
 SMTP_PORT=587
 SMTP_USER=usuario_smtp
@@ -113,6 +119,7 @@ Sequência recomendada para ambiente novo:
 6. backend/src/config/migration_v7.sql
 7. backend/src/config/migration_v8.sql
 8. backend/src/config/migration_v9.sql
+9. backend/src/config/migration_v10.sql
 
 Linux/macOS:
 
@@ -125,6 +132,7 @@ psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v7.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v10.sql
 ```
 
 Windows PowerShell:
@@ -138,6 +146,7 @@ psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backe
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v7.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v8.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v9.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v10.sql
 ```
 
 Observação:
@@ -202,7 +211,7 @@ npm run lint
 docker compose up -d
 ```
 
-O compose atual aplica database.sql + migration_v3..v9 no primeiro bootstrap do volume.
+O compose atual aplica database.sql + migration_v3..v10 no primeiro bootstrap do volume.
 Se o volume do PostgreSQL já existia antes dessa configuração, aplique as migrations manualmente ou recrie o volume.
 
 ## 10. Ordem Correta de Setup (Resumo)

@@ -49,12 +49,21 @@ jest.unstable_mockModule('../services/cronService.js', () => ({
 const mockAuthRepository = {
   getClient: mockGetClient,
   findUserByEmail: jest.fn(),
+  findAnyUserByEmail: jest.fn(),
+  findUserByEmailForSync: jest.fn(),
   createBarbershop: jest.fn(),
   createUser: jest.fn(),
+  upsertPendingRegistration: jest.fn(),
+  findPendingRegistrationByEmail: jest.fn(),
+  findPendingRegistrationByEmailForUpdate: jest.fn(),
+  markPendingRegistrationCompleted: jest.fn(),
+  markPendingRegistrationCompletedByEmail: jest.fn(),
+  touchPendingRegistrationVerificationSentAt: jest.fn(),
   setEmailVerificationToken: jest.fn(),
   findUserByEmailVerificationTokenHash: jest.fn(),
   clearEmailVerificationToken: jest.fn(),
   markEmailAsVerified: jest.fn(),
+  markEmailAsVerifiedWithSupabaseIdentity: jest.fn(),
   saveRefreshToken: jest.fn(),
   revokeUserRefreshTokens: jest.fn(),
   findValidRefreshToken: jest.fn(),
@@ -74,6 +83,16 @@ jest.unstable_mockModule('../services/emailService.js', () => ({
   emailService: mockEmailService,
 }));
 
+const mockSupabaseAuthService = {
+  signUpForEmailVerification: jest.fn(),
+  resendVerificationEmail: jest.fn(),
+  verifyEmailToken: jest.fn(),
+};
+
+jest.unstable_mockModule('../services/supabaseAuthService.js', () => ({
+  supabaseAuthService: mockSupabaseAuthService,
+}));
+
 // ===================== IMPORTS (após mocks) =====================
 
 const { createTestApp } = await import('./helpers/testApp.js');
@@ -86,10 +105,22 @@ const request = supertest(app);
 
 const resetMocks = () => {
   jest.clearAllMocks();
+  process.env.AUTH_PROVIDER_MODE = 'legacy';
   mockClientQuery.mockResolvedValue({ rows: [] });
   mockEmailService.sendAccountVerificationEmail.mockResolvedValue({
     delivered: true,
     mode: 'smtp',
+  });
+  mockSupabaseAuthService.signUpForEmailVerification.mockResolvedValue({
+    userId: 'supabase-user-uuid',
+    email: 'joao@teste.com',
+    verificationEmailSent: true,
+  });
+  mockSupabaseAuthService.resendVerificationEmail.mockResolvedValue({ delivered: true });
+  mockSupabaseAuthService.verifyEmailToken.mockResolvedValue({
+    email: 'joao@teste.com',
+    userId: 'supabase-user-uuid',
+    verifiedAt: new Date().toISOString(),
   });
 };
 

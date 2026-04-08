@@ -62,6 +62,26 @@ if (Test-Path $envFile) {
         $newContent = $newContent.TrimEnd() + "`r`nFRONTEND_URL=http://localhost:3000`r`n"
     }
 
+    if ($newContent -notmatch "(?m)^APP_URL=") {
+        $newContent = $newContent.TrimEnd() + "`r`nAPP_URL=http://localhost:3000`r`n"
+    }
+
+    if ($newContent -notmatch "(?m)^AUTH_PROVIDER_MODE=") {
+        $newContent = $newContent.TrimEnd() + "`r`nAUTH_PROVIDER_MODE=dual`r`n"
+    }
+
+    if ($newContent -notmatch "(?m)^SUPABASE_URL=") {
+        $newContent = $newContent.TrimEnd() + "`r`nSUPABASE_URL=`r`n"
+    }
+
+    if ($newContent -notmatch "(?m)^SUPABASE_ANON_KEY=") {
+        $newContent = $newContent.TrimEnd() + "`r`nSUPABASE_ANON_KEY=`r`n"
+    }
+
+    if ($newContent -notmatch "(?m)^AUTH_SUPABASE_REDIRECT_TO=") {
+        $newContent = $newContent.TrimEnd() + "`r`nAUTH_SUPABASE_REDIRECT_TO=http://localhost:3000/auth/confirm`r`n"
+    }
+
     $newContent | Set-Content $envFile
 
     Write-Host ""
@@ -92,6 +112,11 @@ JWT_SECRET=$jwtSecret
 NODE_ENV=development
 LOG_LEVEL=info
 FRONTEND_URL=http://localhost:3000
+APP_URL=http://localhost:3000
+AUTH_PROVIDER_MODE=dual
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+AUTH_SUPABASE_REDIRECT_TO=http://localhost:3000/auth/confirm
 "@
 
     $envContent | Out-File -FilePath $envFile -Encoding UTF8

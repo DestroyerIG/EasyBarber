@@ -12,6 +12,7 @@ services:
       - ./backend/src/config/migration_v7.sql:/docker-entrypoint-initdb.d/06-migration-v7.sql
       - ./backend/src/config/migration_v8.sql:/docker-entrypoint-initdb.d/07-migration-v8.sql
       - ./backend/src/config/migration_v9.sql:/docker-entrypoint-initdb.d/08-migration-v9.sql
+      - ./backend/src/config/migration_v10.sql:/docker-entrypoint-initdb.d/09-migration-v10.sql
     environment:
       POSTGRES_DB: barberpro
       POSTGRES_USER: barberpro
@@ -38,7 +39,11 @@ services:
       FRONTEND_URL: http://localhost:3000
       APP_URL: http://localhost:3000
       LOG_LEVEL: info
+      AUTH_PROVIDER_MODE: ${AUTH_PROVIDER_MODE:-dual}
       EMAIL_VERIFICATION_TTL_MINUTES: 60
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      AUTH_SUPABASE_REDIRECT_TO: ${AUTH_SUPABASE_REDIRECT_TO:-http://localhost:3000/auth/confirm}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}

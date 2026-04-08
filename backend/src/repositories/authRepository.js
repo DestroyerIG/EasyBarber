@@ -2,18 +2,93 @@ import pool from '../config/database.js';
 
 export const authRepository = {
   async findUserByEmail(email) {
-    const result = await pool.query(
-      `SELECT u.id, u.email, u.password_hash, u.role, u.blocked,
-              u.email_verified, u.email_verified_at,
-              u.email_verification_token_hash, u.email_verification_expires_at, u.verification_sent_at,
-              b.plan, b.name as barbershop_name, b.id as barbershop_id,
-              b.subscription_status,
-              b.subscription_current_period_end
-       FROM users u
-       JOIN barbershops b ON u.barbershop_id = b.id
-       WHERE u.email = $1 AND b.active = true AND u.blocked = false`,
+    try {
+      const result = await pool.query(
+        `SELECT u.id, u.email, u.password_hash, u.role, u.blocked,
+                u.email_verified, u.email_verified_at,
+                u.email_verification_token_hash, u.email_verification_expires_at, u.verification_sent_at,
+                u.supabase_user_id, u.auth_provider, u.last_identity_sync_at,
+                b.plan, b.name as barbershop_name, b.id as barbershop_id,
+                b.subscription_status,
+                b.subscription_current_period_end
+         FROM users u
+         JOIN barbershops b ON u.barbershop_id = b.id
+         WHERE LOWER(u.email) = LOWER($1) AND b.active = true AND u.blocked = false`,
+        [email]
+      );
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code !== '42703') {
+        throw error;
+      }
+
+      const legacyResult = await pool.query(
+        `SELECT u.id, u.email, u.password_hash, u.role, u.blocked,
+                u.email_verified, u.email_verified_at,
+                u.email_verification_token_hash, u.email_verification_expires_at, u.verification_sent_at,
+                NULL::UUID as supabase_user_id,
+                'legacy'::VARCHAR as auth_provider,
+                NULL::TIMESTAMP as last_identity_sync_at,
+                b.plan, b.name as barbershop_name, b.id as barbershop_id,
+                b.subscription_status,
+                b.subscription_current_period_end
+         FROM users u
+         JOIN barbershops b ON u.barbershop_id = b.id
+         WHERE LOWER(u.email) = LOWER($1) AND b.active = true AND u.blocked = false`,
+        [email]
+      );
+
+      return legacyResult.rows[0] || null;
+    }
+  },
+
+  async findAnyUserByEmail(email) {
+    try {
+      const result = await pool.query(
+        `SELECT u.id, u.email, u.barbershop_id, u.blocked,
+                u.email_verified, u.email_verified_at,
+                u.supabase_user_id, u.auth_provider,
+                b.active as barbershop_active
+         FROM users u
+         JOIN barbershops b ON u.barbershop_id = b.id
+         WHERE LOWER(u.email) = LOWER($1)
+         LIMIT 1`,
+        [email]
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code !== '42703') {
+        throw error;
+      }
+
+      const legacyResult = await pool.query(
+        `SELECT u.id, u.email, u.barbershop_id, u.blocked,
+                u.email_verified, u.email_verified_at,
+                NULL::UUID as supabase_user_id,
+                'legacy'::VARCHAR as auth_provider,
+                b.active as barbershop_active
+         FROM users u
+         JOIN barbershops b ON u.barbershop_id = b.id
+         WHERE LOWER(u.email) = LOWER($1)
+         LIMIT 1`,
+        [email]
+      );
+
+      return legacyResult.rows[0] || null;
+    }
+  },
+
+  async findUserByEmailForSync(client, email) {
+    const result = await client.query(
+      `SELECT id, email, barbershop_id
+       FROM users
+       WHERE LOWER(email) = LOWER($1)
+       LIMIT 1
+       FOR UPDATE`,
       [email]
     );
+
     return result.rows[0] || null;
   },
 
@@ -39,13 +114,39 @@ export const authRepository = {
     }
   },
 
-  async createUser(client, { barbershopId, email, passwordHash, role, emailVerified = true }) {
-
+  async createUser(client, {
+    barbershopId,
+    email,
+    passwordHash,
+    role,
+    emailVerified = true,
+    supabaseUserId = null,
+    authProvider = 'legacy',
+  }) {
     try {
       const result = await client.query(
-        `INSERT INTO users (barbershop_id, email, password_hash, role, email_verified) 
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-        [barbershopId, email, passwordHash, role, emailVerified]
+        `INSERT INTO users (
+           barbershop_id,
+           email,
+           password_hash,
+           role,
+           email_verified,
+           supabase_user_id,
+           auth_provider,
+           email_verified_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           CASE WHEN $5 THEN NOW() ELSE NULL END
+         )
+         RETURNING id`,
+        [barbershopId, email, passwordHash, role, emailVerified, supabaseUserId, authProvider]
       );
       return result.rows[0];
     } catch (error) {
@@ -59,6 +160,215 @@ export const authRepository = {
       }
 
       throw error;
+    }
+  },
+
+  async upsertPendingRegistration(client, {
+    email,
+    supabaseUserId,
+    barbershopName,
+    ownerName,
+    whatsapp,
+    desiredPlan,
+    passwordHash,
+  }) {
+    const result = await client.query(
+      `INSERT INTO pending_registrations (
+         email,
+         supabase_user_id,
+         barbershop_name,
+         owner_name,
+         whatsapp,
+         desired_plan,
+         password_hash,
+         auth_provider,
+         status,
+         verification_sent_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'supabase', 'pending', NOW())
+       ON CONFLICT (email)
+       DO UPDATE SET
+         supabase_user_id = COALESCE(EXCLUDED.supabase_user_id, pending_registrations.supabase_user_id),
+         barbershop_name = EXCLUDED.barbershop_name,
+         owner_name = EXCLUDED.owner_name,
+         whatsapp = EXCLUDED.whatsapp,
+         desired_plan = EXCLUDED.desired_plan,
+         password_hash = EXCLUDED.password_hash,
+         auth_provider = 'supabase',
+         status = 'pending',
+         verification_sent_at = NOW(),
+         confirmed_at = NULL
+       RETURNING id,
+                 email,
+                 supabase_user_id,
+                 barbershop_name,
+                 owner_name,
+                 whatsapp,
+                 desired_plan,
+                 password_hash,
+                 auth_provider,
+                 status,
+                 verification_sent_at,
+                 confirmed_at`,
+      [email, supabaseUserId, barbershopName, ownerName, whatsapp, desiredPlan, passwordHash]
+    );
+
+    return result.rows[0] || null;
+  },
+
+  async findPendingRegistrationByEmail(email) {
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                email,
+                supabase_user_id,
+                barbershop_name,
+                owner_name,
+                whatsapp,
+                desired_plan,
+                password_hash,
+                auth_provider,
+                status,
+                verification_sent_at,
+                confirmed_at
+         FROM pending_registrations
+         WHERE LOWER(email) = LOWER($1)
+           AND status = 'pending'
+         LIMIT 1`,
+        [email]
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code === '42P01') {
+        return null;
+      }
+
+      throw error;
+    }
+  },
+
+  async findPendingRegistrationByEmailForUpdate(client, email) {
+    try {
+      const result = await client.query(
+        `SELECT id,
+                email,
+                supabase_user_id,
+                barbershop_name,
+                owner_name,
+                whatsapp,
+                desired_plan,
+                password_hash,
+                auth_provider,
+                status,
+                verification_sent_at,
+                confirmed_at
+         FROM pending_registrations
+         WHERE LOWER(email) = LOWER($1)
+           AND status = 'pending'
+         LIMIT 1
+         FOR UPDATE`,
+        [email]
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code === '42P01') {
+        return null;
+      }
+
+      throw error;
+    }
+  },
+
+  async markPendingRegistrationCompleted(client, pendingRegistrationId) {
+    try {
+      const result = await client.query(
+        `UPDATE pending_registrations
+         SET status = 'completed',
+             confirmed_at = NOW()
+         WHERE id = $1
+           AND status = 'pending'
+         RETURNING id`,
+        [pendingRegistrationId]
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code === '42P01') {
+        return null;
+      }
+
+      throw error;
+    }
+  },
+
+  async markPendingRegistrationCompletedByEmail(client, email) {
+    try {
+      await client.query(
+        `UPDATE pending_registrations
+         SET status = 'completed',
+             confirmed_at = COALESCE(confirmed_at, NOW())
+         WHERE LOWER(email) = LOWER($1)
+           AND status = 'pending'`,
+        [email]
+      );
+    } catch (error) {
+      if (error?.code === '42P01') {
+        return;
+      }
+
+      throw error;
+    }
+  },
+
+  async touchPendingRegistrationVerificationSentAt(client, pendingRegistrationId) {
+    try {
+      await client.query(
+        `UPDATE pending_registrations
+         SET verification_sent_at = NOW()
+         WHERE id = $1
+           AND status = 'pending'`,
+        [pendingRegistrationId]
+      );
+    } catch (error) {
+      if (error?.code === '42P01') {
+        return;
+      }
+
+      throw error;
+    }
+  },
+
+  async markEmailAsVerifiedWithSupabaseIdentity(client, {
+    userId,
+    supabaseUserId,
+    emailVerifiedAt,
+    authProvider = 'supabase',
+  }) {
+    try {
+      const result = await client.query(
+        `UPDATE users
+         SET email_verified = true,
+             email_verified_at = COALESCE($3::timestamp, NOW()),
+             supabase_user_id = COALESCE($2, supabase_user_id),
+             auth_provider = $4,
+             last_identity_sync_at = NOW(),
+             email_verification_token_hash = NULL,
+             email_verification_expires_at = NULL,
+             verification_sent_at = NULL
+         WHERE id = $1
+         RETURNING id, email, email_verified, email_verified_at, supabase_user_id, auth_provider`,
+        [userId, supabaseUserId, emailVerifiedAt || null, authProvider]
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code !== '42703') {
+        throw error;
+      }
+
+      return this.markEmailAsVerified(client, userId);
     }
   },
 
