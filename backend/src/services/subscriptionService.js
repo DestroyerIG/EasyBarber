@@ -151,9 +151,8 @@ export const subscriptionService = {
     }
 
     const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
+      mode: isPix ? 'payment' : 'subscription',
       customer: customerId,
-      payment_method_types: ['card'],
       allow_promotion_codes: true,
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${frontendBaseUrl}/dashboard?billing=success&session_id={CHECKOUT_SESSION_ID}`,
