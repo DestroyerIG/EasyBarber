@@ -10,7 +10,6 @@ import {
   allowsLegacyVerificationFlow,
   getAuthProviderMode,
   isLegacyAuthProviderMode,
-  isSupabaseOnlyAuthProviderMode,
   isSupabasePrimaryAuthProviderMode,
 } from '../config/authProviderMode.js';
 import { supabaseAuthService } from './supabaseAuthService.js';
@@ -178,20 +177,28 @@ const buildVerificationResponse = ({ email, emailVerifiedAt }) => ({
   },
 });
 
-const shouldUseSupabaseResendForUser = (user, mode) => {
-  if (!user) {
-    return false;
+const buildResendVerificationResponse = () => ({
+  message: 'Se existir uma conta pendente para este e-mail, um novo link de verificação foi enviado.',
+});
+
+const mapResendVerificationSupabaseError = (error) => {
+  if (error instanceof AppError) {
+    if (error.code === 'SUPABASE_NETWORK_ERROR' || error.code === 'SUPABASE_AUTH_ERROR') {
+      return new AppError(
+        'Não foi possível reenviar o e-mail de verificação no provedor de identidade. Tente novamente.',
+        503,
+        'RESEND_VERIFICATION_PROVIDER_UNAVAILABLE'
+      );
+    }
+
+    return error;
   }
 
-  if (mode === 'supabase') {
-    return true;
-  }
-
-  if (mode !== 'dual') {
-    return false;
-  }
-
-  return user.auth_provider === 'supabase' || Boolean(user.supabase_user_id);
+  return new AppError(
+    'Não foi possível processar o reenvio do e-mail de verificação. Tente novamente.',
+    500,
+    'RESEND_VERIFICATION_ERROR'
+  );
 };
 
 const registerWithLegacyFlow = async ({
@@ -846,35 +853,58 @@ export const authService = {
 
   async resendVerificationEmail(email) {
     const normalizedEmail = normalizeEmail(email);
-    const safeResponse = {
-      message: 'Se existir uma conta pendente para este e-mail, enviaremos um novo link de verificação.',
-    };
+    const safeResponse = buildResendVerificationResponse();
 
     const mode = getAuthProviderMode();
 
     if (!isLegacyAuthProviderMode()) {
-      const pendingRegistration = await authRepository.findPendingRegistrationByEmail(normalizedEmail);
+      const [pendingRegistration, user] = await Promise.all([
+        authRepository.findPendingRegistrationByEmail(normalizedEmail),
+        authRepository.findUserByEmail(normalizedEmail),
+      ]);
+
+      if (!pendingRegistration && (!user || user.email_verified)) {
+        logger.info(
+          {
+            mode,
+            email: normalizedEmail,
+            userFound: Boolean(user),
+            alreadyVerified: Boolean(user?.email_verified),
+          },
+          'Reenvio de verificação tratado sem envio'
+        );
+        return safeResponse;
+      }
+
+      try {
+        await supabaseAuthService.resendVerificationEmail(normalizedEmail);
+      } catch (error) {
+        if (error instanceof AppError && error.code === 'INVALID_VERIFICATION_TOKEN') {
+          logger.info(
+            {
+              mode,
+              email: normalizedEmail,
+              userId: user?.id || null,
+              pendingRegistrationId: pendingRegistration?.id || null,
+            },
+            'Identidade não encontrada no Supabase para reenvio de verificação'
+          );
+
+          return safeResponse;
+        }
+
+        throw mapResendVerificationSupabaseError(error);
+      }
 
       if (pendingRegistration) {
         const pendingClient = await authRepository.getClient();
 
         try {
           await pendingClient.query('BEGIN');
-
-          try {
-            await supabaseAuthService.resendVerificationEmail(normalizedEmail);
-          } catch (error) {
-            logger.error(
-              { err: error, email: normalizedEmail, pendingRegistrationId: pendingRegistration.id },
-              'Falha ao reenviar verificação Supabase para cadastro pendente'
-            );
-          }
-
           await authRepository.touchPendingRegistrationVerificationSentAt(
             pendingClient,
             pendingRegistration.id
           );
-
           await pendingClient.query('COMMIT');
         } catch (error) {
           await pendingClient.query('ROLLBACK');
@@ -885,9 +915,11 @@ export const authService = {
         } finally {
           pendingClient.release();
         }
-
-        return safeResponse;
       }
+
+      return {
+        message: 'Se o e-mail estiver pendente de confirmação, um novo link foi enviado pelo provedor de identidade.',
+      };
     }
 
     const user = await authRepository.findUserByEmail(normalizedEmail);
@@ -897,32 +929,6 @@ export const authService = {
         { email: normalizedEmail, userFound: Boolean(user), alreadyVerified: Boolean(user?.email_verified) },
         'Reenvio de verificação tratado sem envio'
       );
-      return safeResponse;
-    }
-
-    if (shouldUseSupabaseResendForUser(user, mode)) {
-      try {
-        await supabaseAuthService.resendVerificationEmail(user.email);
-      } catch (error) {
-        logger.error(
-          { err: error, userId: user.id, email: user.email },
-          'Falha ao reenviar e-mail de verificação via Supabase'
-        );
-      }
-
-      return safeResponse;
-    }
-
-    if (isSupabaseOnlyAuthProviderMode()) {
-      try {
-        await supabaseAuthService.resendVerificationEmail(user.email);
-      } catch (error) {
-        logger.error(
-          { err: error, userId: user.id, email: user.email },
-          'Falha ao reenviar e-mail de verificação em modo Supabase-only'
-        );
-      }
-
       return safeResponse;
     }
 
@@ -957,6 +963,24 @@ export const authService = {
       });
     } catch (error) {
       logger.error({ err: error, userId: user.id, email: user.email }, 'Falha ao reenviar e-mail de verificação');
+
+      if (error instanceof AppError && error.code === 'EMAIL_DELIVERY_FAILED') {
+        throw new AppError(
+          'Não foi possível enviar o e-mail de verificação no momento. Tente novamente.',
+          503,
+          'RESEND_VERIFICATION_EMAIL_UNAVAILABLE'
+        );
+      }
+
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      throw new AppError(
+        'Não foi possível processar o reenvio do e-mail de verificação. Tente novamente.',
+        500,
+        'RESEND_VERIFICATION_ERROR'
+      );
     }
 
     return safeResponse;

@@ -97,6 +97,7 @@ jest.unstable_mockModule('../services/supabaseAuthService.js', () => ({
 
 const { createTestApp } = await import('./helpers/testApp.js');
 const supertest = (await import('supertest')).default;
+const { AppError } = await import('../utils/errors.js');
 
 const app = createTestApp();
 const request = supertest(app);
@@ -444,7 +445,7 @@ describe('Auth API — /api/v1/auth', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.data.message).toMatch(/Se existir uma conta pendente/i);
+        expect(res.body.data.message).toMatch(/novo link de verificação/i);
       expect(mockAuthRepository.setEmailVerificationToken).toHaveBeenCalled();
       const [dbClient, payload] = mockAuthRepository.setEmailVerificationToken.mock.calls[0];
       expect(dbClient).toBeDefined();
@@ -465,6 +466,50 @@ describe('Auth API — /api/v1/auth', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.data.message).toMatch(/Se existir uma conta pendente/i);
       expect(mockAuthRepository.setEmailVerificationToken).not.toHaveBeenCalled();
+      expect(mockEmailService.sendAccountVerificationEmail).not.toHaveBeenCalled();
+    });
+
+    it('deve usar Supabase no modo dual sem acionar SMTP', async () => {
+      process.env.AUTH_PROVIDER_MODE = 'dual';
+
+      mockAuthRepository.findPendingRegistrationByEmail.mockResolvedValue(null);
+      mockAuthRepository.findUserByEmail.mockResolvedValue({
+        id: 'legacy-user-uuid',
+        email: 'joao@teste.com',
+        email_verified: false,
+        auth_provider: 'legacy',
+      });
+
+      const res = await request.post('/api/v1/auth/resend-verification').send({
+        email: 'joao@teste.com',
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(mockSupabaseAuthService.resendVerificationEmail).toHaveBeenCalledWith('joao@teste.com');
+      expect(mockEmailService.sendAccountVerificationEmail).not.toHaveBeenCalled();
+      expect(mockAuthRepository.setEmailVerificationToken).not.toHaveBeenCalled();
+    });
+
+    it('deve retornar 503 controlado quando o Supabase estiver indisponível', async () => {
+      process.env.AUTH_PROVIDER_MODE = 'supabase';
+
+      mockAuthRepository.findPendingRegistrationByEmail.mockResolvedValue({
+        id: 'pending-uuid',
+        email: 'joao@teste.com',
+      });
+      mockAuthRepository.findUserByEmail.mockResolvedValue(null);
+      mockSupabaseAuthService.resendVerificationEmail.mockRejectedValue(
+        new AppError('Falha de rede no Supabase', 502, 'SUPABASE_NETWORK_ERROR')
+      );
+
+      const res = await request.post('/api/v1/auth/resend-verification').send({
+        email: 'joao@teste.com',
+      });
+
+      expect(res.status).toBe(503);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('RESEND_VERIFICATION_PROVIDER_UNAVAILABLE');
       expect(mockEmailService.sendAccountVerificationEmail).not.toHaveBeenCalled();
     });
   });
