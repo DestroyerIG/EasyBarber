@@ -33,7 +33,7 @@ export function useDashboardBilling() {
     loadSubscriptionStatus();
   }, [loadSubscriptionStatus]);
 
-  const goToPlans = () => router.push('/dashboard/planos');
+  const goToPlans = () => router.push('/planos');
 
   const openBillingPortal = async () => {
     setPortalLoading(true);

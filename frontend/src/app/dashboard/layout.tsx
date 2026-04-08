@@ -25,15 +25,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter();
   const { logout } = useAuth();
 
-  // Extrai o segmento após /dashboard, ex: /dashboard/agendamentos → 'agendamentos'
-  const rawSegment = pathname.split('/')[2] || 'dashboard';
+  // Suporta ambos formatos de URL: /dashboard/agendamentos e /agendamentos
+  const pathSegments = pathname.split('/').filter(Boolean);
+  const rawSegment = pathSegments[0] === 'dashboard'
+    ? (pathSegments[1] || 'dashboard')
+    : (pathSegments[0] || 'dashboard');
   const activeTab: TabId = isTabId(rawSegment) ? rawSegment : 'dashboard';
 
   const handleTabChange = (tab: TabId) => {
     if (tab === 'dashboard') {
       router.push('/dashboard');
     } else {
-      router.push(`/dashboard/${tab}`);
+      router.push(`/${tab}`);
     }
   };
 
