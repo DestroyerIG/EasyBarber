@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
 import { isPlanId, PLAN_MAP, SAAS_PLANS, type PlanId } from '@/lib/plans';
+import { formatCurrency } from '@/lib/formatters';
 import api from '@/lib/api';
 import { getApiErrorCode, getApiErrorMessage } from '@/utils/handleApiError';
 import easyBarberLogo from '@/icons/easybarber.png';
@@ -271,7 +272,7 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
                   >
                     {SAAS_PLANS.map((plan) => (
                       <option key={plan.id} value={plan.id}>
-                        {plan.name} - R$ {plan.price}/mês
+                        {plan.name} - {formatCurrency(plan.price)}/mês
                       </option>
                     ))}
                   </select>
