@@ -19,7 +19,7 @@ export const FEATURE_REQUIREMENTS = Object.freeze({
   reports: 'profissional',
   exports: 'profissional',
   whatsapp_automation: 'profissional',
-  advanced_admin: 'premium',
+  advanced_admin: 'basico',
   billing: 'basico',
   subscription_status: 'basico',
 });
