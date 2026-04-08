@@ -316,6 +316,17 @@ const registerWithSupabasePrimaryFlow = async ({
   const normalizedEmail = normalizeEmail(email);
   const plan = DEFAULT_PLAN;
   const onboardingDesiredPlan = desiredPlan || plan;
+  const registerStartedAt = Date.now();
+  let currentStage = 'checking_existing_user';
+
+  logger.info(
+    {
+      mode: getAuthProviderMode(),
+      email: normalizedEmail,
+      stage: currentStage,
+    },
+    'Cadastro Supabase: início'
+  );
 
   const existingUser = await authRepository.findAnyUserByEmail(normalizedEmail);
   if (existingUser) {
@@ -326,32 +337,53 @@ const registerWithSupabasePrimaryFlow = async ({
   let verificationEmailSent = false;
 
   try {
+    currentStage = 'supabase_signup';
+
     const signUpResult = await supabaseAuthService.signUpForEmailVerification(normalizedEmail);
     supabaseUserId = signUpResult.userId;
     verificationEmailSent = signUpResult.verificationEmailSent !== false;
   } catch (error) {
     if (!(error instanceof AppError) || error.code !== 'SUPABASE_USER_EXISTS') {
+      logger.error(
+        {
+          err: error,
+          mode: getAuthProviderMode(),
+          email: normalizedEmail,
+          stage: currentStage,
+          durationMs: Date.now() - registerStartedAt,
+        },
+        'Cadastro Supabase: falha ao iniciar identidade'
+      );
       throw error;
     }
 
     try {
+      currentStage = 'supabase_resend_after_user_exists';
       await supabaseAuthService.resendVerificationEmail(normalizedEmail);
       verificationEmailSent = true;
     } catch (resendError) {
       verificationEmailSent = false;
       logger.error(
-        { err: resendError, email: normalizedEmail },
+        {
+          err: resendError,
+          mode: getAuthProviderMode(),
+          email: normalizedEmail,
+          stage: currentStage,
+          durationMs: Date.now() - registerStartedAt,
+        },
         'Falha ao reenviar confirmação Supabase durante cadastro'
       );
     }
   }
 
+  currentStage = 'hash_password';
   const passwordHash = await bcrypt.hash(password, 12);
   const client = await authRepository.getClient();
   let transactionCommitted = false;
   let pendingRegistration = null;
 
   try {
+    currentStage = 'persist_pending_registration';
     await client.query('BEGIN');
 
     pendingRegistration = await authRepository.upsertPendingRegistration(client, {
@@ -379,11 +411,22 @@ const registerWithSupabasePrimaryFlow = async ({
       throw error;
     }
 
-    logger.error({ err: error, email: normalizedEmail }, 'Erro ao persistir cadastro pendente Supabase');
+    logger.error(
+      {
+        err: error,
+        mode: getAuthProviderMode(),
+        email: normalizedEmail,
+        stage: currentStage,
+        durationMs: Date.now() - registerStartedAt,
+      },
+      'Erro ao persistir cadastro pendente Supabase'
+    );
     throw new AppError('Erro ao iniciar cadastro. Tente novamente.', 500, 'REGISTER_ERROR');
   } finally {
     client.release();
   }
+
+  currentStage = 'completed';
 
   logger.info(
     {
@@ -393,6 +436,8 @@ const registerWithSupabasePrimaryFlow = async ({
       verificationEmailSent,
       pendingRegistrationId: pendingRegistration?.id || null,
       supabaseUserId,
+      stage: currentStage,
+      durationMs: Date.now() - registerStartedAt,
     },
     'Cadastro iniciado com Supabase como fonte primária'
   );

@@ -12,6 +12,8 @@ type BackendRequestResult = {
   response?: Response;
   payload: BackendEnvelope | null;
   networkError?: unknown;
+  timedOut?: boolean;
+  timeoutMs?: number;
 };
 
 type AuthTokens = {
@@ -24,6 +26,7 @@ const REFRESH_TOKEN_COOKIE_NAME = 'refresh_token';
 
 const ACCESS_TOKEN_MAX_AGE_SECONDS = 15 * 60;
 const REFRESH_TOKEN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+const DEFAULT_BACKEND_AUTH_TIMEOUT_MS = 20000;
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
@@ -36,6 +39,55 @@ export const AUTH_COOKIE_NAMES = {
   access: ACCESS_TOKEN_COOKIE_NAME,
   refresh: REFRESH_TOKEN_COOKIE_NAME,
 } as const;
+
+const resolveBackendAuthTimeoutMs = () => {
+  const parsed = Number.parseInt(process.env.AUTH_BFF_UPSTREAM_TIMEOUT_MS || '', 10);
+
+  if (!Number.isFinite(parsed) || parsed < 1000) {
+    return DEFAULT_BACKEND_AUTH_TIMEOUT_MS;
+  }
+
+  return parsed;
+};
+
+const createTimeoutSignal = (
+  timeoutMs: number,
+  upstreamSignal?: AbortSignal | null
+) => {
+  const controller = new AbortController();
+  let timedOut = false;
+
+  const abortFromUpstream = () => {
+    controller.abort();
+  };
+
+  if (upstreamSignal) {
+    if (upstreamSignal.aborted) {
+      controller.abort();
+    } else {
+      upstreamSignal.addEventListener('abort', abortFromUpstream, { once: true });
+    }
+  }
+
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  const cleanup = () => {
+    clearTimeout(timeoutId);
+
+    if (upstreamSignal) {
+      upstreamSignal.removeEventListener('abort', abortFromUpstream);
+    }
+  };
+
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut,
+    cleanup,
+  };
+};
 
 const resolveBackendApiBaseUrl = () => {
   const rawBase =
@@ -156,10 +208,14 @@ export const requestBackendAuth = async (
   path: string,
   init: RequestInit = {}
 ): Promise<BackendRequestResult> => {
+  const timeoutMs = resolveBackendAuthTimeoutMs();
+  const { signal, didTimeout, cleanup } = createTimeoutSignal(timeoutMs, init.signal);
+
   try {
     const response = await fetch(getBackendAuthUrl(path), {
       ...init,
       cache: 'no-store',
+      signal,
       headers: {
         Accept: 'application/json',
         ...(init.headers || {}),
@@ -167,9 +223,20 @@ export const requestBackendAuth = async (
     });
 
     const payload = await parseResponsePayload(response);
-    return { response, payload };
+    return {
+      response,
+      payload,
+      timeoutMs,
+    };
   } catch (networkError) {
-    return { payload: null, networkError };
+    return {
+      payload: null,
+      networkError,
+      timedOut: didTimeout(),
+      timeoutMs,
+    };
+  } finally {
+    cleanup();
   }
 };
 
