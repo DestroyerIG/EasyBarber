@@ -3,6 +3,22 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { Navbar } from '@/components/Navbar';
+import type { TabId } from '@/types';
+
+const DASHBOARD_TABS: readonly TabId[] = [
+  'dashboard',
+  'agendamentos',
+  'financeiro',
+  'clientes',
+  'servicos',
+  'planos',
+  'configuracoes',
+  'whatsapp',
+];
+
+function isTabId(value: string): value is TabId {
+  return DASHBOARD_TABS.includes(value as TabId);
+}
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -10,9 +26,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { logout } = useAuth();
 
   // Extrai o segmento após /dashboard, ex: /dashboard/agendamentos → 'agendamentos'
-  const activeTab = pathname.split('/')[2] || 'dashboard';
+  const rawSegment = pathname.split('/')[2] || 'dashboard';
+  const activeTab: TabId = isTabId(rawSegment) ? rawSegment : 'dashboard';
 
-  const handleTabChange = (tab: string) => {
+  const handleTabChange = (tab: TabId) => {
     if (tab === 'dashboard') {
       router.push('/dashboard');
     } else {
