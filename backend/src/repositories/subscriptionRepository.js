@@ -9,6 +9,8 @@ export const subscriptionRepository = {
               stripe_customer_id,
               stripe_subscription_id,
               stripe_price_id,
+              stripe_payment_mode,
+              payment_method,
               subscription_status,
               subscription_current_period_start,
               subscription_current_period_end,
@@ -27,6 +29,8 @@ export const subscriptionRepository = {
               stripe_customer_id,
               stripe_subscription_id,
               stripe_price_id,
+              stripe_payment_mode,
+              payment_method,
               subscription_status,
               subscription_current_period_start,
               subscription_current_period_end,
@@ -56,18 +60,27 @@ export const subscriptionRepository = {
     const result = await db(client).query(
       `UPDATE barbershops
        SET plan = COALESCE($2, plan),
-           stripe_subscription_id = COALESCE($3, stripe_subscription_id),
+           stripe_subscription_id = CASE
+             WHEN $11 THEN NULL
+             ELSE COALESCE($3, stripe_subscription_id)
+           END,
            stripe_price_id = COALESCE($4, stripe_price_id),
            subscription_status = COALESCE($5, subscription_status),
            subscription_current_period_start = COALESCE($6, subscription_current_period_start),
            subscription_current_period_end = COALESCE($7, subscription_current_period_end),
            subscription_cancel_at_period_end = COALESCE($8, subscription_cancel_at_period_end),
+           stripe_payment_mode = COALESCE($9, stripe_payment_mode),
+           payment_method = COALESCE($10, payment_method),
            subscription_updated_at = CURRENT_TIMESTAMP
        WHERE id = $1
        RETURNING id, plan, subscription_status,
                  subscription_current_period_start,
                  subscription_current_period_end,
-                 subscription_cancel_at_period_end`,
+                 subscription_cancel_at_period_end,
+                 stripe_payment_mode,
+                 payment_method,
+                 stripe_subscription_id,
+                 stripe_price_id`,
       [
         barbershopId,
         payload.plan || null,
@@ -77,6 +90,9 @@ export const subscriptionRepository = {
         payload.currentPeriodStart || null,
         payload.currentPeriodEnd || null,
         payload.cancelAtPeriodEnd,
+        payload.stripePaymentMode || null,
+        payload.paymentMethod || null,
+        Boolean(payload.clearStripeSubscriptionId),
       ]
     );
 
@@ -109,6 +125,8 @@ export const subscriptionRepository = {
       `SELECT plan,
               stripe_customer_id,
               stripe_subscription_id,
+              stripe_payment_mode,
+              payment_method,
               subscription_status,
               subscription_current_period_start,
               subscription_current_period_end,
@@ -119,6 +137,24 @@ export const subscriptionRepository = {
     );
 
     return result.rows[0] || null;
+  },
+
+  async expireOneTimeSubscriptions(client = null) {
+    const result = await db(client).query(
+      `UPDATE barbershops
+       SET subscription_status = 'canceled',
+           subscription_updated_at = CURRENT_TIMESTAMP
+       WHERE stripe_payment_mode = 'payment'
+         AND subscription_status IN ('active', 'trialing')
+         AND subscription_current_period_end IS NOT NULL
+         AND subscription_current_period_end <= NOW()
+       RETURNING id`
+    );
+
+    return {
+      expiredCount: result.rowCount,
+      barbershopIds: result.rows.map((row) => row.id),
+    };
   },
 
   async getClient() {

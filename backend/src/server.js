@@ -32,6 +32,31 @@ for (const envVar of requiredEnvVars) {
   }
 }
 
+const stripeRequiredEnvVars = [
+  'STRIPE_SECRET_KEY',
+  'STRIPE_WEBHOOK_SECRET',
+  'STRIPE_PRICE_ID_BASICO',
+  'STRIPE_PRICE_ID_PROFISSIONAL',
+  'STRIPE_PRICE_ID_PREMIUM',
+  'STRIPE_PRICE_ID_BASICO_ONE_TIME',
+  'STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME',
+  'STRIPE_PRICE_ID_PREMIUM_ONE_TIME',
+];
+
+const stripeBillingEnabled = stripeRequiredEnvVars.some((envVar) => Boolean(process.env[envVar]));
+
+if (stripeBillingEnabled) {
+  const missingStripeEnvVars = stripeRequiredEnvVars.filter((envVar) => !process.env[envVar]);
+
+  if (missingStripeEnvVars.length > 0) {
+    logger.fatal(
+      { missingEnvVars: missingStripeEnvVars },
+      'Configuração Stripe incompleta para billing híbrido'
+    );
+    process.exit(1);
+  }
+}
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 const API_V1 = '/api/v1';

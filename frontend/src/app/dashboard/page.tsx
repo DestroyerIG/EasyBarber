@@ -9,9 +9,17 @@ import { ProfitBar } from '@/components/ProfitBar';
 import { WeeklyChart } from '@/components/WeeklyChart';
 import { LoadingSkeleton } from '@/components/LoadingSkeleton';
 import { useToast } from '@/components/Toast';
-import { billingApi } from '@/lib/billing';
+import { billingApi, type CheckoutPaymentMethod } from '@/lib/billing';
 import { isPlanId } from '@/lib/plans';
 import type { DashboardData } from '@/types';
+
+const resolveCheckoutPaymentMethod = (value: string | null): CheckoutPaymentMethod => {
+  if (value === 'pix' || value === 'boleto') {
+    return value;
+  }
+
+  return 'card';
+};
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -33,9 +41,12 @@ export default function DashboardPage() {
     }
   }, [router, showToast]);
 
-  const startCheckout = useCallback(async (plan: 'basico' | 'profissional' | 'premium') => {
+  const startCheckout = useCallback(async (
+    plan: 'basico' | 'profissional' | 'premium',
+    paymentMethod: CheckoutPaymentMethod = 'card'
+  ) => {
     try {
-      const session = await billingApi.createCheckoutSession(plan);
+      const session = await billingApi.createCheckoutSession(plan, paymentMethod);
       window.location.assign(session.checkoutUrl);
     } catch {
       showToast('Não foi possível iniciar o checkout agora.', 'error');
@@ -69,8 +80,12 @@ export default function DashboardPage() {
     const checkoutPlan = query.get('checkoutPlan');
     if (!checkoutPlan || !isPlanId(checkoutPlan)) return;
 
+    const checkoutMethod = resolveCheckoutPaymentMethod(
+      query.get('checkoutMethod') || query.get('paymentMethod')
+    );
+
     checkoutTriggeredRef.current = true;
-    startCheckout(checkoutPlan);
+    startCheckout(checkoutPlan, checkoutMethod);
   }, [authLoading, showToast, startCheckout, user?.role]);
 
   if (loading || user?.role === 'platform_admin') {

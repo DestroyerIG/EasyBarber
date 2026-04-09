@@ -444,7 +444,8 @@ Body checkout:
 
 ```json
 {
-  "plan": "profissional"
+  "plan": "profissional",
+  "paymentMethod": "card"
 }
 ```
 
@@ -454,10 +455,30 @@ Planos aceitos:
 - profissional
 - premium
 
+Métodos de pagamento aceitos:
+
+- card
+- pix
+- boleto
+
+Regras do checkout híbrido:
+
+- card: Stripe Checkout com `mode=subscription` e Price recorrente.
+- pix: Stripe Checkout com `mode=payment` e Price avulso (one-time).
+- boleto: Stripe Checkout com `mode=payment` e Price avulso (one-time).
+- O backend valida para nunca misturar `subscription` com price one-time, nem `payment` com price recorrente.
+
 Regra de trial (7 dias grátis):
 
-- O trial de 7 dias é aplicado somente na primeira assinatura da barbearia.
-- Em trocas de plano ou novas contratações após já existir histórico de assinatura Stripe para a barbearia, o checkout é criado sem trial.
+- O trial de 7 dias é aplicado somente no fluxo `card` (recorrente), na primeira assinatura da barbearia.
+- Em trocas de plano ou novas contratações após já existir histórico de assinatura Stripe para a barbearia, o checkout recorrente é criado sem trial.
+
+Eventos Stripe esperados no webhook:
+
+- checkout.session.completed
+- customer.subscription.updated
+- customer.subscription.deleted
+- invoice.payment_succeeded
 
 ## 7. Endpoints Admin
 

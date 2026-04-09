@@ -56,17 +56,36 @@ O backend não fixa valores monetários em código.
 
 A cobrança usa price IDs do Stripe:
 
+Recorrente (assinatura por cartão):
+
 - STRIPE_PRICE_ID_BASICO
 - STRIPE_PRICE_ID_PROFISSIONAL
 - STRIPE_PRICE_ID_PREMIUM
+
+Avulso (Pix/Boleto):
+
+- STRIPE_PRICE_ID_BASICO_ONE_TIME
+- STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME
+- STRIPE_PRICE_ID_PREMIUM_ONE_TIME
+
+Mapeamento de fluxo:
+
+- card: mode subscription + price recorrente.
+- pix: mode payment + price one-time.
+- boleto: mode payment + price one-time.
 
 Ou seja, preço e moeda são controlados no Stripe Dashboard.
 
 Regra de trial:
 
-- Todos os planos podem ter 7 dias grátis.
+- O trial de 7 dias é aplicado somente no fluxo recorrente (card).
 - O trial de 7 dias é concedido somente na primeira assinatura da barbearia.
-- Se a barbearia já tiver histórico de assinatura Stripe, novos checkouts são criados sem trial.
+- Se a barbearia já tiver histórico de assinatura Stripe, novos checkouts recorrentes são criados sem trial.
+
+Regra de expiração do fluxo one-time:
+
+- Pagamentos avulsos aprovados ativam o plano por 30 dias.
+- A expiração é controlada no backend por `subscription_current_period_end` e job de expiração automática.
 
 ## 6. Endpoints Relacionados
 

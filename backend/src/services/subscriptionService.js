@@ -1,32 +1,27 @@
 import logger from '../utils/logger.js';
 import { AppError, NotFoundError } from '../utils/errors.js';
-import { getFrontendBaseUrl, getStripeClient, getStripePriceIds } from '../config/stripe.js';
+import { getFrontendBaseUrl, getStripeClient, getStripePriceCatalog } from '../config/stripe.js';
 import { subscriptionRepository } from '../repositories/subscriptionRepository.js';
+import { stripePricingService } from './stripePricingService.js';
+import { stripeCheckoutService } from './stripeCheckoutService.js';
 
-const PLAN_IDS = ['basico', 'profissional', 'premium'];
 const VALID_STATUSES = new Set(['active', 'trialing', 'past_due', 'canceled', 'incomplete']);
-const TRIAL_PERIOD_DAYS = 7;
+const CHECKOUT_COMPLETION_EVENTS = new Set([
+  'checkout.session.completed',
+  'checkout.session.async_payment_succeeded',
+  'checkout.session.async_payment_failed',
+]);
 
-const ensurePlan = (plan) => {
-  if (!PLAN_IDS.includes(plan)) {
-    throw new AppError('Plano inválido para checkout', 400, 'INVALID_PLAN');
-  }
-};
+const SUBSCRIPTION_EVENT_TYPES = new Set([
+  'customer.subscription.updated',
+  'customer.subscription.deleted',
+]);
 
-const ensurePriceId = (plan) => {
-  const planPriceIds = getStripePriceIds();
-  const priceId = planPriceIds[plan];
-
-  if (!priceId) {
-    throw new AppError(
-      `Price ID não configurado para o plano ${plan}`,
-      503,
-      'BILLING_NOT_CONFIGURED'
-    );
-  }
-
-  return { priceId, planPriceIds };
-};
+const INVOICE_EVENT_TYPES = new Set([
+  'invoice.payment_succeeded',
+  'invoice.paid',
+  'invoice.payment_failed',
+]);
 
 const unixToDate = (value) => {
   if (!value || Number.isNaN(Number(value))) {
@@ -45,11 +40,6 @@ const normalizeStatus = (status) => {
   }
 
   return 'incomplete';
-};
-
-const resolvePlanByPriceId = (priceId, planPriceIds) => {
-  const found = Object.entries(planPriceIds).find(([, id]) => id === priceId);
-  return found ? found[0] : null;
 };
 
 const getSubscriptionData = async (stripe, subscriptionRef) => {
@@ -100,15 +90,59 @@ const hasPriorStripeSubscription = async (stripe, customerId, barbershop) => {
   return subscriptions.data.length > 0;
 };
 
+const getCheckoutSessionPriceId = async (stripe, session) => {
+  const inlinePriceId = session?.line_items?.data?.[0]?.price?.id;
+  if (inlinePriceId) {
+    return inlinePriceId;
+  }
+
+  if (!session?.id) {
+    return null;
+  }
+
+  const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 1 });
+  return lineItems?.data?.[0]?.price?.id || null;
+};
+
+const resolveSessionPaymentMethod = (session, explicitPaymentMethod = null) => {
+  const normalizedExplicit = stripePricingService.normalizePaymentMethod(explicitPaymentMethod);
+  if (normalizedExplicit) {
+    return normalizedExplicit;
+  }
+
+  const normalizedMetadata = stripePricingService.normalizePaymentMethod(session?.metadata?.paymentMethod);
+  if (normalizedMetadata) {
+    return normalizedMetadata;
+  }
+
+  const normalizedStripeType = stripePricingService.normalizePaymentMethod(session?.payment_method_types?.[0]);
+  if (normalizedStripeType) {
+    return normalizedStripeType;
+  }
+
+  return 'card';
+};
+
+const getStripeErrorMetadata = (error) => {
+  return {
+    message: error?.message || 'Erro desconhecido no Stripe',
+    type: error?.type || null,
+    code: error?.code || null,
+    declineCode: error?.decline_code || null,
+    requestId: error?.requestId || error?.raw?.requestId || null,
+  };
+};
+
 const updateFromStripeSubscription = async ({
   barbershopId,
   subscription,
   explicitPlan,
-  planPriceIds,
+  priceCatalog,
   client,
 }) => {
   const stripePriceId = subscription.items?.data?.[0]?.price?.id || null;
-  const resolvedPlan = explicitPlan || resolvePlanByPriceId(stripePriceId, planPriceIds);
+  const resolvedByPriceId = stripePricingService.resolvePlanByPriceId(stripePriceId, priceCatalog);
+  const resolvedPlan = explicitPlan || resolvedByPriceId?.plan || null;
 
   return subscriptionRepository.updateSubscriptionState(
     barbershopId,
@@ -116,19 +150,81 @@ const updateFromStripeSubscription = async ({
       plan: resolvedPlan,
       stripeSubscriptionId: subscription.id,
       stripePriceId,
+      stripePaymentMode: 'subscription',
+      paymentMethod: 'card',
       subscriptionStatus: normalizeStatus(subscription.status),
       currentPeriodStart: unixToDate(subscription.current_period_start),
       currentPeriodEnd: unixToDate(subscription.current_period_end),
       cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+      clearStripeSubscriptionId: false,
+    },
+    client
+  );
+};
+
+const updatePendingOneTimePayment = async ({
+  barbershopId,
+  explicitPlan,
+  explicitPaymentMethod,
+  client,
+}) => {
+  const paymentMethod = stripePricingService.normalizePaymentMethod(explicitPaymentMethod);
+
+  return subscriptionRepository.updateSubscriptionState(
+    barbershopId,
+    {
+      plan: explicitPlan || null,
+      stripePaymentMode: 'payment',
+      paymentMethod: paymentMethod || null,
+      subscriptionStatus: 'incomplete',
+      cancelAtPeriodEnd: false,
+      clearStripeSubscriptionId: true,
+    },
+    client
+  );
+};
+
+const updatePaidOneTimeCheckout = async ({
+  stripe,
+  barbershopId,
+  session,
+  explicitPlan,
+  explicitPaymentMethod,
+  priceCatalog,
+  client,
+}) => {
+  const stripePriceId = await getCheckoutSessionPriceId(stripe, session);
+  const resolvedByPriceId = stripePricingService.resolvePlanByPriceId(stripePriceId, priceCatalog);
+  const resolvedPlan = explicitPlan || resolvedByPriceId?.plan || null;
+
+  if (!resolvedPlan) {
+    throw new AppError('Não foi possível identificar o plano do pagamento avulso', 400, 'INVALID_PLAN');
+  }
+
+  const paymentMethod = resolveSessionPaymentMethod(session, explicitPaymentMethod);
+  const { periodStart, periodEnd } = stripeCheckoutService.resolveOneTimePeriodDates();
+
+  return subscriptionRepository.updateSubscriptionState(
+    barbershopId,
+    {
+      plan: resolvedPlan,
+      stripeSubscriptionId: null,
+      stripePriceId,
+      stripePaymentMode: 'payment',
+      paymentMethod,
+      subscriptionStatus: 'active',
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd,
+      cancelAtPeriodEnd: false,
+      clearStripeSubscriptionId: true,
     },
     client
   );
 };
 
 export const subscriptionService = {
-  async createCheckoutSession(barbershopId, plan) {
-    ensurePlan(plan);
-    const { priceId } = ensurePriceId(plan);
+  async createCheckoutSession(barbershopId, plan, paymentMethod) {
+    const pricing = stripePricingService.resolveCheckoutPricing({ plan, paymentMethod });
     const stripe = getStripeClient();
 
     const barbershop = await subscriptionRepository.getBarbershopBillingContext(barbershopId);
@@ -137,38 +233,63 @@ export const subscriptionService = {
     }
 
     const customerId = await ensureCustomer(stripe, barbershop);
-    const hasPriorSubscription = await hasPriorStripeSubscription(stripe, customerId, barbershop);
-    const frontendBaseUrl = getFrontendBaseUrl();
-    const subscriptionData = {
-      metadata: {
+
+    logger.info(
+      {
         barbershopId,
         plan,
+        paymentMethod: pricing.paymentMethod,
+        mode: pricing.mode,
+        flowType: pricing.flowType,
+        priceId: pricing.priceId,
       },
-    };
+      'Criando sessão de checkout Stripe'
+    );
 
-    if (!hasPriorSubscription) {
-      subscriptionData.trial_period_days = TRIAL_PERIOD_DAYS;
-    }
+    const applyTrial = pricing.mode === 'subscription'
+      ? !(await hasPriorStripeSubscription(stripe, customerId, barbershop))
+      : false;
 
-    const session = await stripe.checkout.sessions.create({
-      mode: isPix ? 'payment' : 'subscription',
-      customer: customerId,
-      allow_promotion_codes: true,
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${frontendBaseUrl}/dashboard?billing=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${frontendBaseUrl}/dashboard?billing=canceled`,
-      metadata: {
-        barbershopId,
-        plan,
-      },
-      subscription_data: subscriptionData,
-      locale: 'pt-BR',
+    const checkoutPayload = stripeCheckoutService.buildCheckoutSessionPayload({
+      customerId,
+      barbershopId,
+      plan,
+      paymentMethod: pricing.paymentMethod,
+      mode: pricing.mode,
+      flowType: pricing.flowType,
+      priceId: pricing.priceId,
+      applyTrial,
     });
 
-    return {
-      sessionId: session.id,
-      checkoutUrl: session.url,
-    };
+    try {
+      const session = await stripe.checkout.sessions.create(checkoutPayload);
+
+      return {
+        sessionId: session.id,
+        checkoutUrl: session.url,
+      };
+    } catch (error) {
+      const stripeError = getStripeErrorMetadata(error);
+
+      logger.error(
+        {
+          barbershopId,
+          plan,
+          paymentMethod: pricing.paymentMethod,
+          mode: pricing.mode,
+          flowType: pricing.flowType,
+          priceId: pricing.priceId,
+          stripeError,
+        },
+        'Falha ao criar sessão de checkout Stripe'
+      );
+
+      throw new AppError(
+        'Não foi possível iniciar o checkout no Stripe no momento. Tente novamente.',
+        502,
+        'CHECKOUT_SESSION_ERROR'
+      );
+    }
   },
 
   async getStatus(barbershopId) {
@@ -184,6 +305,8 @@ export const subscriptionService = {
       currentPeriodEnd: data.subscription_current_period_end,
       cancelAtPeriodEnd: data.subscription_cancel_at_period_end,
       hasCustomer: Boolean(data.stripe_customer_id),
+      paymentMode: data.stripe_payment_mode,
+      paymentMethod: data.payment_method,
     };
   },
 
@@ -217,11 +340,19 @@ export const subscriptionService = {
 
   async resyncBarbershopSubscription(barbershopId) {
     const stripe = getStripeClient();
-    const planPriceIds = getStripePriceIds();
+    const priceCatalog = getStripePriceCatalog();
 
     const barbershop = await subscriptionRepository.getBarbershopBillingContext(barbershopId);
     if (!barbershop) {
       throw new NotFoundError('Barbearia');
+    }
+
+    if (barbershop.stripe_payment_mode === 'payment') {
+      throw new AppError(
+        'Sincronização manual disponível apenas para assinaturas recorrentes por cartão.',
+        400,
+        'RESYNC_UNAVAILABLE_FOR_ONE_TIME'
+      );
     }
 
     if (!barbershop.stripe_subscription_id) {
@@ -241,7 +372,7 @@ export const subscriptionService = {
       barbershopId,
       subscription,
       explicitPlan: subscription.metadata?.plan || null,
-      planPriceIds,
+      priceCatalog,
       client: null,
     });
 
@@ -270,7 +401,7 @@ export const subscriptionService = {
       process.env.STRIPE_WEBHOOK_SECRET
     );
 
-    const planPriceIds = getStripePriceIds();
+    const priceCatalog = getStripePriceCatalog();
     const client = await subscriptionRepository.getClient();
 
     try {
@@ -284,32 +415,81 @@ export const subscriptionService = {
 
       let barbershopId = null;
 
-      if (event.type === 'checkout.session.completed') {
+      if (CHECKOUT_COMPLETION_EVENTS.has(event.type)) {
         const session = event.data.object;
         const metadataPlan = session.metadata?.plan;
         const metadataBarbershopId = session.metadata?.barbershopId;
+        const metadataPaymentMethod = session.metadata?.paymentMethod;
 
         if (!metadataBarbershopId) {
           throw new AppError('Webhook sem barbershopId no metadata', 400, 'WEBHOOK_METADATA_ERROR');
         }
 
-        const subscription = await getSubscriptionData(stripe, session.subscription);
-        if (!subscription) {
-          throw new AppError('Subscription não encontrada no Stripe', 400, 'SUBSCRIPTION_NOT_FOUND');
+        logger.info(
+          {
+            eventType: event.type,
+            barbershopId: metadataBarbershopId,
+            plan: metadataPlan || null,
+            paymentMethod: metadataPaymentMethod || null,
+            mode: session.mode,
+            paymentStatus: session.payment_status || null,
+          },
+          'Processando webhook de checkout Stripe'
+        );
+
+        if (session.mode === 'subscription') {
+          const subscription = await getSubscriptionData(stripe, session.subscription);
+          if (!subscription) {
+            throw new AppError('Subscription não encontrada no Stripe', 400, 'SUBSCRIPTION_NOT_FOUND');
+          }
+
+          await updateFromStripeSubscription({
+            barbershopId: metadataBarbershopId,
+            subscription,
+            explicitPlan: metadataPlan,
+            priceCatalog,
+            client,
+          });
         }
 
-        await updateFromStripeSubscription({
-          barbershopId: metadataBarbershopId,
-          subscription,
-          explicitPlan: metadataPlan,
-          planPriceIds,
-          client,
-        });
+        if (session.mode === 'payment') {
+          const shouldActivateOneTime =
+            event.type === 'checkout.session.async_payment_succeeded' ||
+            session.payment_status === 'paid';
+
+          if (shouldActivateOneTime) {
+            await updatePaidOneTimeCheckout({
+              stripe,
+              barbershopId: metadataBarbershopId,
+              session,
+              explicitPlan: metadataPlan,
+              explicitPaymentMethod: metadataPaymentMethod,
+              priceCatalog,
+              client,
+            });
+          } else {
+            await updatePendingOneTimePayment({
+              barbershopId: metadataBarbershopId,
+              explicitPlan: metadataPlan,
+              explicitPaymentMethod: metadataPaymentMethod,
+              client,
+            });
+
+            logger.info(
+              {
+                eventType: event.type,
+                barbershopId: metadataBarbershopId,
+                paymentStatus: session.payment_status || null,
+              },
+              'Pagamento avulso ainda pendente de confirmação no Stripe'
+            );
+          }
+        }
 
         barbershopId = metadataBarbershopId;
       }
 
-      if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
+      if (SUBSCRIPTION_EVENT_TYPES.has(event.type)) {
         const subscription = event.data.object;
         const customerId = typeof subscription.customer === 'string'
           ? subscription.customer
@@ -324,18 +504,33 @@ export const subscriptionService = {
           throw new AppError('Barbearia não encontrada para customer Stripe', 404, 'BARBERSHOP_NOT_FOUND');
         }
 
-        await updateFromStripeSubscription({
-          barbershopId: barbershop.id,
-          subscription,
-          explicitPlan: subscription.metadata?.plan || null,
-          planPriceIds,
-          client,
-        });
+        const shouldIgnoreEvent =
+          barbershop.stripe_payment_mode === 'payment' &&
+          (!barbershop.stripe_subscription_id || barbershop.stripe_subscription_id !== subscription.id);
 
-        barbershopId = barbershop.id;
+        if (shouldIgnoreEvent) {
+          logger.info(
+            {
+              eventType: event.type,
+              barbershopId: barbershop.id,
+              stripeSubscriptionId: subscription.id,
+            },
+            'Evento de assinatura ignorado para conta em fluxo one-time'
+          );
+        } else {
+          await updateFromStripeSubscription({
+            barbershopId: barbershop.id,
+            subscription,
+            explicitPlan: subscription.metadata?.plan || null,
+            priceCatalog,
+            client,
+          });
+
+          barbershopId = barbershop.id;
+        }
       }
 
-      if (event.type === 'invoice.paid' || event.type === 'invoice.payment_failed') {
+      if (INVOICE_EVENT_TYPES.has(event.type)) {
         const invoice = event.data.object;
         const customerId = typeof invoice.customer === 'string'
           ? invoice.customer
@@ -347,15 +542,26 @@ export const subscriptionService = {
           if (barbershop) {
             barbershopId = barbershop.id;
 
-            const subscription = await getSubscriptionData(stripe, invoice.subscription);
-            if (subscription) {
-              await updateFromStripeSubscription({
-                barbershopId: barbershop.id,
-                subscription,
-                explicitPlan: subscription.metadata?.plan || null,
-                planPriceIds,
-                client,
-              });
+            if (barbershop.stripe_payment_mode === 'payment') {
+              logger.info(
+                {
+                  eventType: event.type,
+                  barbershopId: barbershop.id,
+                  customerId,
+                },
+                'Evento de invoice ignorado para conta em fluxo one-time'
+              );
+            } else {
+              const subscription = await getSubscriptionData(stripe, invoice.subscription);
+              if (subscription) {
+                await updateFromStripeSubscription({
+                  barbershopId: barbershop.id,
+                  subscription,
+                  explicitPlan: subscription.metadata?.plan || null,
+                  priceCatalog,
+                  client,
+                });
+              }
             }
           }
         }
@@ -384,7 +590,17 @@ export const subscriptionService = {
       };
     } catch (error) {
       await client.query('ROLLBACK');
-      logger.error({ err: error, eventType: event.type }, 'Falha ao processar webhook Stripe');
+
+      const safeStripeError = getStripeErrorMetadata(error);
+      logger.error(
+        {
+          err: error,
+          eventType: event.type,
+          stripeError: safeStripeError,
+        },
+        'Falha ao processar webhook Stripe'
+      );
+
       throw error;
     } finally {
       client.release();

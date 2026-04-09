@@ -92,7 +92,8 @@ try {
         "backend/src/config/migration_v7.sql",
         "backend/src/config/migration_v8.sql",
         "backend/src/config/migration_v9.sql",
-        "backend/src/config/migration_v10.sql"
+        "backend/src/config/migration_v10.sql",
+        "backend/src/config/migration_v11.sql"
     )
 
     foreach ($sqlFile in $sqlFiles) {

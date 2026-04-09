@@ -46,6 +46,7 @@ psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v10.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v11.sql
 ```
 
 Se ainda não existe banco:
@@ -70,6 +71,7 @@ psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backe
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v8.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v9.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v10.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v11.sql
 ```
 
 ## 4) Subir backend e frontend
@@ -110,7 +112,7 @@ docker compose up -d
 
 Observação importante:
 
-- O container de banco aplica automaticamente database.sql + migration_v3..v10 no primeiro bootstrap do volume.
+- O container de banco aplica automaticamente database.sql + migration_v3..v11 no primeiro bootstrap do volume.
 - Se o volume já existia antes dessa configuração, aplique migrations manualmente ou recrie o volume.
 
 Para manter o fluxo antigo de verificação por SMTP em ambiente local, configure `AUTH_PROVIDER_MODE=legacy` no backend/.env.

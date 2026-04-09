@@ -59,7 +59,15 @@ STRIPE_WEBHOOK_SECRET=whsec_xxx
 STRIPE_PRICE_ID_BASICO=price_xxx
 STRIPE_PRICE_ID_PROFISSIONAL=price_xxx
 STRIPE_PRICE_ID_PREMIUM=price_xxx
+STRIPE_PRICE_ID_BASICO_ONE_TIME=price_xxx
+STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME=price_xxx
+STRIPE_PRICE_ID_PREMIUM_ONE_TIME=price_xxx
 ```
+
+Mapeamento de fluxo no checkout Stripe:
+
+- card -> mode subscription + price recorrente.
+- pix/boleto -> mode payment + price one-time.
 
 ### Backend (opcionais)
 
@@ -131,6 +139,7 @@ npm start
 7. migration_v8.sql
 8. migration_v9.sql
 9. migration_v10.sql
+10. migration_v11.sql
 
 ## 6.2 Comandos (host com psql)
 
@@ -144,6 +153,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v7.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v10.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v11.sql
 ```
 
 ## 6.3 Upgrade legado
@@ -170,9 +180,9 @@ docker compose up -d --build
 
 ### 7.2 Aplicar migrations adicionais
 
-O bootstrap automático do db aplica database.sql + migration_v3..v10 no primeiro bootstrap do volume.
+O bootstrap automático do db aplica database.sql + migration_v3..v11 no primeiro bootstrap do volume.
 
-Se o volume já existia antes dessa configuração, execute migration_v3..v10 manualmente.
+Se o volume já existia antes dessa configuração, execute migration_v3..v11 manualmente.
 
 Com psql local:
 
@@ -185,6 +195,7 @@ psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP
 psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
 psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
 psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v10.sql
+psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v11.sql
 ```
 
 ## 8. Deploy em PaaS (Backend/Frontend separados)
@@ -240,7 +251,7 @@ No painel Stripe:
   - checkout.session.completed
   - customer.subscription.updated
   - customer.subscription.deleted
-  - invoice.paid
+  - invoice.payment_succeeded
   - invoice.payment_failed
 
 Salvar signing secret em STRIPE_WEBHOOK_SECRET.
@@ -269,7 +280,7 @@ curl https://sua-api.com/health
 ## 12. Riscos Comuns
 
 - Banco sem migration_v3 (quebra módulo WhatsApp).
-- Banco sem migration_v9/v10 (quebra fluxo de verificação e sincronização Supabase).
+- Banco sem migration_v9/v10/v11 (quebra fluxo de verificação, sincronização Supabase e billing híbrido).
 - FRONTEND_URL incorreta (erro CORS).
 - SUPABASE_URL/SUPABASE_ANON_KEY ausentes com AUTH_PROVIDER_MODE=dual|supabase (falha de cadastro/verificação).
 - SMTP_* ausentes ou inválidas quando AUTH_PROVIDER_MODE=legacy (fallback legado indisponível).
@@ -303,5 +314,5 @@ As seguintes correções já estão aplicadas no repositório:
 - backend/.env.example com DB_CONNECT_TIMEOUT.
 - docker-compose.yml com FRONTEND_URL no backend.
 - docker-compose.yml com NEXT_PUBLIC_API_URL em /api/v1 no frontend.
-- setup.ps1 aplicando database.sql + migration_v3..v10.
+- setup.ps1 aplicando database.sql + migration_v3..v11.
 - fix-env.ps1 sem variáveis legadas WHATSAPP_API_*.

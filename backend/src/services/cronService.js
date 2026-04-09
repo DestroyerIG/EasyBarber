@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import pool from '../config/database.js';
 import { sendWhatsAppMessage } from './whatsapp/index.js';
 import logger from '../utils/logger.js';
+import { subscriptionRepository } from '../repositories/subscriptionRepository.js';
 
 export const startReminderCron = () => {
   cron.schedule('*/10 * * * *', async () => {
@@ -65,6 +66,25 @@ export const startReminderCron = () => {
 
     } catch (error) {
       logger.error({ err: error }, 'Erro ao enviar lembretes');
+    }
+  });
+
+  // Expira acessos one-time (pix/boleto) quando o período contratado termina.
+  cron.schedule('15 * * * *', async () => {
+    try {
+      const { expiredCount, barbershopIds } = await subscriptionRepository.expireOneTimeSubscriptions();
+
+      if (expiredCount > 0) {
+        logger.info(
+          {
+            expiredCount,
+            barbershopIds,
+          },
+          'Assinaturas one-time expiradas automaticamente'
+        );
+      }
+    } catch (error) {
+      logger.error({ err: error }, 'Erro ao expirar assinaturas one-time');
     }
   });
 

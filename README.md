@@ -18,7 +18,7 @@ Também há suporte a execução via Docker Compose com PostgreSQL.
 - Gestão de agendamentos, clientes, serviços e barbeiros.
 - Módulo financeiro com resumo diário/mensal e despesas.
 - Bot de WhatsApp via Evolution API v1 (serviço externo) com configuração de mensagens e menu dinâmico.
-- Assinaturas com Stripe (checkout, portal e webhook), com 7 dias grátis apenas na primeira assinatura da barbearia.
+- Billing com Stripe em fluxo híbrido (assinatura recorrente no cartão + checkout avulso em Pix/Boleto), com 7 dias grátis apenas na primeira assinatura recorrente da barbearia.
 - Painel administrativo de plataforma com bloqueio de contas/usuários e auditoria.
 - Controle de acesso por plano e status de assinatura.
 
@@ -74,7 +74,7 @@ No frontend, o App Router organiza páginas públicas, dashboard tenant e área 
 ```text
 backend/
   src/
-    config/        # database.sql e migration_v2..v10.sql
+    config/        # database.sql e migration_v2..v11.sql
     controllers/
     middleware/
     repositories/
@@ -136,6 +136,9 @@ STRIPE_WEBHOOK_SECRET=whsec_xxx
 STRIPE_PRICE_ID_BASICO=price_xxx
 STRIPE_PRICE_ID_PROFISSIONAL=price_xxx
 STRIPE_PRICE_ID_PREMIUM=price_xxx
+STRIPE_PRICE_ID_BASICO_ONE_TIME=price_xxx
+STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME=price_xxx
+STRIPE_PRICE_ID_PREMIUM_ONE_TIME=price_xxx
 
 # WhatsApp Provider (Evolution API v1 externa)
 WHATSAPP_PROVIDER=evolution
@@ -146,6 +149,15 @@ EVOLUTION_WEBHOOK_URL=https://sua-api.com/api/v1/whatsapp/webhook
 EVOLUTION_API_TIMEOUT_MS=10000
 WHATSAPP_SESSION_TIMEOUT_MS=1800000
 ```
+
+Fluxo híbrido de billing Stripe:
+
+- card: checkout com mode subscription + price recorrente.
+- pix: checkout com mode payment + price one-time.
+- boleto: checkout com mode payment + price one-time.
+
+No fluxo recorrente (card), o trial de 7 dias é aplicado apenas na primeira assinatura da barbearia.
+No fluxo one-time (pix/boleto), o backend ativa acesso por período manual e controla expiração automática.
 
 ### Frontend (frontend/.env.local)
 
@@ -191,6 +203,7 @@ A sequência recomendada para banco novo é:
 7. backend/src/config/migration_v8.sql
 8. backend/src/config/migration_v9.sql
 9. backend/src/config/migration_v10.sql
+10. backend/src/config/migration_v11.sql
 
 Observação: migration_v2.sql é voltada a upgrade legado e normalmente não é necessária em ambiente novo.
 
@@ -307,6 +320,7 @@ Arquivos SQL em backend/src/config:
 - migration_v8.sql (barbershop settings)
 - migration_v9.sql (verificação de e-mail de conta)
 - migration_v10.sql (vínculo de identidade Supabase + pendências de cadastro)
+- migration_v11.sql (billing híbrido Stripe: modo e método de pagamento)
 
 A documentação completa de migrations manuais, validação, rollback e troubleshooting está em POSTGRESQL_SETUP.md.
 
@@ -386,7 +400,7 @@ As inconsistências operacionais críticas foram corrigidas no estado atual do p
 - backend/.env.example usa DB_CONNECT_TIMEOUT.
 - backend/.env.example inclui AUTH_PROVIDER_MODE, SUPABASE_* e SMTP_* (fallback legado).
 - docker-compose.yml usa FRONTEND_URL no backend e NEXT_PUBLIC_API_URL com /api/v1 no frontend.
-- setup.ps1 aplica database.sql + migration_v3..v10.
+- setup.ps1 aplica database.sql + migration_v3..v11.
 - fix-env.ps1 remove variáveis legadas WHATSAPP_API_* e mantém defaults compatíveis com o backend atual.
 
 Observação:

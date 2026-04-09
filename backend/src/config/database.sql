@@ -14,6 +14,12 @@ CREATE TABLE IF NOT EXISTS barbershops (
     stripe_customer_id VARCHAR(255) UNIQUE,
     stripe_subscription_id VARCHAR(255) UNIQUE,
     stripe_price_id VARCHAR(255),
+    stripe_payment_mode VARCHAR(20),
+    payment_method VARCHAR(20),
+    CONSTRAINT check_barbershops_stripe_payment_mode
+        CHECK (stripe_payment_mode IN ('subscription', 'payment')),
+    CONSTRAINT check_barbershops_payment_method
+        CHECK (payment_method IN ('card', 'pix', 'boleto')),
     subscription_status VARCHAR(50) NOT NULL DEFAULT 'active'
         CHECK (subscription_status IN ('active', 'trialing', 'past_due', 'canceled', 'incomplete')),
     subscription_current_period_start TIMESTAMP,

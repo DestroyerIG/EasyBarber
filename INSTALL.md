@@ -120,6 +120,7 @@ Sequência recomendada para ambiente novo:
 7. backend/src/config/migration_v8.sql
 8. backend/src/config/migration_v9.sql
 9. backend/src/config/migration_v10.sql
+10. backend/src/config/migration_v11.sql
 
 Linux/macOS:
 
@@ -133,6 +134,7 @@ psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v10.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v11.sql
 ```
 
 Windows PowerShell:
@@ -147,6 +149,7 @@ psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backe
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v8.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v9.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v10.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v11.sql
 ```
 
 Observação:
@@ -211,7 +214,7 @@ npm run lint
 docker compose up -d
 ```
 
-O compose atual aplica database.sql + migration_v3..v10 no primeiro bootstrap do volume.
+O compose atual aplica database.sql + migration_v3..v11 no primeiro bootstrap do volume.
 Se o volume do PostgreSQL já existia antes dessa configuração, aplique as migrations manualmente ou recrie o volume.
 
 ## 10. Ordem Correta de Setup (Resumo)

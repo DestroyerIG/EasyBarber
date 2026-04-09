@@ -7,7 +7,11 @@ export { createCheckoutSessionSchema };
 
 export const createCheckoutSession = async (req, res, next) => {
   try {
-    const data = await subscriptionService.createCheckoutSession(req.user.barbershopId, req.body.plan);
+    const data = await subscriptionService.createCheckoutSession(
+      req.user.barbershopId,
+      req.body.plan,
+      req.body.paymentMethod
+    );
     sendSuccess(res, data);
   } catch (error) {
     next(error);

@@ -13,6 +13,7 @@ services:
       - ./backend/src/config/migration_v8.sql:/docker-entrypoint-initdb.d/07-migration-v8.sql
       - ./backend/src/config/migration_v9.sql:/docker-entrypoint-initdb.d/08-migration-v9.sql
       - ./backend/src/config/migration_v10.sql:/docker-entrypoint-initdb.d/09-migration-v10.sql
+      - ./backend/src/config/migration_v11.sql:/docker-entrypoint-initdb.d/10-migration-v11.sql
     environment:
       POSTGRES_DB: barberpro
       POSTGRES_USER: barberpro

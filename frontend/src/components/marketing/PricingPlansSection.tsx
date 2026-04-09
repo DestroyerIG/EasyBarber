@@ -5,10 +5,32 @@ import { CheckCircle2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
-import { billingApi } from '@/lib/billing';
+import { billingApi, type CheckoutPaymentMethod } from '@/lib/billing';
 import { SAAS_PLANS, type PlanId } from '@/lib/plans';
 import { formatCurrency } from '@/lib/formatters';
 import { getApiErrorMessage } from '@/utils/handleApiError';
+
+const PAYMENT_METHOD_OPTIONS: Array<{
+  id: CheckoutPaymentMethod;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: 'card',
+    label: 'Cartão',
+    description: 'Assinatura recorrente mensal',
+  },
+  {
+    id: 'pix',
+    label: 'Pix',
+    description: 'Pagamento avulso no checkout',
+  },
+  {
+    id: 'boleto',
+    label: 'Boleto',
+    description: 'Pagamento avulso no checkout',
+  },
+];
 
 interface PricingPlansSectionProps {
   sectionId?: string;
@@ -30,9 +52,11 @@ export function PricingPlansSection({
   className,
 }: PricingPlansSectionProps) {
   const [processingPlan, setProcessingPlan] = useState<PlanId | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('card');
   const { user } = useAuth();
   const { showToast } = useToast();
   const router = useRouter();
+  const isRecurringFlow = paymentMethod === 'card';
 
   const isCurrentPlan = (planId: PlanId) => {
     return currentPlan === planId && (subscriptionStatus === 'active' || subscriptionStatus === 'trialing');
@@ -40,7 +64,7 @@ export function PricingPlansSection({
 
   const handlePlanSelect = async (planId: PlanId) => {
     if (!user) {
-      router.push(`/cadastro?plan=${planId}`);
+      router.push(`/cadastro?plan=${planId}&paymentMethod=${paymentMethod}`);
       return;
     }
 
@@ -51,7 +75,7 @@ export function PricingPlansSection({
 
     setProcessingPlan(planId);
     try {
-      const session = await billingApi.createCheckoutSession(planId);
+      const session = await billingApi.createCheckoutSession(planId, paymentMethod);
       window.location.assign(session.checkoutUrl);
     } catch (error: unknown) {
       const message = getApiErrorMessage(error, 'Não foi possível iniciar o checkout no momento.');
@@ -68,6 +92,32 @@ export function PricingPlansSection({
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Planos</p>
           <h2 className="mt-3 text-3xl font-black leading-tight sm:text-4xl">{title}</h2>
           <p className="mt-4 text-gray-400">{subtitle}</p>
+
+          <div className="mt-6 rounded-2xl border border-white/10 bg-black/30 p-3 text-left">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">Forma de pagamento</p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {PAYMENT_METHOD_OPTIONS.map((option) => {
+                const selected = paymentMethod === option.id;
+
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => setPaymentMethod(option.id)}
+                    className={[
+                      'rounded-xl border px-3 py-2 text-left transition-colors',
+                      selected
+                        ? 'border-primary bg-primary/10 text-white'
+                        : 'border-white/10 bg-black/20 text-gray-300 hover:border-white/30',
+                    ].join(' ')}
+                  >
+                    <p className="text-sm font-semibold">{option.label}</p>
+                    <p className="mt-1 text-[11px] text-gray-400">{option.description}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 
@@ -97,10 +147,14 @@ export function PricingPlansSection({
                 <p className="mt-2 text-sm text-gray-400">{plan.description}</p>
                 <p className="mt-4 text-4xl font-black text-primary">
                   {formatCurrency(plan.price)}
-                  <span className="text-sm font-medium text-gray-400">/mês</span>
+                  <span className="text-sm font-medium text-gray-400">
+                    {isRecurringFlow ? '/mês' : ' pagamento avulso'}
+                  </span>
                 </p>
                 <p className="mt-2 inline-flex items-center rounded-full border border-emerald-400/35 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium leading-snug text-emerald-200 sm:text-xs">
-                  Teste gratuito por {plan.trialDays} dias com acesso completo — sem compromisso.
+                  {isRecurringFlow
+                    ? `Teste gratuito por ${plan.trialDays} dias com acesso completo.`
+                    : 'Acesso liberado por 30 dias apos a confirmacao do pagamento.'}
                 </p>
               </div>
 
