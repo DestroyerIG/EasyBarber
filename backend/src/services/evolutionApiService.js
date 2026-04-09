@@ -226,7 +226,7 @@ export const createInstance = async () => {
           webhook_base64: true,
           webhook_events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'],
         },
-        expectedStatuses: [200, 201, 409],
+        expectedStatuses: [200, 201, 403 ,409],
       },
     ],
     'createInstance'
