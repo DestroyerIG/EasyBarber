@@ -196,6 +196,7 @@ Checklist:
 - AUTH_PROVIDER_MODE configurado corretamente (`dual`, `supabase` ou `legacy`).
 - SUPABASE_URL e SUPABASE_ANON_KEY configuradas para `dual/supabase`.
 - AUTH_SUPABASE_REDIRECT_TO apontando para `/auth/confirm` no frontend público.
+- SUPABASE_SERVICE_ROLE_KEY configurada para executar scripts administrativos (`seed:auth-admin` e `seed:system-users`).
 - Variáveis SMTP_* configuradas somente quando usar fallback legado (`AUTH_PROVIDER_MODE=legacy`).
 - APP_URL/FRONTEND_URL apontando para a URL pública correta do frontend.
 - Caixa de spam/lixo eletrônico verificada.
@@ -207,6 +208,33 @@ SELECT email, email_verified, email_verification_expires_at, verification_sent_a
 FROM users
 ORDER BY created_at DESC
 LIMIT 10;
+```
+
+## 4.5 Login retornando 401 no modo híbrido
+
+Sintomas:
+
+- Login falha com `Email ou senha incorretos` para usuario que deveria autenticar via Supabase.
+
+Checklist:
+
+- Conferir `users.auth_provider` (`legacy` usa bcrypt local, `supabase` usa Supabase Auth).
+- Para contas `supabase`, validar se a senha foi realmente atualizada no Supabase Auth.
+- Verificar divergencia entre `users.supabase_user_id` e o `user.id` retornado no Supabase.
+- Confirmar que `users.blocked = false` e `users.email_verified = true`.
+- Em caso de usuarios estrategicos (admin/teste), reexecutar:
+
+```bash
+cd backend
+npm run seed:system-users
+```
+
+Validacao SQL rapida:
+
+```sql
+SELECT email, auth_provider, supabase_user_id, email_verified, blocked
+FROM users
+WHERE LOWER(email) IN ('contato@easyconnectcg.com.br', 'teste@easybarber.com');
 ```
 
 ## 5. WhatsApp
@@ -263,7 +291,7 @@ Checklist atual:
 1. backend/.env.example está alinhado com DB_CONNECT_TIMEOUT.
 2. docker-compose.yml usa FRONTEND_URL no backend.
 3. docker-compose.yml usa NEXT_PUBLIC_API_URL com /api/v1 no frontend.
-4. setup.ps1 aplica database.sql + migration_v3..v10.
+4. setup.ps1 aplica database.sql + migration_v3..v11.
 5. fix-env.ps1 não adiciona variáveis legadas WHATSAPP_API_*.
 
 Como proceder:
@@ -277,7 +305,7 @@ Quando o ambiente está inconsistente:
 
 1. Backup (se houver dados).
 2. Recriar banco do zero.
-3. Aplicar database.sql + migration_v3..v10.
+3. Aplicar database.sql + migration_v3..v11.
 4. Revisar backend/.env e frontend/.env.local.
 5. Subir backend e validar /health.
 6. Subir frontend.

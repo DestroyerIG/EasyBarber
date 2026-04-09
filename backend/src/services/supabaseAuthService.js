@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
-import { AppError } from '../utils/errors.js';
+import { AppError, UnauthorizedError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 
 let supabaseClient;
@@ -218,6 +218,45 @@ const mapSupabaseError = (error, fallbackMessage) => {
   return new AppError(fallbackMessage || 'Falha ao processar autenticação externa.', 502, 'SUPABASE_AUTH_ERROR');
 };
 
+const mapSupabaseSignInError = (error) => {
+  const message = String(error?.message || '').trim();
+  const normalizedMessage = message.toLowerCase();
+  const normalizedCode = String(error?.code || error?.error_code || '').trim().toLowerCase();
+
+  if (isTimeoutLikeError(error)) {
+    return new AppError(
+      'Tempo esgotado ao comunicar com o provedor de identidade. Tente novamente.',
+      504,
+      'SUPABASE_TIMEOUT'
+    );
+  }
+
+  if (
+    normalizedCode === 'invalid_credentials' ||
+    normalizedCode === 'email_not_confirmed' ||
+    normalizedMessage.includes('invalid login credentials') ||
+    normalizedMessage.includes('invalid email or password') ||
+    normalizedMessage.includes('email not confirmed') ||
+    normalizedMessage.includes('user not found')
+  ) {
+    return new UnauthorizedError('Email ou senha incorretos');
+  }
+
+  if (normalizedMessage.includes('fetch failed') || normalizedMessage.includes('network')) {
+    return new AppError(
+      'Falha de rede ao comunicar com o provedor de identidade.',
+      502,
+      'SUPABASE_NETWORK_ERROR'
+    );
+  }
+
+  return new AppError(
+    'Não foi possível autenticar no provedor de identidade.',
+    502,
+    'SUPABASE_AUTH_ERROR'
+  );
+};
+
 const getSupabaseClient = () => {
   const config = resolveSupabaseConfig();
 
@@ -251,6 +290,55 @@ const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
 export const supabaseAuthService = {
   resolveEmailRedirectTo,
+
+  async signInWithPassword(email, password) {
+    const normalizedEmail = normalizeEmail(email);
+    const rawPassword = String(password || '');
+
+    if (!normalizedEmail || !rawPassword) {
+      throw new UnauthorizedError('Email ou senha incorretos');
+    }
+
+    const client = getSupabaseClient();
+
+    let data;
+    let error;
+
+    try {
+      ({ data, error } = await runSupabaseOperation(
+        {
+          operation: 'signInWithPassword',
+          context: { email: normalizedEmail },
+        },
+        () => client.auth.signInWithPassword({
+          email: normalizedEmail,
+          password: rawPassword,
+        })
+      ));
+    } catch (operationError) {
+      throw mapSupabaseSignInError(operationError);
+    }
+
+    if (error) {
+      throw mapSupabaseSignInError(error);
+    }
+
+    const resolvedUserId = data?.user?.id || null;
+
+    if (!resolvedUserId) {
+      throw new AppError(
+        'Não foi possível validar identidade no provedor externo.',
+        502,
+        'SUPABASE_AUTH_ERROR'
+      );
+    }
+
+    return {
+      userId: resolvedUserId,
+      email: normalizeEmail(data?.user?.email || normalizedEmail),
+      sessionExpiresAt: data?.session?.expires_at || null,
+    };
+  },
 
   async signUpForEmailVerification(email) {
     const normalizedEmail = normalizeEmail(email);

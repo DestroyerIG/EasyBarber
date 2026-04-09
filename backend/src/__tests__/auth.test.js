@@ -49,6 +49,8 @@ jest.unstable_mockModule('../services/cronService.js', () => ({
 const mockAuthRepository = {
   getClient: mockGetClient,
   findUserByEmail: jest.fn(),
+  findUserByEmailIncludingBlocked: jest.fn(),
+  findUserBySupabaseUserId: jest.fn(),
   findAnyUserByEmail: jest.fn(),
   findUserByEmailForSync: jest.fn(),
   createBarbershop: jest.fn(),
@@ -64,6 +66,9 @@ const mockAuthRepository = {
   clearEmailVerificationToken: jest.fn(),
   markEmailAsVerified: jest.fn(),
   markEmailAsVerifiedWithSupabaseIdentity: jest.fn(),
+  updateUserIdentitySync: jest.fn(),
+  upsertPlatformAdminUser: jest.fn(),
+  upsertTenantAdminUser: jest.fn(),
   saveRefreshToken: jest.fn(),
   revokeUserRefreshTokens: jest.fn(),
   findValidRefreshToken: jest.fn(),
@@ -84,6 +89,7 @@ jest.unstable_mockModule('../services/emailService.js', () => ({
 }));
 
 const mockSupabaseAuthService = {
+  signInWithPassword: jest.fn(),
   signUpForEmailVerification: jest.fn(),
   resendVerificationEmail: jest.fn(),
   verifyEmailToken: jest.fn(),
@@ -111,6 +117,11 @@ const resetMocks = () => {
   mockEmailService.sendAccountVerificationEmail.mockResolvedValue({
     delivered: true,
     mode: 'smtp',
+  });
+  mockSupabaseAuthService.signInWithPassword.mockResolvedValue({
+    userId: 'supabase-user-uuid',
+    email: 'joao@teste.com',
+    sessionExpiresAt: null,
   });
   mockSupabaseAuthService.signUpForEmailVerification.mockResolvedValue({
     userId: 'supabase-user-uuid',
@@ -237,7 +248,7 @@ describe('Auth API — /api/v1/auth', () => {
       const bcrypt = await import('bcryptjs');
       const hashedPassword = await bcrypt.default.hash('Senha123!', 12);
 
-      mockAuthRepository.findUserByEmail.mockResolvedValue({
+      mockAuthRepository.findUserByEmailIncludingBlocked.mockResolvedValue({
         id: 'user-uuid',
         email: 'joao@teste.com',
         password_hash: hashedPassword,
@@ -246,6 +257,8 @@ describe('Auth API — /api/v1/auth', () => {
         barbershop_name: 'Barbearia Teste',
         plan: 'basico',
         role: 'admin',
+        auth_provider: 'legacy',
+        blocked: false,
       });
       mockAuthRepository.revokeUserRefreshTokens.mockResolvedValue();
       mockAuthRepository.saveRefreshToken.mockResolvedValue();
@@ -264,7 +277,7 @@ describe('Auth API — /api/v1/auth', () => {
     });
 
     it('deve retornar 401 com email inexistente', async () => {
-      mockAuthRepository.findUserByEmail.mockResolvedValue(null);
+      mockAuthRepository.findUserByEmailIncludingBlocked.mockResolvedValue(null);
 
       const res = await request.post('/api/v1/auth/login').send({
         email: 'naoexiste@teste.com',
@@ -279,7 +292,7 @@ describe('Auth API — /api/v1/auth', () => {
       const bcrypt = await import('bcryptjs');
       const hashedPassword = await bcrypt.default.hash('Senha123!', 12);
 
-      mockAuthRepository.findUserByEmail.mockResolvedValue({
+      mockAuthRepository.findUserByEmailIncludingBlocked.mockResolvedValue({
         id: 'user-uuid',
         email: 'joao@teste.com',
         password_hash: hashedPassword,
@@ -287,6 +300,8 @@ describe('Auth API — /api/v1/auth', () => {
         barbershop_id: 'barbershop-uuid',
         plan: 'basico',
         role: 'admin',
+        auth_provider: 'legacy',
+        blocked: false,
       });
 
       const res = await request.post('/api/v1/auth/login').send({
@@ -302,7 +317,7 @@ describe('Auth API — /api/v1/auth', () => {
       const bcrypt = await import('bcryptjs');
       const hashedPassword = await bcrypt.default.hash('Senha123!', 12);
 
-      mockAuthRepository.findUserByEmail.mockResolvedValue({
+      mockAuthRepository.findUserByEmailIncludingBlocked.mockResolvedValue({
         id: 'user-uuid',
         email: 'joao@teste.com',
         password_hash: hashedPassword,
@@ -310,6 +325,8 @@ describe('Auth API — /api/v1/auth', () => {
         barbershop_id: 'barbershop-uuid',
         plan: 'basico',
         role: 'tenant_admin',
+        auth_provider: 'legacy',
+        blocked: false,
       });
 
       const res = await request.post('/api/v1/auth/login').send({
@@ -320,6 +337,103 @@ describe('Auth API — /api/v1/auth', () => {
       expect(res.status).toBe(403);
       expect(res.body.success).toBe(false);
       expect(res.body.error.code).toBe('EMAIL_NOT_VERIFIED');
+    });
+
+    it('deve autenticar usuário supabase e sincronizar identidade', async () => {
+      mockAuthRepository.findUserByEmailIncludingBlocked.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        password_hash: 'hash-local-compat',
+        email_verified: true,
+        barbershop_id: 'barbershop-uuid',
+        barbershop_name: 'Barbearia Teste',
+        plan: 'premium',
+        role: 'tenant_admin',
+        auth_provider: 'supabase',
+        supabase_user_id: 'supabase-user-uuid',
+        blocked: false,
+      });
+
+      mockAuthRepository.updateUserIdentitySync.mockResolvedValue({
+        id: 'user-uuid',
+        supabase_user_id: 'supabase-user-uuid',
+        auth_provider: 'supabase',
+      });
+      mockAuthRepository.revokeUserRefreshTokens.mockResolvedValue();
+      mockAuthRepository.saveRefreshToken.mockResolvedValue();
+      mockClientQuery.mockResolvedValue({ rows: [] });
+
+      const res = await request.post('/api/v1/auth/login').send({
+        email: 'joao@teste.com',
+        password: 'Senha123!',
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(mockSupabaseAuthService.signInWithPassword).toHaveBeenCalledWith(
+        'joao@teste.com',
+        'Senha123!'
+      );
+      expect(mockAuthRepository.updateUserIdentitySync).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          userId: 'user-uuid',
+          supabaseUserId: 'supabase-user-uuid',
+          authProvider: 'supabase',
+        })
+      );
+    });
+
+    it('deve retornar 401 quando houver divergência de identidade supabase', async () => {
+      mockAuthRepository.findUserByEmailIncludingBlocked.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        password_hash: 'hash-local-compat',
+        email_verified: true,
+        barbershop_id: 'barbershop-uuid',
+        plan: 'premium',
+        role: 'tenant_admin',
+        auth_provider: 'supabase',
+        supabase_user_id: 'supabase-user-id-diferente',
+        blocked: false,
+      });
+
+      mockSupabaseAuthService.signInWithPassword.mockResolvedValue({
+        userId: 'supabase-user-uuid',
+        email: 'joao@teste.com',
+        sessionExpiresAt: null,
+      });
+
+      const res = await request.post('/api/v1/auth/login').send({
+        email: 'joao@teste.com',
+        password: 'Senha123!',
+      });
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(mockAuthRepository.updateUserIdentitySync).not.toHaveBeenCalled();
+    });
+
+    it('deve retornar 401 para usuário bloqueado', async () => {
+      mockAuthRepository.findUserByEmailIncludingBlocked.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        password_hash: 'hash-local-compat',
+        email_verified: true,
+        barbershop_id: 'barbershop-uuid',
+        plan: 'premium',
+        role: 'tenant_admin',
+        auth_provider: 'legacy',
+        blocked: true,
+      });
+
+      const res = await request.post('/api/v1/auth/login').send({
+        email: 'joao@teste.com',
+        password: 'Senha123!',
+      });
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
     });
 
     it('deve retornar 400 com body vazio', async () => {

@@ -371,7 +371,13 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 Após concluir o preparo do banco em ambiente local, execute no diretório backend:
 
 ```bash
-npm run seed:test-users
+npm run seed:system-users
+```
+
+Para sincronizar apenas o admin da plataforma:
+
+```bash
+npm run seed:auth-admin
 ```
 
 As credenciais de desenvolvimento ficam centralizadas em README.md, na seção "Usuários de teste (ambiente local)".

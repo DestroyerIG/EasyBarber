@@ -32,6 +32,8 @@ cp frontend/.env.example frontend/.env.local
 
 Edite backend/.env e frontend/.env.local conforme seu ambiente.
 
+Para usar os scripts administrativos de seed (`seed:auth-admin` e `seed:system-users`), configure tambem `SUPABASE_SERVICE_ROLE_KEY` no backend/.env.
+
 ## 3) Preparar banco (obrigatório)
 
 Banco novo: execute SQL base + migrations na ordem abaixo:
@@ -93,7 +95,13 @@ npm run dev
 Para acesso rápido no ambiente local, execute no diretório backend:
 
 ```bash
-npm run seed:test-users
+npm run seed:system-users
+```
+
+Para sincronizar apenas o admin da plataforma:
+
+```bash
+npm run seed:auth-admin
 ```
 
 Após subir o projeto, utilize os usuários de teste documentados no README para acessar o sistema.

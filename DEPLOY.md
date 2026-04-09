@@ -42,6 +42,7 @@ AUTH_PROVIDER_MODE=dual
 EMAIL_VERIFICATION_TTL_MINUTES=60
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_ANON_KEY=<anon-key>
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 AUTH_SUPABASE_REDIRECT_TO=https://seu-frontend.com/auth/confirm
 # fallback legado (AUTH_PROVIDER_MODE=legacy)
 SMTP_HOST=smtp.seudominio.com
@@ -50,6 +51,8 @@ SMTP_USER=usuario_smtp
 SMTP_PASS=senha_smtp
 SMTP_FROM="EasyBarber <no-reply@seudominio.com>"
 ```
+
+Observacao: `SUPABASE_SERVICE_ROLE_KEY` e necessaria para scripts administrativos de sincronizacao de usuarios (`seed:auth-admin` e `seed:system-users`).
 
 ### Backend (billing/Stripe)
 

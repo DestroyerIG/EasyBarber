@@ -159,8 +159,11 @@ Se o e-mail não estiver verificado e a senha estiver correta, retorna:
 
 Observação:
 
-- Nesta fase, o login continua interno (`bcrypt + JWT próprio`).
-- O Supabase não é usado como provedor de login.
+- O login usa fluxo hibrido por `auth_provider`:
+  - `legacy`: valida senha via `bcrypt.compare(password, users.password_hash)`.
+  - `supabase`: valida senha via `supabase.auth.signInWithPassword` e sincroniza identidade local.
+- Em contas `supabase`, o backend valida divergencia entre `users.supabase_user_id` e o `user.id` retornado pelo Supabase.
+- Em sucesso de login `supabase`, o backend atualiza `users.last_identity_sync_at` e preenche `users.supabase_user_id` quando ausente.
 
 ### GET /auth/verify-email
 

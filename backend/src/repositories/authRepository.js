@@ -1,5 +1,96 @@
 import pool from '../config/database.js';
 
+const upsertManagedUser = async (client, {
+  barbershopId,
+  email,
+  passwordHash,
+  role,
+  supabaseUserId = null,
+  emailVerified = true,
+  authProvider = 'supabase',
+}) => {
+  try {
+    const result = await client.query(
+      `INSERT INTO users (
+         barbershop_id,
+         email,
+         password_hash,
+         role,
+         blocked,
+         blocked_at,
+         blocked_reason,
+         email_verified,
+         email_verified_at,
+         supabase_user_id,
+         auth_provider,
+         last_identity_sync_at
+       )
+       VALUES (
+         $1,
+         $2,
+         $3,
+         $4,
+         false,
+         NULL,
+         NULL,
+         $5,
+         CASE WHEN $5 THEN NOW() ELSE NULL END,
+         $6,
+         $7,
+         NOW()
+       )
+       ON CONFLICT (email)
+       DO UPDATE SET
+         barbershop_id = EXCLUDED.barbershop_id,
+         password_hash = EXCLUDED.password_hash,
+         role = EXCLUDED.role,
+         blocked = false,
+         blocked_at = NULL,
+         blocked_reason = NULL,
+         email_verified = EXCLUDED.email_verified,
+         email_verified_at = CASE
+           WHEN EXCLUDED.email_verified
+             THEN COALESCE(users.email_verified_at, NOW())
+           ELSE NULL
+         END,
+         supabase_user_id = COALESCE(EXCLUDED.supabase_user_id, users.supabase_user_id),
+         auth_provider = EXCLUDED.auth_provider,
+         last_identity_sync_at = NOW()
+       RETURNING id,
+                 email,
+                 role,
+                 barbershop_id,
+                 blocked,
+                 email_verified,
+                 supabase_user_id,
+                 auth_provider,
+                 last_identity_sync_at`,
+      [barbershopId, email, passwordHash, role, emailVerified, supabaseUserId, authProvider]
+    );
+
+    return result.rows[0] || null;
+  } catch (error) {
+    if (error?.code !== '42703') {
+      throw error;
+    }
+
+    const legacyResult = await client.query(
+      `INSERT INTO users (barbershop_id, email, password_hash, role, blocked)
+       VALUES ($1, $2, $3, $4, false)
+       ON CONFLICT (email)
+       DO UPDATE SET
+         barbershop_id = EXCLUDED.barbershop_id,
+         password_hash = EXCLUDED.password_hash,
+         role = EXCLUDED.role,
+         blocked = false
+       RETURNING id, email, role, barbershop_id, blocked`,
+      [barbershopId, email, passwordHash, role]
+    );
+
+    return legacyResult.rows[0] || null;
+  }
+};
+
 export const authRepository = {
   async findUserByEmail(email) {
     try {
@@ -39,6 +130,77 @@ export const authRepository = {
       );
 
       return legacyResult.rows[0] || null;
+    }
+  },
+
+  async findUserByEmailIncludingBlocked(email) {
+    try {
+      const result = await pool.query(
+        `SELECT u.id, u.email, u.password_hash, u.role, u.blocked,
+                u.email_verified, u.email_verified_at,
+                u.email_verification_token_hash, u.email_verification_expires_at, u.verification_sent_at,
+                u.supabase_user_id, u.auth_provider, u.last_identity_sync_at,
+                b.plan, b.name as barbershop_name, b.id as barbershop_id,
+                b.subscription_status,
+                b.subscription_current_period_end
+         FROM users u
+         JOIN barbershops b ON u.barbershop_id = b.id
+         WHERE LOWER(u.email) = LOWER($1) AND b.active = true
+         LIMIT 1`,
+        [email]
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code !== '42703') {
+        throw error;
+      }
+
+      const legacyResult = await pool.query(
+        `SELECT u.id, u.email, u.password_hash, u.role, u.blocked,
+                u.email_verified, u.email_verified_at,
+                u.email_verification_token_hash, u.email_verification_expires_at, u.verification_sent_at,
+                NULL::UUID as supabase_user_id,
+                'legacy'::VARCHAR as auth_provider,
+                NULL::TIMESTAMP as last_identity_sync_at,
+                b.plan, b.name as barbershop_name, b.id as barbershop_id,
+                b.subscription_status,
+                b.subscription_current_period_end
+         FROM users u
+         JOIN barbershops b ON u.barbershop_id = b.id
+         WHERE LOWER(u.email) = LOWER($1) AND b.active = true
+         LIMIT 1`,
+        [email]
+      );
+
+      return legacyResult.rows[0] || null;
+    }
+  },
+
+  async findUserBySupabaseUserId(supabaseUserId) {
+    try {
+      const result = await pool.query(
+        `SELECT u.id, u.email, u.password_hash, u.role, u.blocked,
+                u.email_verified, u.email_verified_at,
+                u.supabase_user_id, u.auth_provider, u.last_identity_sync_at,
+                b.plan, b.name as barbershop_name, b.id as barbershop_id,
+                b.subscription_status,
+                b.subscription_current_period_end
+         FROM users u
+         JOIN barbershops b ON u.barbershop_id = b.id
+         WHERE u.supabase_user_id = $1
+           AND b.active = true
+         LIMIT 1`,
+        [supabaseUserId]
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code === '42703') {
+        return null;
+      }
+
+      throw error;
     }
   },
 
@@ -427,6 +589,52 @@ export const authRepository = {
     );
 
     return result.rows[0] || null;
+  },
+
+  async updateUserIdentitySync(client, { userId, supabaseUserId, authProvider = 'supabase' }) {
+    try {
+      const result = await client.query(
+        `UPDATE users
+         SET supabase_user_id = COALESCE($2, supabase_user_id),
+             auth_provider = COALESCE($3, auth_provider),
+             last_identity_sync_at = NOW()
+         WHERE id = $1
+         RETURNING id, supabase_user_id, auth_provider, last_identity_sync_at`,
+        [userId, supabaseUserId, authProvider]
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code !== '42703') {
+        throw error;
+      }
+
+      const legacyResult = await client.query(
+        `UPDATE users
+         SET updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+         RETURNING id`,
+        [userId]
+      );
+
+      return legacyResult.rows[0] || null;
+    }
+  },
+
+  async upsertPlatformAdminUser(client, payload) {
+    return upsertManagedUser(client, {
+      ...payload,
+      role: 'platform_admin',
+      authProvider: 'supabase',
+    });
+  },
+
+  async upsertTenantAdminUser(client, payload) {
+    return upsertManagedUser(client, {
+      ...payload,
+      role: 'tenant_admin',
+      authProvider: 'supabase',
+    });
   },
 
   async saveRefreshToken(client, { userId, tokenHash, expiresAt }) {

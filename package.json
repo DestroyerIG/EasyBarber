@@ -9,7 +9,10 @@
     "build:backend": "cd backend && npm install",
     "build:frontend": "cd frontend && npm run build",
     "start:backend": "cd backend && npm start",
-    "start:frontend": "cd frontend && npm start"
+    "start:frontend": "cd frontend && npm start",
+    "seed:test-users": "cd backend && npm run seed:test-users",
+    "seed:auth-admin": "cd backend && npm run seed:auth-admin",
+    "seed:system-users": "cd backend && npm run seed:system-users"
   },
   "keywords": [
     "barbershop",

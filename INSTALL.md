@@ -62,6 +62,7 @@ AUTH_PROVIDER_MODE=dual
 EMAIL_VERIFICATION_TTL_MINUTES=60
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_ANON_KEY=<anon-key>
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 AUTH_SUPABASE_REDIRECT_TO=http://localhost:3000/auth/confirm
 
 # fallback legado (AUTH_PROVIDER_MODE=legacy)
@@ -71,6 +72,8 @@ SMTP_USER=usuario_smtp
 SMTP_PASS=senha_smtp
 SMTP_FROM="EasyBarber <no-reply@seudominio.com>"
 ```
+
+Observacao: `SUPABASE_SERVICE_ROLE_KEY` e obrigatoria para scripts administrativos de sincronizacao (`seed:auth-admin` e `seed:system-users`).
 
 ### Frontend
 
@@ -187,7 +190,13 @@ curl http://localhost:5000/health
 Para acesso rápido no ambiente local, execute no diretório backend:
 
 ```bash
-npm run seed:test-users
+npm run seed:system-users
+```
+
+Para sincronizar somente o admin da plataforma:
+
+```bash
+npm run seed:auth-admin
 ```
 
 As credenciais e permissões dos usuários padrão de desenvolvimento estão centralizadas em README.md, na seção "Usuários de teste (ambiente local)".

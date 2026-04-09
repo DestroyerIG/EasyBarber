@@ -674,9 +674,10 @@ export const authService = {
   async login(res, { email, password }) {
     const client = await authRepository.getClient();
     const normalizedEmail = normalizeEmail(email);
+    let refreshTransactionStarted = false;
 
     try {
-      const user = await authRepository.findUserByEmail(normalizedEmail);
+      const user = await authRepository.findUserByEmailIncludingBlocked(normalizedEmail);
 
       if (!user) {
         if (isSupabasePrimaryAuthProviderMode()) {
@@ -695,20 +696,136 @@ export const authService = {
           }
         }
 
-        logger.warn({ email: normalizedEmail }, 'Tentativa de login com email inexistente');
+        logger.warn(
+          {
+            email: normalizedEmail,
+            authMode: getAuthProviderMode(),
+            reason: 'user_not_found',
+          },
+          'Login negado: usuário não encontrado'
+        );
         throw new UnauthorizedError('Email ou senha incorretos');
       }
 
+      const authProvider = (
+        String(user.auth_provider || '').trim().toLowerCase() === 'supabase' ||
+        Boolean(user.supabase_user_id)
+      )
+        ? 'supabase'
+        : 'legacy';
       const normalizedRole = normalizeRole(user.role);
-      const isValid = await bcrypt.compare(password, user.password_hash);
 
-      if (!isValid) {
-        logger.warn({ email: normalizedEmail, userId: user.id }, 'Tentativa de login com senha incorreta');
+      if (user.blocked) {
+        logger.warn(
+          {
+            email: normalizedEmail,
+            userId: user.id,
+            authProvider,
+            reason: 'blocked_user',
+          },
+          'Login negado: usuário bloqueado'
+        );
         throw new UnauthorizedError('Email ou senha incorretos');
+      }
+
+      if (authProvider === 'supabase') {
+        logger.info(
+          {
+            email: normalizedEmail,
+            userId: user.id,
+            authProvider,
+          },
+          'Login em modo Supabase'
+        );
+
+        let supabaseIdentity;
+
+        try {
+          supabaseIdentity = await supabaseAuthService.signInWithPassword(normalizedEmail, password);
+        } catch (error) {
+          if (error instanceof UnauthorizedError) {
+            logger.warn(
+              {
+                email: normalizedEmail,
+                userId: user.id,
+                authProvider,
+                reason: 'invalid_password',
+              },
+              'Login negado: senha inválida no provedor Supabase'
+            );
+            throw new UnauthorizedError('Email ou senha incorretos');
+          }
+
+          throw error;
+        }
+
+        if (user.supabase_user_id && user.supabase_user_id !== supabaseIdentity.userId) {
+          logger.error(
+            {
+              email: normalizedEmail,
+              userId: user.id,
+              authProvider,
+              reason: 'identity_mismatch',
+              expectedSupabaseUserId: user.supabase_user_id,
+              providedSupabaseUserId: supabaseIdentity.userId,
+            },
+            'Login negado: divergência de identidade Supabase'
+          );
+          throw new UnauthorizedError('Email ou senha incorretos');
+        }
+
+        await authRepository.updateUserIdentitySync(client, {
+          userId: user.id,
+          supabaseUserId: supabaseIdentity.userId,
+          authProvider: 'supabase',
+        });
+
+        logger.info(
+          {
+            email: normalizedEmail,
+            userId: user.id,
+            authProvider,
+            supabaseUserId: supabaseIdentity.userId,
+            identityLinked: !user.supabase_user_id,
+          },
+          'Sincronização de identidade Supabase atualizada no login'
+        );
+      } else {
+        logger.info(
+          {
+            email: normalizedEmail,
+            userId: user.id,
+            authProvider,
+          },
+          'Login em modo legado'
+        );
+
+        const isValid = await bcrypt.compare(password, user.password_hash || '');
+
+        if (!isValid) {
+          logger.warn(
+            {
+              email: normalizedEmail,
+              userId: user.id,
+              authProvider,
+              reason: 'invalid_password',
+            },
+            'Login negado: senha inválida'
+          );
+          throw new UnauthorizedError('Email ou senha incorretos');
+        }
       }
 
       if (!user.email_verified) {
-        logger.warn({ email: normalizedEmail, userId: user.id }, 'Tentativa de login com e-mail não verificado');
+        logger.warn(
+          {
+            email: normalizedEmail,
+            userId: user.id,
+            authProvider,
+            reason: 'email_not_verified',
+          },
+          'Login negado: e-mail não verificado'
+        );
         throw new AppError(
           'Conta não verificada. Verifique seu e-mail antes de fazer login.',
           403,
@@ -717,6 +834,7 @@ export const authService = {
       }
 
       await client.query('BEGIN');
+      refreshTransactionStarted = true;
       await authRepository.revokeUserRefreshTokens(client, user.id);
 
       const accessToken = generateAccessToken({
@@ -732,10 +850,18 @@ export const authService = {
       const refreshToken = await generateRefreshToken(client, user.id);
 
       await client.query('COMMIT');
+      refreshTransactionStarted = false;
 
       setAuthCookies(res, accessToken, refreshToken);
 
-      logger.info({ userId: user.id, email: normalizedEmail }, 'Login realizado');
+      logger.info(
+        {
+          userId: user.id,
+          email: normalizedEmail,
+          authProvider,
+        },
+        'Login realizado'
+      );
 
       return {
         token: accessToken,
@@ -751,7 +877,9 @@ export const authService = {
         }),
       };
     } catch (error) {
-      await client.query('ROLLBACK');
+      if (refreshTransactionStarted) {
+        await client.query('ROLLBACK');
+      }
       throw error;
     } finally {
       client.release();

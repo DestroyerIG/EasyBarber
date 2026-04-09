@@ -121,6 +121,7 @@ EMAIL_VERIFICATION_TTL_MINUTES=60
 # Supabase Auth (cadastro/verificação)
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_ANON_KEY=<anon-key>
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 AUTH_SUPABASE_REDIRECT_TO=http://localhost:3000/auth/confirm
 
 # SMTP (fallback legado em AUTH_PROVIDER_MODE=legacy)
@@ -230,10 +231,16 @@ npm run dev
 Antes de utilizar os usuários abaixo, execute:
 
 ```bash
-npm run seed:test-users
+npm run seed:system-users
 ```
 
 O comando deve ser executado no diretório backend.
+
+Para sincronizar apenas o admin da plataforma:
+
+```bash
+npm run seed:auth-admin
+```
 
 ### Admin (plataforma)
 
@@ -250,13 +257,13 @@ Permissões:
 ### Usuário de teste (tenant)
 
 - Email: teste@easybarber.com
-- Senha: 12345678
-- Role: employee
+- Senha: @Easyconnect08
+- Role: tenant_admin
 
 Contexto:
 
-- Barbearia: EasyBarber Teste
-- Plano: profissional
+- Barbearia: EasyBarber Teste Premium
+- Plano: premium
 - Status da assinatura: active
 
 Acesso liberado:
@@ -284,7 +291,7 @@ Acesso liberado:
 2. Em `AUTH_PROVIDER_MODE=dual|supabase`, o cadastro é iniciado primeiro no Supabase Auth e salvo como pendência interna.
 3. Usuário confirma no link do Supabase (callback em /auth/confirm), que aciona /api/auth/verify-email.
 4. A API valida `token_hash` no Supabase, sincroniza `email_verified_at`, `supabase_user_id`, `auth_provider='supabase'` e cria/sincroniza usuário interno.
-5. Somente após verificação, login em /api/v1/auth/login (bcrypt + JWT interno) gera cookies access_token e refresh_token.
+5. Somente após verificação, login em /api/v1/auth/login segue fluxo hibrido: `auth_provider='legacy'` valida via bcrypt local, `auth_provider='supabase'` valida no Supabase Auth e sincroniza identidade local (`supabase_user_id`, `last_identity_sync_at`).
 6. Frontend consulta /api/v1/auth/me para montar sessão e usa /api/v1/auth/refresh em expiração do access token.
 7. Rotas protegidas exigem auth, role e feature permission.
 
@@ -358,6 +365,8 @@ npm run build:backend
 npm run build:frontend
 npm run start:backend
 npm run start:frontend
+npm run seed:auth-admin
+npm run seed:system-users
 ```
 
 Backend:
@@ -368,6 +377,8 @@ npm run dev
 npm start
 npm test
 npm run test:watch
+npm run seed:auth-admin
+npm run seed:system-users
 ```
 
 Frontend:
@@ -398,7 +409,7 @@ npm run lint
 As inconsistências operacionais críticas foram corrigidas no estado atual do projeto:
 
 - backend/.env.example usa DB_CONNECT_TIMEOUT.
-- backend/.env.example inclui AUTH_PROVIDER_MODE, SUPABASE_* e SMTP_* (fallback legado).
+- backend/.env.example inclui AUTH_PROVIDER_MODE, SUPABASE_* (incluindo SERVICE_ROLE para scripts administrativos) e SMTP_* (fallback legado).
 - docker-compose.yml usa FRONTEND_URL no backend e NEXT_PUBLIC_API_URL com /api/v1 no frontend.
 - setup.ps1 aplica database.sql + migration_v3..v11.
 - fix-env.ps1 remove variáveis legadas WHATSAPP_API_* e mantém defaults compatíveis com o backend atual.
