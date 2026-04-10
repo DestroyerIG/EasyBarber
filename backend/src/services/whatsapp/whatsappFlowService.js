@@ -1,14 +1,9 @@
 import logger from '../../utils/logger.js';
 import pool from '../../config/database.js';
 import { sendWhatsAppMessage, buildWelcomeMessage } from './whatsappMessageService.js';
+import { normalizeWhatsAppNumber } from '../../utils/whatsapp.js';
 
-const normalizePhone = (value) => String(value || '').replace(/\D/g, '');
 const normalizeText = (value) => String(value || '').trim();
-
-const isValidPhone = (phone) => {
-  const digits = normalizePhone(phone);
-  return digits.length >= 10 && digits.length <= 15;
-};
 
 const normalizeChoice = (text) => {
   const cleaned = normalizeText(text).toLowerCase();
@@ -229,7 +224,7 @@ const extractPhoneFromWebhook = (payload = {}) => {
   ];
 
   for (const candidate of candidates) {
-    const normalized = normalizePhone(candidate);
+    const normalized = normalizeWhatsAppNumber(candidate);
     if (normalized) {
       return normalized;
     }
@@ -304,11 +299,11 @@ const isFromMe = (payload = {}) => {
 };
 
 export const handleIncomingMessage = async (phone, text) => {
-  const normalizedPhone = normalizePhone(phone);
+  const normalizedPhone = normalizeWhatsAppNumber(phone);
   const normalizedText = normalizeText(text);
 
   try {
-    if (!normalizedPhone || !isValidPhone(normalizedPhone)) {
+    if (!normalizedPhone) {
       logger.warn({ phone }, 'Mensagem recebida ignorada: telefone invalido');
       return { ok: false, ignored: true, reason: 'invalid_phone' };
     }

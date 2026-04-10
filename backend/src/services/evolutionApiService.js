@@ -1,6 +1,9 @@
 import logger from '../utils/logger.js';
+import { normalizeWhatsAppNumber } from '../utils/whatsapp.js';
 
-const DEFAULT_TIMEOUT_MS = Number.parseInt(process.env.EVOLUTION_API_TIMEOUT_MS || '10000', 10);
+const DEFAULT_TIMEOUT_MS = 10000;
+const DEFAULT_RETRY_ATTEMPTS = 1;
+const MAX_RETRY_ATTEMPTS = 3;
 
 class EvolutionApiError extends Error {
   constructor(message, { status = null, details = null, code = 'EVOLUTION_API_ERROR' } = {}) {
@@ -17,13 +20,30 @@ const getConfig = () => {
   const apiKey = process.env.EVOLUTION_API_KEY || '';
   const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'easybarber';
   const webhookUrl = process.env.EVOLUTION_WEBHOOK_URL || '';
+  const timeoutFromEnv = Number.parseInt(
+    process.env.EVOLUTION_API_TIMEOUT_MS || String(DEFAULT_TIMEOUT_MS),
+    10
+  );
+  const retryFromEnv = Number.parseInt(
+    process.env.EVOLUTION_API_RETRY_ATTEMPTS || String(DEFAULT_RETRY_ATTEMPTS),
+    10
+  );
+
+  const timeoutMs = Number.isFinite(timeoutFromEnv) && timeoutFromEnv > 0
+    ? timeoutFromEnv
+    : DEFAULT_TIMEOUT_MS;
+
+  const retryAttempts = Number.isFinite(retryFromEnv)
+    ? Math.min(Math.max(retryFromEnv, 0), MAX_RETRY_ATTEMPTS)
+    : DEFAULT_RETRY_ATTEMPTS;
 
   return {
     baseURL,
     apiKey,
     instanceName,
     webhookUrl,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
+    timeoutMs,
+    retryAttempts,
   };
 };
 
@@ -50,6 +70,7 @@ const buildHeaders = () => {
 
   return {
     'Content-Type': 'application/json',
+    Accept: 'application/json',
     apikey: apiKey,
   };
 };
@@ -90,72 +111,128 @@ const extractErrorMessage = (payload) => {
   return null;
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRetriableStatus = (status) => [408, 429, 500, 502, 503, 504].includes(status);
+
 const request = async ({ method, path, body = undefined, expectedStatuses = [200, 201] }) => {
   ensureConfigured();
 
-  const { baseURL, timeoutMs } = getConfig();
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const { baseURL, timeoutMs, retryAttempts } = getConfig();
+  const url = `${baseURL}${normalizePath(path)}`;
+  const maxAttempts = retryAttempts + 1;
+  let lastError = null;
 
-  try {
-    const url = `${baseURL}${normalizePath(path)}`;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    logger.debug(
-      {
-        method,
-        url,
-        hasBody: body !== undefined,
-        bodyKeys: body && typeof body === 'object' ? Object.keys(body) : [],
-      },
-      'Evolution API request'
-    );
-
-    const response = await fetch(url, {
-      method,
-      headers: buildHeaders(),
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: controller.signal,
-    });
-
-    const payload = await parseResponseBody(response);
-
-    if (!expectedStatuses.includes(response.status)) {
-      const message = extractErrorMessage(payload) || `Evolution API respondeu com status ${response.status}`;
-
-      logger.error(
+    try {
+      logger.debug(
         {
-          status: response.status,
-          payload,
-          url,
           method,
+          url,
+          hasBody: body !== undefined,
+          bodyKeys: body && typeof body === 'object' ? Object.keys(body) : [],
+          attempt,
+          maxAttempts,
         },
-        'Erro na Evolution API'
+        'Evolution API request'
       );
 
-      throw new EvolutionApiError(message, {
-        status: response.status,
-        details: payload,
+      const response = await fetch(url, {
+        method,
+        headers: buildHeaders(),
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: controller.signal,
       });
-    }
 
-    return payload;
-  } catch (error) {
-    if (error?.name === 'AbortError') {
-      throw new EvolutionApiError('Timeout ao chamar Evolution API', {
-        code: 'EVOLUTION_TIMEOUT',
-      });
-    }
+      const payload = await parseResponseBody(response);
 
-    if (error instanceof EvolutionApiError) {
-      throw error;
-    }
+      if (!expectedStatuses.includes(response.status)) {
+        const message = extractErrorMessage(payload) || `Evolution API respondeu com status ${response.status}`;
+        const apiError = new EvolutionApiError(message, {
+          status: response.status,
+          details: payload,
+        });
 
-    throw new EvolutionApiError(error?.message || 'Falha de comunicacao com Evolution API', {
-      code: 'EVOLUTION_NETWORK_ERROR',
-    });
-  } finally {
-    clearTimeout(timeoutId);
+        if (attempt < maxAttempts && isRetriableStatus(response.status)) {
+          logger.warn(
+            {
+              status: response.status,
+              method,
+              url,
+              attempt,
+              maxAttempts,
+            },
+            'Erro transiente na Evolution API, tentando novamente'
+          );
+          lastError = apiError;
+          await sleep(250 * attempt);
+          continue;
+        }
+
+        logger.error(
+          {
+            status: response.status,
+            payload,
+            url,
+            method,
+            attempt,
+          },
+          'Erro na Evolution API'
+        );
+
+        throw apiError;
+      }
+
+      return payload;
+    } catch (error) {
+      const normalizedError =
+        error?.name === 'AbortError'
+          ? new EvolutionApiError('Timeout ao chamar Evolution API', {
+              code: 'EVOLUTION_TIMEOUT',
+            })
+          : error instanceof EvolutionApiError
+            ? error
+            : new EvolutionApiError(error?.message || 'Falha de comunicacao com Evolution API', {
+                code: 'EVOLUTION_NETWORK_ERROR',
+              });
+
+      const shouldRetry =
+        attempt < maxAttempts &&
+        (
+          normalizedError.code === 'EVOLUTION_TIMEOUT' ||
+          normalizedError.code === 'EVOLUTION_NETWORK_ERROR' ||
+          isRetriableStatus(normalizedError.status || 0)
+        );
+
+      if (shouldRetry) {
+        logger.warn(
+          {
+            code: normalizedError.code,
+            status: normalizedError.status,
+            method,
+            url,
+            attempt,
+            maxAttempts,
+          },
+          'Falha transiente ao chamar Evolution API, tentando novamente'
+        );
+        lastError = normalizedError;
+        await sleep(250 * attempt);
+        continue;
+      }
+
+      throw normalizedError;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
+
+  throw lastError || new EvolutionApiError('Falha de comunicacao com Evolution API', {
+    code: 'EVOLUTION_NETWORK_ERROR',
+  });
 };
 
 const requestWithFallback = async (candidates, operationName, fallbackStatuses = [404, 405, 501]) => {
@@ -187,7 +264,11 @@ const requestWithFallback = async (candidates, operationName, fallbackStatuses =
   throw lastError || new EvolutionApiError(`${operationName} indisponivel`);
 };
 
-const requestTryingPayloads = async (candidates, operationName) => {
+const requestTryingPayloads = async (
+  candidates,
+  operationName,
+  fallbackStatuses = [400, 409, 415, 422]
+) => {
   let lastError = null;
 
   for (const candidate of candidates) {
@@ -198,7 +279,7 @@ const requestTryingPayloads = async (candidates, operationName) => {
 
       if (
         error instanceof EvolutionApiError &&
-        [400, 404, 405, 409, 415, 422, 501].includes(error.status || 0)
+        fallbackStatuses.includes(error.status || 0)
       ) {
         logger.debug(
           {
@@ -208,7 +289,7 @@ const requestTryingPayloads = async (candidates, operationName) => {
             status: error.status,
             bodyKeys: candidate?.body ? Object.keys(candidate.body) : [],
           },
-          'Tentando proximo payload/endpoint da Evolution API'
+          'Tentando proximo payload da Evolution API'
         );
         continue;
       }
@@ -227,16 +308,15 @@ const unwrapInstancesList = (payload) => {
   return [];
 };
 
-const normalizePhone = (value) => String(value || '').replace(/\D/g, '');
-
 export const getEvolutionConfig = () => {
-  const { baseURL, instanceName, webhookUrl, timeoutMs } = getConfig();
+  const { baseURL, instanceName, webhookUrl, timeoutMs, retryAttempts } = getConfig();
 
   return {
     baseURL,
     instanceName,
     webhookUrl,
     timeoutMs,
+    retryAttempts,
   };
 };
 
@@ -360,7 +440,7 @@ export const logoutInstance = async () => {
 
 export const sendTextMessage = async ({ phone, text }) => {
   const { instanceName } = getConfig();
-  const normalizedPhone = normalizePhone(phone);
+  const normalizedPhone = normalizeWhatsAppNumber(phone);
   const normalizedText = String(text || '').trim();
 
   if (!normalizedPhone) {
@@ -388,28 +468,7 @@ export const sendTextMessage = async ({ phone, text }) => {
     },
     {
       method: 'POST',
-      path: '/message/sendText',
-      body: {
-        number: normalizedPhone,
-        textMessage: {
-          text: normalizedText,
-        },
-      },
-    },
-    {
-      method: 'POST',
       path: `/message/sendText/${instanceName}`,
-      body: {
-        instanceName,
-        number: normalizedPhone,
-        textMessage: {
-          text: normalizedText,
-        },
-      },
-    },
-    {
-      method: 'POST',
-      path: '/message/sendText',
       body: {
         instanceName,
         number: normalizedPhone,
@@ -420,7 +479,7 @@ export const sendTextMessage = async ({ phone, text }) => {
     },
   ];
 
-  return requestTryingPayloads(candidates, 'sendTextMessage');
+  return requestTryingPayloads(candidates, 'sendTextMessage', [400, 409, 415, 422]);
 };
 
 export { EvolutionApiError };

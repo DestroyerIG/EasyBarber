@@ -16,11 +16,10 @@ import { requireFeature } from '../middleware/subscriptionGuard.js';
 import pool from '../config/database.js';
 import { sendSuccess, sendCreated, sendError } from '../utils/response.js';
 import logger from '../utils/logger.js';
+import { normalizeWhatsAppNumber } from '../utils/whatsapp.js';
 
 const router = express.Router();
 const waProtected = [authMiddleware, requireTenantRoles, requireFeature('whatsapp_automation')];
-
-const normalizeDigits = (value) => String(value || '').replace(/\D/g, '');
 
 const extractWebhookText = (payload) => {
   const directText = [
@@ -51,7 +50,7 @@ const extractWebhookText = (payload) => {
 };
 
 const extractWebhookPhone = (payload) => {
-  const jid = [
+  const phoneCandidate = [
     payload?.key?.remoteJid,
     payload?.data?.key?.remoteJid,
     payload?.data?.remoteJid,
@@ -65,13 +64,7 @@ const extractWebhookPhone = (payload) => {
     payload?.messages?.[0]?.key?.remoteJid,
   ].find((value) => typeof value === 'string' && value.trim());
 
-  if (!jid) return null;
-  if (jid.includes('@g.us') || jid === 'status@broadcast') return null;
-
-  const digits = normalizeDigits(jid.split('@')[0]);
-  if (!digits || digits.length < 10 || digits.length > 15) return null;
-
-  return digits;
+  return normalizeWhatsAppNumber(phoneCandidate);
 };
 
 const extractWebhookFromMe = (payload) => {
@@ -298,7 +291,7 @@ router.post('/disconnect', ...waProtected, async (req, res, next) => {
 router.post('/send', ...waProtected, async (req, res, next) => {
   try {
     const { phone, message } = req.body || {};
-    const normalizedPhone = normalizeDigits(phone);
+    const normalizedPhone = normalizeWhatsAppNumber(phone);
     const normalizedMessage = String(message || '').trim();
 
     if (!normalizedPhone || !normalizedMessage) {
@@ -306,7 +299,7 @@ router.post('/send', ...waProtected, async (req, res, next) => {
         res,
         400,
         'WHATSAPP_SEND_INVALID_PAYLOAD',
-        'Campos phone e message sao obrigatorios'
+        'Campos phone valido e message sao obrigatorios'
       );
     }
 

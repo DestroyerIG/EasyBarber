@@ -10,6 +10,7 @@ import {
   EvolutionApiError,
 } from './evolutionApiService.js';
 import logger from '../utils/logger.js';
+import { normalizeWhatsAppNumber } from '../utils/whatsapp.js';
 
 const STATUS = {
   UNAVAILABLE: 'unavailable',
@@ -47,31 +48,6 @@ const updateUnavailableState = (error) => {
     connectedName: null,
     error: error?.message || 'Evolution API indisponivel',
   });
-};
-
-const normalizeDigits = (value) => String(value || '').replace(/\D/g, '');
-
-const normalizeIncomingPhone = (value) => {
-  if (!value) return null;
-
-  const raw = String(value).trim();
-  if (!raw) return null;
-
-  // Ex.: 5511999999999@s.whatsapp.net
-  if (raw.includes('@')) {
-    const jidNumber = raw.split('@')[0];
-    const digits = normalizeDigits(jidNumber);
-    return digits || null;
-  }
-
-  // Ex.: whatsapp:+5511999999999
-  const digits = normalizeDigits(raw);
-  return digits || null;
-};
-
-const looksLikeValidPhone = (value) => {
-  const digits = normalizeIncomingPhone(value);
-  return Boolean(digits && digits.length >= 10 && digits.length <= 15);
 };
 
 const isLikelyRenderableImageBase64 = (value) => {
@@ -181,7 +157,7 @@ const extractIdentity = (payload) => {
     getNested(payload, ['data', 'pushName']),
   ].find((value) => typeof value === 'string' && value.trim());
 
-  const number = normalizeIncomingPhone(numberCandidate);
+  const number = normalizeWhatsAppNumber(numberCandidate);
 
   return {
     number,
@@ -408,16 +384,11 @@ export const disconnectWhatsApp = async () => {
 };
 
 export const sendWhatsAppText = async (phone, message) => {
-  const normalizedPhone = normalizeIncomingPhone(phone);
+  const normalizedPhone = normalizeWhatsAppNumber(phone);
   const normalizedMessage = String(message || '').trim();
 
   if (!normalizedPhone) {
     logger.warn({ phone }, 'Envio WhatsApp ignorado: telefone invalido');
-    return false;
-  }
-
-  if (!looksLikeValidPhone(normalizedPhone)) {
-    logger.warn({ phone, normalizedPhone }, 'Envio WhatsApp ignorado: telefone fora do padrao esperado');
     return false;
   }
 
