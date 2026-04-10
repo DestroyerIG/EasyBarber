@@ -210,6 +210,99 @@ const buildInvalidOptionMessage = async () => {
   ].join('\n');
 };
 
+const extractPhoneFromWebhook = (payload = {}) => {
+  const candidates = [
+    payload?.phone,
+    payload?.from,
+    payload?.sender,
+    payload?.senderNumber,
+    payload?.number,
+    payload?.key?.remoteJid,
+    payload?.key?.participant,
+    payload?.data?.from,
+    payload?.data?.sender,
+    payload?.data?.phone,
+    payload?.data?.key?.remoteJid,
+    payload?.message?.from,
+    payload?.message?.sender,
+    payload?.message?.phone,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizePhone(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return '';
+};
+
+const extractTextFromWebhook = (payload = {}) => {
+  const candidates = [
+    payload?.text,
+    payload?.body,
+    payload?.message,
+    payload?.content,
+    payload?.data?.text,
+    payload?.data?.body,
+    payload?.data?.message,
+    payload?.data?.content,
+    payload?.message?.text,
+    payload?.message?.body,
+    payload?.message?.conversation,
+    payload?.message?.extendedTextMessage?.text,
+    payload?.data?.message?.conversation,
+    payload?.data?.message?.extendedTextMessage?.text,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeText(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return '';
+};
+
+const isIncomingMessageEvent = (payload = {}) => {
+  const eventName = String(
+    payload?.event ||
+      payload?.type ||
+      payload?.data?.event ||
+      payload?.data?.type ||
+      ''
+  ).toLowerCase();
+
+  if (!eventName) {
+    return true;
+  }
+
+  const allowedEvents = [
+    'messages.upsert',
+    'message.upsert',
+    'message',
+    'messages',
+    'new_message',
+    'incoming_message',
+    'message_received',
+    'messageset',
+    'messages-set',
+  ];
+
+  return allowedEvents.includes(eventName);
+};
+
+const isFromMe = (payload = {}) => {
+  return Boolean(
+    payload?.fromMe === true ||
+      payload?.key?.fromMe === true ||
+      payload?.data?.fromMe === true ||
+      payload?.data?.key?.fromMe === true
+  );
+};
+
 export const handleIncomingMessage = async (phone, text) => {
   const normalizedPhone = normalizePhone(phone);
   const normalizedText = normalizeText(text);
@@ -328,5 +421,68 @@ export const handleIncomingMessage = async (phone, text) => {
       reason: 'flow_error',
       error: error?.message || 'Erro interno no fluxo WhatsApp',
     };
+  }
+};
+
+export const handleWebhook = async (req, res) => {
+  try {
+    const payload = req.body ?? {};
+
+    logger.info({ payload }, 'Webhook WhatsApp recebido');
+
+    if (isFromMe(payload)) {
+      return res.status(200).json({
+        success: true,
+        message: 'Evento ignorado: mensagem enviada pela própria instância.',
+      });
+    }
+
+    if (!isIncomingMessageEvent(payload)) {
+      return res.status(200).json({
+        success: true,
+        message: 'Evento ignorado: não é mensagem de entrada.',
+      });
+    }
+
+    const phone = extractPhoneFromWebhook(payload);
+    const text = extractTextFromWebhook(payload);
+
+    if (!phone) {
+      logger.warn({ payload }, 'Webhook ignorado: telefone não identificado');
+      return res.status(200).json({
+        success: true,
+        message: 'Webhook recebido, mas sem telefone identificável.',
+      });
+    }
+
+    if (!text) {
+      logger.warn({ payload, phone }, 'Webhook ignorado: texto não identificado');
+      return res.status(200).json({
+        success: true,
+        message: 'Webhook recebido, mas sem texto processável.',
+      });
+    }
+
+    const result = await handleIncomingMessage(phone, text);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        phone,
+        text,
+        result,
+      },
+    });
+  } catch (error) {
+    logger.error({ err: error, body: req.body }, 'Erro ao processar webhook WhatsApp');
+
+    return res.status(500).json({
+      success: false,
+      message: 'Erro ao processar webhook WhatsApp',
+      error: {
+        code: 'WHATSAPP_WEBHOOK_ERROR',
+        message: error?.message || 'Erro interno no webhook WhatsApp',
+      },
+    });
   }
 };
