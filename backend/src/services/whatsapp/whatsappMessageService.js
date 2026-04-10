@@ -8,18 +8,37 @@ import logger from '../../utils/logger.js';
 /**
  * Envia mensagem via provider configurado (Evolution API).
  */
-export const sendWhatsAppMessage = async (phone, message) => {
+export const sendWhatsAppMessage = async (phone, message, context = {}) => {
   try {
-    const sent = await sendWhatsAppText(phone, message);
+    const sent = await sendWhatsAppText(phone, message, context);
     if (!sent) {
-      logger.warn({ phone }, 'Mensagem nao enviada pelo provider WhatsApp');
+      logger.warn(
+        {
+          phone,
+          remoteJidOriginal: context?.remoteJidOriginal || null,
+        },
+        'Mensagem nao enviada pelo provider WhatsApp'
+      );
       return false;
     }
 
-    logger.debug({ phone }, 'Mensagem enviada');
+    logger.debug(
+      {
+        phone,
+        remoteJidOriginal: context?.remoteJidOriginal || null,
+      },
+      'Mensagem enviada'
+    );
     return true;
   } catch (error) {
-    logger.error({ err: error, phone }, 'Erro ao enviar mensagem WhatsApp');
+    logger.error(
+      {
+        err: error,
+        phone,
+        remoteJidOriginal: context?.remoteJidOriginal || null,
+      },
+      'Erro ao enviar mensagem WhatsApp'
+    );
     return false;
   }
 };

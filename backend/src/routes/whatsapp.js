@@ -1,5 +1,5 @@
 import express from 'express';
-import { handleWebhook, handleIncomingMessage } from '../services/whatsapp/index.js';
+import { handleIncomingMessage } from '../services/whatsapp/index.js';
 import {
   getWhatsAppStatus,
   connectWhatsApp,
@@ -16,7 +16,10 @@ import { requireFeature } from '../middleware/subscriptionGuard.js';
 import pool from '../config/database.js';
 import { sendSuccess, sendCreated, sendError } from '../utils/response.js';
 import logger from '../utils/logger.js';
-import { normalizeWhatsAppNumber } from '../utils/whatsapp.js';
+import {
+  normalizeWhatsAppNumber,
+  extractWhatsAppPhoneFromWebhook,
+} from '../utils/whatsapp.js';
 
 const router = express.Router();
 const waProtected = [authMiddleware, requireTenantRoles, requireFeature('whatsapp_automation')];
@@ -49,27 +52,62 @@ const extractWebhookText = (payload) => {
   return directText ? directText.trim() : null;
 };
 
-const extractWebhookPhone = (payload) => {
-  const phoneCandidate = [
-    payload?.key?.remoteJid,
-    payload?.data?.key?.remoteJid,
-    payload?.data?.remoteJid,
-    payload?.remoteJid,
-    payload?.jid,
-    payload?.from,
-    payload?.data?.from,
-    payload?.sender,
-    payload?.phone,
-    payload?.data?.messages?.[0]?.key?.remoteJid,
-    payload?.messages?.[0]?.key?.remoteJid,
-  ].find((value) => typeof value === 'string' && value.trim());
+const normalizeWebhookEventPayload = (payload = {}, forcedEvent = null) => {
+  const dataNode = payload?.data && typeof payload.data === 'object' ? payload.data : null;
+  const dataMessage = dataNode?.message && typeof dataNode.message === 'object' ? dataNode.message : null;
+  const dataUpsertMessage =
+    Array.isArray(dataNode?.messages) && dataNode.messages[0] && typeof dataNode.messages[0] === 'object'
+      ? dataNode.messages[0]
+      : null;
+  const rootUpsertMessage =
+    Array.isArray(payload?.messages) && payload.messages[0] && typeof payload.messages[0] === 'object'
+      ? payload.messages[0]
+      : null;
+  const messageNode = dataUpsertMessage || rootUpsertMessage || dataMessage;
 
-  return normalizeWhatsAppNumber(phoneCandidate);
+  const key =
+    messageNode?.key ||
+    payload?.key ||
+    payload?.message?.key ||
+    dataNode?.key ||
+    null;
+
+  const message =
+    messageNode?.message ||
+    payload?.message ||
+    dataNode?.message ||
+    null;
+
+  return {
+    ...payload,
+    ...(dataNode || {}),
+    ...(messageNode || {}),
+    key: key || undefined,
+    message: message || undefined,
+    sender: payload?.sender || dataNode?.sender || messageNode?.sender || null,
+    from: payload?.from || dataNode?.from || messageNode?.from || null,
+    event:
+      forcedEvent ||
+      payload?.event ||
+      payload?.type ||
+      dataNode?.event ||
+      dataNode?.type ||
+      null,
+    type:
+      payload?.type ||
+      payload?.event ||
+      dataNode?.type ||
+      dataNode?.event ||
+      forcedEvent ||
+      null,
+  };
 };
 
 const extractWebhookFromMe = (payload) => {
   const candidates = [
+    payload?.fromMe,
     payload?.key?.fromMe,
+    payload?.data?.fromMe,
     payload?.data?.key?.fromMe,
     payload?.data?.messages?.[0]?.key?.fromMe,
     payload?.messages?.[0]?.key?.fromMe,
@@ -78,28 +116,56 @@ const extractWebhookFromMe = (payload) => {
   return candidates.find((value) => typeof value === 'boolean') ?? false;
 };
 
+const hasWebhookRemoteJid = (payload) => {
+  return Boolean(
+    payload?.key?.remoteJid ||
+      payload?.message?.key?.remoteJid ||
+      payload?.data?.key?.remoteJid
+  );
+};
+
 const mapWebhookIncomingMessage = (payload) => {
-  const eventName = String(payload?.event || payload?.type || '').toLowerCase();
+  const normalizedPayload = normalizeWebhookEventPayload(payload);
+  const eventName = String(normalizedPayload?.event || normalizedPayload?.type || '').toLowerCase();
   const relevantEvent = !eventName || eventName.includes('message') || eventName.includes('upsert');
 
   if (!relevantEvent) {
     return null;
   }
 
-  const fromMe = extractWebhookFromMe(payload);
+  const fromMe = extractWebhookFromMe(normalizedPayload);
   if (fromMe) {
     return null;
   }
 
-  const phone = extractWebhookPhone(payload);
-  const text = extractWebhookText(payload);
-
-  if (!phone || !text) {
+  if (eventName.includes('upsert') && !hasWebhookRemoteJid(normalizedPayload)) {
+    logger.warn(
+      {
+        event: eventName,
+        sender: normalizedPayload?.sender || null,
+        from: normalizedPayload?.from || null,
+      },
+      'Webhook ignorado: messages-upsert sem remoteJid valido'
+    );
     return null;
   }
 
-  return { phone, text };
+  const text = extractWebhookText(normalizedPayload);
+
+  if (!text) {
+    return null;
+  }
+
+  return { payload: normalizedPayload };
 };
+
+const buildWebhookDebugFields = (payload) => ({
+  keyRemoteJid: payload?.key?.remoteJid || null,
+  messageKeyRemoteJid: payload?.message?.key?.remoteJid || null,
+  sender: payload?.sender || null,
+  from: payload?.from || null,
+  extractedPhone: extractWhatsAppPhoneFromWebhook(payload),
+});
 
 // ==================== WEBHOOKS ====================
 
@@ -108,18 +174,15 @@ router.post('/webhook', async (req, res, next) => {
   try {
     const payload = req.body || {};
 
-    // Compatibilidade com simulador/local legado
-    if (payload.phone && (payload.message || payload.text)) {
-      return handleWebhook(req, res);
-    }
-
     const incoming = mapWebhookIncomingMessage(payload);
 
     if (!incoming) {
+      const normalizedPayload = normalizeWebhookEventPayload(payload);
+
       logger.debug(
         {
-          event: payload?.event || payload?.type,
-          fromMe: extractWebhookFromMe(payload),
+          event: normalizedPayload?.event || normalizedPayload?.type,
+          fromMe: extractWebhookFromMe(normalizedPayload),
         },
         'Webhook ignorado sem payload de mensagem util'
       );
@@ -127,11 +190,15 @@ router.post('/webhook', async (req, res, next) => {
       return sendSuccess(res, { received: true, processed: false });
     }
 
-    const result = await handleIncomingMessage(incoming.phone, incoming.text);
+    const debugFields = buildWebhookDebugFields(incoming.payload);
+
+    logger.debug(debugFields, 'Webhook WhatsApp debug de extração de telefone');
+
+    const result = await handleIncomingMessage(incoming.payload);
 
     logger.debug(
       {
-        phone: incoming.phone,
+        phone: debugFields.extractedPhone,
         processed: result?.ok,
         ignored: result?.ignored,
         reason: result?.reason,
@@ -156,7 +223,13 @@ router.post('/webhook/:event', async (req, res, next) => {
     const payload = req.body || {};
     const eventName = String(req.params.event || '').toLowerCase();
 
-    logger.debug({ event: eventName, payload }, 'Webhook Evolution sub-rota recebida');
+    logger.debug(
+      {
+        event: eventName,
+        payloadKeys: Object.keys(payload),
+      },
+      'Webhook Evolution sub-rota recebida'
+    );
 
     // Ignora eventos que não são de mensagem
     if (!eventName.includes('message')) {
@@ -170,10 +243,12 @@ router.post('/webhook/:event', async (req, res, next) => {
     });
 
     if (!incoming) {
+      const normalizedPayload = normalizeWebhookEventPayload(payload, eventName);
+
       logger.debug(
         {
           event: eventName,
-          fromMe: extractWebhookFromMe(payload),
+          fromMe: extractWebhookFromMe(normalizedPayload),
         },
         'Webhook Evolution sub-rota sem payload util'
       );
@@ -181,12 +256,22 @@ router.post('/webhook/:event', async (req, res, next) => {
       return sendSuccess(res, { received: true, processed: false });
     }
 
-    const result = await handleIncomingMessage(incoming.phone, incoming.text);
+    const debugFields = buildWebhookDebugFields(incoming.payload);
 
     logger.debug(
       {
         event: eventName,
-        phone: incoming.phone,
+        ...debugFields,
+      },
+      'Webhook Evolution messages-upsert debug de extração de telefone'
+    );
+
+    const result = await handleIncomingMessage(incoming.payload);
+
+    logger.debug(
+      {
+        event: eventName,
+        phone: debugFields.extractedPhone,
         processed: result?.ok,
         ignored: result?.ignored,
         reason: result?.reason,

@@ -1,7 +1,11 @@
 import logger from '../../utils/logger.js';
 import pool from '../../config/database.js';
 import { sendWhatsAppMessage, buildWelcomeMessage } from './whatsappMessageService.js';
-import { normalizeWhatsAppNumber } from '../../utils/whatsapp.js';
+import {
+  normalizeWhatsAppNumber,
+  extractWhatsAppPhoneFromWebhook,
+  extractWhatsAppRemoteJidFromWebhook,
+} from '../../utils/whatsapp.js';
 
 const normalizeText = (value) => String(value || '').trim();
 
@@ -205,34 +209,6 @@ const buildInvalidOptionMessage = async () => {
   ].join('\n');
 };
 
-const extractPhoneFromWebhook = (payload = {}) => {
-  const candidates = [
-    payload?.phone,
-    payload?.from,
-    payload?.sender,
-    payload?.senderNumber,
-    payload?.number,
-    payload?.key?.remoteJid,
-    payload?.key?.participant,
-    payload?.data?.from,
-    payload?.data?.sender,
-    payload?.data?.phone,
-    payload?.data?.key?.remoteJid,
-    payload?.message?.from,
-    payload?.message?.sender,
-    payload?.message?.phone,
-  ];
-
-  for (const candidate of candidates) {
-    const normalized = normalizeWhatsAppNumber(candidate);
-    if (normalized) {
-      return normalized;
-    }
-  }
-
-  return '';
-};
-
 const extractTextFromWebhook = (payload = {}) => {
   const candidates = [
     payload?.text,
@@ -259,6 +235,55 @@ const extractTextFromWebhook = (payload = {}) => {
   }
 
   return '';
+};
+
+const buildWebhookPayloadSummary = (payload = {}) => ({
+  event:
+    payload?.event ||
+    payload?.type ||
+    payload?.data?.event ||
+    payload?.data?.type ||
+    null,
+  keyRemoteJid: payload?.key?.remoteJid || payload?.data?.key?.remoteJid || null,
+  messageKeyRemoteJid: payload?.message?.key?.remoteJid || null,
+  sender: payload?.sender || payload?.data?.sender || null,
+  from: payload?.from || payload?.data?.from || null,
+});
+
+const hasWebhookRemoteJid = (payload = {}) => {
+  return Boolean(
+    payload?.key?.remoteJid ||
+      payload?.message?.key?.remoteJid ||
+      payload?.data?.key?.remoteJid
+  );
+};
+
+const resolveIncomingMessageInput = (phoneOrPayload, text) => {
+  const isPayloadInput =
+    phoneOrPayload && typeof phoneOrPayload === 'object' && !Array.isArray(phoneOrPayload);
+
+  if (!isPayloadInput) {
+    const normalizedPhone = normalizeWhatsAppNumber(phoneOrPayload);
+
+    return {
+      normalizedPhone,
+      normalizedText: normalizeText(text),
+      remoteJidOriginal:
+        typeof phoneOrPayload === 'string' && phoneOrPayload.includes('@')
+          ? phoneOrPayload.trim()
+          : null,
+      payloadSummary: null,
+    };
+  }
+
+  const hasRemoteJid = hasWebhookRemoteJid(phoneOrPayload);
+
+  return {
+    normalizedPhone: hasRemoteJid ? extractWhatsAppPhoneFromWebhook(phoneOrPayload) : null,
+    normalizedText: extractTextFromWebhook(phoneOrPayload),
+    remoteJidOriginal: extractWhatsAppRemoteJidFromWebhook(phoneOrPayload),
+    payloadSummary: buildWebhookPayloadSummary(phoneOrPayload),
+  };
 };
 
 const isIncomingMessageEvent = (payload = {}) => {
@@ -298,13 +323,25 @@ const isFromMe = (payload = {}) => {
   );
 };
 
-export const handleIncomingMessage = async (phone, text) => {
-  const normalizedPhone = normalizeWhatsAppNumber(phone);
-  const normalizedText = normalizeText(text);
+export const handleIncomingMessage = async (phoneOrPayload, text) => {
+  const {
+    normalizedPhone,
+    normalizedText,
+    remoteJidOriginal,
+    payloadSummary,
+  } = resolveIncomingMessageInput(phoneOrPayload, text);
+  const sendContext = remoteJidOriginal ? { remoteJidOriginal } : {};
 
   try {
     if (!normalizedPhone) {
-      logger.warn({ phone }, 'Mensagem recebida ignorada: telefone invalido');
+      logger.warn(
+        {
+          phone: !payloadSummary ? phoneOrPayload : null,
+          remoteJid: remoteJidOriginal,
+          payload: payloadSummary,
+        },
+        'Mensagem recebida ignorada: telefone invalido'
+      );
       return { ok: false, ignored: true, reason: 'invalid_phone' };
     }
 
@@ -323,7 +360,7 @@ export const handleIncomingMessage = async (phone, text) => {
 
     if (isGreeting(normalizedText)) {
       const menuMessage = await buildMenuMessage();
-      const sent = await sendWhatsAppMessage(normalizedPhone, menuMessage);
+      const sent = await sendWhatsAppMessage(normalizedPhone, menuMessage, sendContext);
 
       return {
         ok: sent,
@@ -336,7 +373,7 @@ export const handleIncomingMessage = async (phone, text) => {
 
     if (!choice) {
       const invalidMessage = await buildInvalidOptionMessage();
-      const sent = await sendWhatsAppMessage(normalizedPhone, invalidMessage);
+      const sent = await sendWhatsAppMessage(normalizedPhone, invalidMessage, sendContext);
 
       return {
         ok: sent,
@@ -349,7 +386,7 @@ export const handleIncomingMessage = async (phone, text) => {
 
     if (!option) {
       const invalidMessage = await buildInvalidOptionMessage();
-      const sent = await sendWhatsAppMessage(normalizedPhone, invalidMessage);
+      const sent = await sendWhatsAppMessage(normalizedPhone, invalidMessage, sendContext);
 
       return {
         ok: sent,
@@ -379,7 +416,7 @@ export const handleIncomingMessage = async (phone, text) => {
       return { ok: false, ignored: true, reason: 'empty_reply' };
     }
 
-    const sent = await sendWhatsAppMessage(normalizedPhone, reply);
+    const sent = await sendWhatsAppMessage(normalizedPhone, reply, sendContext);
 
     if (!sent) {
       logger.warn({ phone: normalizedPhone }, 'Mensagem nao enviada pelo provider WhatsApp');
@@ -405,6 +442,8 @@ export const handleIncomingMessage = async (phone, text) => {
       {
         err: error,
         phone: normalizedPhone,
+        remoteJid: remoteJidOriginal,
+        payload: payloadSummary,
         text: normalizedText,
       },
       'Erro ao processar fluxo de mensagem WhatsApp'
@@ -422,8 +461,9 @@ export const handleIncomingMessage = async (phone, text) => {
 export const handleWebhook = async (req, res) => {
   try {
     const payload = req.body ?? {};
+    const payloadSummary = buildWebhookPayloadSummary(payload);
 
-    logger.info({ payload }, 'Webhook WhatsApp recebido');
+    logger.info({ payload: payloadSummary }, 'Webhook WhatsApp recebido');
 
     if (isFromMe(payload)) {
       return res.status(200).json({
@@ -439,26 +479,9 @@ export const handleWebhook = async (req, res) => {
       });
     }
 
-    const phone = extractPhoneFromWebhook(payload);
+    const phone = extractWhatsAppPhoneFromWebhook(payload);
     const text = extractTextFromWebhook(payload);
-
-    if (!phone) {
-      logger.warn({ payload }, 'Webhook ignorado: telefone não identificado');
-      return res.status(200).json({
-        success: true,
-        message: 'Webhook recebido, mas sem telefone identificável.',
-      });
-    }
-
-    if (!text) {
-      logger.warn({ payload, phone }, 'Webhook ignorado: texto não identificado');
-      return res.status(200).json({
-        success: true,
-        message: 'Webhook recebido, mas sem texto processável.',
-      });
-    }
-
-    const result = await handleIncomingMessage(phone, text);
+    const result = await handleIncomingMessage(payload);
 
     return res.status(200).json({
       success: true,
@@ -469,7 +492,13 @@ export const handleWebhook = async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error({ err: error, body: req.body }, 'Erro ao processar webhook WhatsApp');
+    logger.error(
+      {
+        err: error,
+        payload: buildWebhookPayloadSummary(req.body ?? {}),
+      },
+      'Erro ao processar webhook WhatsApp'
+    );
 
     return res.status(500).json({
       success: false,

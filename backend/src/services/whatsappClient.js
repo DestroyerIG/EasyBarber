@@ -383,17 +383,35 @@ export const disconnectWhatsApp = async () => {
   }
 };
 
-export const sendWhatsAppText = async (phone, message) => {
-  const normalizedPhone = normalizeWhatsAppNumber(phone);
+export const sendWhatsAppText = async (phone, message, context = {}) => {
+  const rawPhone = String(phone ?? '').trim();
+  const normalizedPhone = normalizeWhatsAppNumber(rawPhone);
   const normalizedMessage = String(message || '').trim();
+  const remoteJidOriginal =
+    typeof context?.remoteJidOriginal === 'string' && context.remoteJidOriginal.trim()
+      ? context.remoteJidOriginal.trim()
+      : null;
+  const endpoint = `/message/sendText/${getEvolutionConfig().instanceName}`;
 
-  if (!normalizedPhone) {
-    logger.warn({ phone }, 'Envio WhatsApp ignorado: telefone invalido');
+  if (!normalizedPhone || rawPhone !== normalizedPhone) {
+    logger.warn(
+      {
+        phone: rawPhone,
+        remoteJidOriginal,
+      },
+      'Envio WhatsApp ignorado: telefone nao normalizado ou invalido'
+    );
     return false;
   }
 
   if (!normalizedMessage) {
-    logger.warn({ phone: normalizedPhone }, 'Envio WhatsApp ignorado: mensagem vazia');
+    logger.warn(
+      {
+        phone: normalizedPhone,
+        remoteJidOriginal,
+      },
+      'Envio WhatsApp ignorado: mensagem vazia'
+    );
     return false;
   }
 
@@ -416,6 +434,8 @@ export const sendWhatsAppText = async (phone, message) => {
     logger.info(
       {
         phone: normalizedPhone,
+        remoteJidOriginal,
+        endpoint,
         messageLength: normalizedMessage.length,
       },
       'Mensagem enviada via Evolution API'
@@ -427,6 +447,10 @@ export const sendWhatsAppText = async (phone, message) => {
       {
         err: error,
         phone: normalizedPhone,
+        remoteJidOriginal,
+        endpoint,
+        status: error?.status || null,
+        evolutionErrorPayload: error?.details || null,
         messageLength: normalizedMessage.length,
       },
       'Falha ao enviar mensagem via Evolution API'
