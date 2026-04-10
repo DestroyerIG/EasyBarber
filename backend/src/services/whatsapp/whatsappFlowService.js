@@ -5,6 +5,7 @@ import {
   normalizeWhatsAppNumber,
   extractWhatsAppPhoneFromWebhook,
   extractWhatsAppRemoteJidFromWebhook,
+  extractSenderPhoneFromWebhook, // ← IMPORTAÇÃO ADICIONADA
 } from '../../utils/whatsapp.js';
 
 const normalizeText = (value) => String(value || '').trim();
@@ -268,8 +269,15 @@ const resolveIncomingMessageInput = (phoneOrPayload, text) => {
     };
   }
 
+  // ─── FIX: usar extractSenderPhoneFromWebhook ───────────────────────────────
+  // Antes: extractWhatsAppPhoneFromWebhook priorizava key.remoteJid, que em
+  // alguns formatos da Evolution API pode ser o número da instância/bot ao
+  // invés do remetente real. Agora priorizamos sender/from explícitos.
+  const normalizedPhone = extractSenderPhoneFromWebhook(phoneOrPayload);
+  // ──────────────────────────────────────────────────────────────────────────
+
   return {
-    normalizedPhone: extractWhatsAppPhoneFromWebhook(phoneOrPayload),
+    normalizedPhone,
     normalizedText: extractTextFromWebhook(phoneOrPayload),
     remoteJidOriginal: extractWhatsAppRemoteJidFromWebhook(phoneOrPayload),
     payloadSummary: buildWebhookPayloadSummary(phoneOrPayload),
@@ -469,7 +477,7 @@ export const handleWebhook = async (req, res) => {
       });
     }
 
-    const phone = extractWhatsAppPhoneFromWebhook(payload);
+    const phone = extractSenderPhoneFromWebhook(payload); // ← FIX: usar sender first
     const text = extractTextFromWebhook(payload);
     const result = await handleIncomingMessage(payload);
 

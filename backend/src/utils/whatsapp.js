@@ -164,4 +164,40 @@ export const extractWhatsAppPhoneFromWebhook = (payload = {}) => {
   return null;
 };
 
+/**
+ * Extrai o telefone do REMETENTE (quem enviou a mensagem).
+ *
+ * Na Evolution API, para mensagens recebidas em chat 1:1:
+ *   - key.remoteJid = JID do remetente ✅
+ *   - sender        = JID do remetente (pode estar presente ou não)
+ *
+ * O problema: em alguns formatos de payload, o `remoteJid` pode conter
+ * o número da instância/bot ao invés do cliente que enviou.
+ * Por isso priorizamos `sender` e `from` quando disponíveis.
+ */
+export const extractSenderPhoneFromWebhook = (payload = {}) => {
+  // Prioridade: sender/from explícitos antes de remoteJid
+  const senderFirstCandidates = [
+    { value: payload?.sender, allowNumericOnly: true },
+    { value: payload?.from, allowNumericOnly: true },
+    { value: payload?.data?.sender, allowNumericOnly: true },
+    { value: payload?.data?.from, allowNumericOnly: true },
+    // remoteJid como fallback (válido para chat 1:1)
+    { value: payload?.key?.remoteJid, allowNumericOnly: false },
+    { value: payload?.message?.key?.remoteJid, allowNumericOnly: false },
+    { value: payload?.data?.key?.remoteJid, allowNumericOnly: false },
+    { value: payload?.data?.messages?.[0]?.key?.remoteJid, allowNumericOnly: false },
+    { value: payload?.messages?.[0]?.key?.remoteJid, allowNumericOnly: false },
+  ];
+
+  for (const candidate of senderFirstCandidates) {
+    const phone = normalizeWebhookPhoneCandidate(candidate.value, {
+      allowNumericOnly: candidate.allowNumericOnly,
+    });
+    if (phone) return phone;
+  }
+
+  return null;
+};
+
 export const isValidWhatsAppNumber = (value) => normalizeWhatsAppNumber(value) !== null;
