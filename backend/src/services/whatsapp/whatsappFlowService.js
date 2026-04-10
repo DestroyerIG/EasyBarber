@@ -4,7 +4,8 @@ import { sendWhatsAppMessage, buildWelcomeMessage } from './whatsappMessageServi
 import { getWhatsAppStatus } from '../whatsappClient.js';
 import {
   normalizeWhatsAppNumber,
-  extractWhatsAppPhoneFromWebhook,
+  extractWhatsAppPhoneFromWebhookDetailed,
+  extractWhatsAppInstanceNumbersFromWebhook,
   extractWhatsAppRemoteJidFromWebhook,
 } from '../../utils/whatsapp.js';
 
@@ -366,11 +367,36 @@ const buildWebhookPayloadSummary = (payload = {}) => ({
   from: payload?.from || payload?.data?.from || null,
 });
 
+const mergeKnownInstanceNumbers = (values = []) => {
+  const normalized = new Set();
+
+  for (const value of values) {
+    const phone = normalizeWhatsAppNumber(value);
+    if (phone) {
+      normalized.add(phone);
+    }
+  }
+
+  return Array.from(normalized);
+};
+
+const resolveConnectedNumber = () =>
+  normalizeWhatsAppNumber(getWhatsAppStatus()?.connectedNumber);
+
 const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
   const isPayloadInput =
     phoneOrPayload && typeof phoneOrPayload === 'object' && !Array.isArray(phoneOrPayload);
   const preExtractedPhone = normalizeWhatsAppNumber(options?.preExtractedPhone);
   const preExtractedText = normalizeText(options?.preExtractedText);
+  const connectedNumber = resolveConnectedNumber();
+  const preExtractedInstanceNumbers = Array.isArray(options?.preExtractedInstanceNumbers)
+    ? options.preExtractedInstanceNumbers
+    : [];
+
+  const baseKnownInstanceNumbers = mergeKnownInstanceNumbers([
+    connectedNumber,
+    ...preExtractedInstanceNumbers,
+  ]);
 
   if (!isPayloadInput) {
     const normalizedPhone = normalizeWhatsAppNumber(phoneOrPayload);
@@ -383,6 +409,8 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
           ? phoneOrPayload.trim()
           : null,
       payloadSummary: null,
+      phoneExtraction: null,
+      knownInstanceNumbers: baseKnownInstanceNumbers,
       sources: {
         phone: 'direct_input',
         text: 'direct_input',
@@ -390,7 +418,20 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
     };
   }
 
-  const normalizedPhone = preExtractedPhone || extractWhatsAppPhoneFromWebhook(phoneOrPayload);
+  const extraction = extractWhatsAppPhoneFromWebhookDetailed(phoneOrPayload, {
+    connectedNumbers: baseKnownInstanceNumbers,
+  });
+
+  const payloadInstanceNumbers = extractWhatsAppInstanceNumbersFromWebhook(phoneOrPayload, {
+    connectedNumbers: baseKnownInstanceNumbers,
+  });
+  const knownInstanceNumbers = mergeKnownInstanceNumbers([
+    ...baseKnownInstanceNumbers,
+    ...payloadInstanceNumbers,
+    ...(Array.isArray(extraction.instanceNumbers) ? extraction.instanceNumbers : []),
+  ]);
+
+  const normalizedPhone = preExtractedPhone || extraction.phone;
   const normalizedText = preExtractedText || extractTextFromWebhook(phoneOrPayload);
 
   return {
@@ -398,8 +439,14 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
     normalizedText,
     remoteJidOriginal: extractWhatsAppRemoteJidFromWebhook(phoneOrPayload),
     payloadSummary: buildWebhookPayloadSummary(phoneOrPayload),
+    phoneExtraction: extraction,
+    knownInstanceNumbers,
     sources: {
-      phone: preExtractedPhone ? 'pre_extracted' : 'payload_extractor',
+      phone: preExtractedPhone
+        ? 'pre_extracted'
+        : extraction.phone
+          ? 'payload_extractor'
+          : 'payload_extractor_ambiguous',
       text: preExtractedText ? 'pre_extracted' : 'payload_extractor',
     },
   };
@@ -438,23 +485,29 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     normalizedText,
     remoteJidOriginal,
     payloadSummary,
+    phoneExtraction,
+    knownInstanceNumbers,
     sources,
   } = resolveIncomingMessageInput(phoneOrPayload, text, options);
   const sendContext = remoteJidOriginal ? { remoteJidOriginal } : {};
 
   try {
     if (!normalizedPhone) {
+      const invalidPhoneReason = payloadSummary ? 'ambiguous_phone' : 'invalid_phone';
+
       logger.warn(
         {
           phone: !payloadSummary ? phoneOrPayload : null,
           remoteJid: remoteJidOriginal,
           payload: payloadSummary,
+          phoneExtraction,
+          knownInstanceNumbers,
           sources,
           eventName: options?.eventName || null,
         },
-        'Mensagem recebida ignorada: telefone invalido'
+        'Mensagem recebida ignorada: telefone nao confiavel para resposta'
       );
-      return { ok: false, ignored: true, reason: 'invalid_phone' };
+      return { ok: false, ignored: true, reason: invalidPhoneReason };
     }
 
     if (!normalizedText) {
@@ -469,16 +522,15 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       return { ok: false, ignored: true, reason: 'empty_text' };
     }
 
-    const connectedNumber = normalizeWhatsAppNumber(getWhatsAppStatus()?.connectedNumber);
-    if (connectedNumber && normalizedPhone === connectedNumber) {
+    if (knownInstanceNumbers.includes(normalizedPhone)) {
       logger.warn(
         {
           phone: normalizedPhone,
-          connectedNumber,
+          knownInstanceNumbers,
           remoteJid: remoteJidOriginal,
           eventName: options?.eventName || null,
         },
-        'Mensagem recebida ignorada: destino resolve para o numero conectado da instancia'
+        'Mensagem recebida ignorada: destino resolve para numero da instancia'
       );
       return { ok: false, ignored: true, reason: 'self_target' };
     }
@@ -636,7 +688,10 @@ export const handleWebhook = async (req, res) => {
       });
     }
 
-    const phone = extractWhatsAppPhoneFromWebhook(payload);
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload, {
+      connectedNumbers: mergeKnownInstanceNumbers([resolveConnectedNumber()]),
+    });
+    const phone = extraction.phone;
     const text = extractTextFromWebhook(payload);
     const eventName = normalizeWebhookEventName(
       payload?.event || payload?.type || payload?.data?.event || payload?.data?.type || ''
@@ -644,6 +699,7 @@ export const handleWebhook = async (req, res) => {
     const result = await handleIncomingMessage(payload, text, {
       preExtractedPhone: phone,
       preExtractedText: text,
+      preExtractedInstanceNumbers: extraction.instanceNumbers,
       eventName,
     });
 

@@ -20,7 +20,7 @@ import logger from '../utils/logger.js';
 import {
   normalizeWhatsAppNumber,
   extractWhatsAppRemoteJidFromWebhook,
-  extractWhatsAppPhoneFromWebhook,
+  extractWhatsAppPhoneFromWebhookDetailed,
 } from '../utils/whatsapp.js';
 
 const router = express.Router();
@@ -149,6 +149,18 @@ const extractWebhookFromMe = (payload) => {
   return candidates.find((value) => typeof value === 'boolean') ?? false;
 };
 
+const buildWebhookPhoneExtractionOptions = () => {
+  const connectedNumber = normalizeWhatsAppNumber(getWhatsAppStatus()?.connectedNumber);
+
+  if (!connectedNumber) {
+    return {};
+  }
+
+  return {
+    connectedNumbers: [connectedNumber],
+  };
+};
+
 const mapWebhookIncomingMessage = (payload) => {
   const normalizedPayload = normalizeWebhookEventPayload(payload);
   const eventName = normalizeWebhookEventName(normalizedPayload?.event || normalizedPayload?.type || '');
@@ -162,7 +174,11 @@ const mapWebhookIncomingMessage = (payload) => {
     return null;
   }
 
-  const extractedPhone = extractWhatsAppPhoneFromWebhook(normalizedPayload);
+  const extraction = extractWhatsAppPhoneFromWebhookDetailed(
+    normalizedPayload,
+    buildWebhookPhoneExtractionOptions()
+  );
+  const extractedPhone = extraction.phone;
 
   if (!extractedPhone) {
     logger.warn(
@@ -172,7 +188,8 @@ const mapWebhookIncomingMessage = (payload) => {
         messageKeyRemoteJid: normalizedPayload?.message?.key?.remoteJid || null,
         sender: normalizedPayload?.sender || null,
         from: normalizedPayload?.from || null,
-        extractedPhone,
+        extractionRejections: extraction.rejections,
+        instanceNumbers: extraction.instanceNumbers,
       },
       'Webhook ignorado: messages-upsert sem telefone extraivel'
     );
@@ -190,16 +207,27 @@ const mapWebhookIncomingMessage = (payload) => {
     eventName,
     extractedPhone,
     extractedText: text,
+    extraction,
   };
 };
 
-const buildWebhookDebugFields = (payload, extractedPhone = null) => ({
-  keyRemoteJid: payload?.key?.remoteJid || null,
-  messageKeyRemoteJid: payload?.message?.key?.remoteJid || null,
-  sender: payload?.sender || null,
-  from: payload?.from || null,
-  extractedPhone: extractedPhone || extractWhatsAppPhoneFromWebhook(payload),
-});
+const buildWebhookDebugFields = (payload, extraction = null) => {
+  const resolvedExtraction =
+    extraction ||
+    extractWhatsAppPhoneFromWebhookDetailed(payload, buildWebhookPhoneExtractionOptions());
+
+  return {
+    keyRemoteJid: payload?.key?.remoteJid || null,
+    messageKeyRemoteJid: payload?.message?.key?.remoteJid || null,
+    sender: payload?.sender || null,
+    from: payload?.from || null,
+    extractedPhone: resolvedExtraction.phone,
+    extractionSourcePath: resolvedExtraction.sourcePath,
+    extractionCandidateType: resolvedExtraction.candidateType,
+    extractionRejections: resolvedExtraction.rejections,
+    instanceNumbers: resolvedExtraction.instanceNumbers,
+  };
+};
 
 const pruneWebhookDedupeCache = () => {
   const now = Date.now();
@@ -379,13 +407,14 @@ router.post('/webhook', async (req, res, next) => {
       });
     }
 
-    const debugFields = buildWebhookDebugFields(incoming.payload, incoming.extractedPhone);
+    const debugFields = buildWebhookDebugFields(incoming.payload, incoming.extraction);
 
     logger.debug(debugFields, 'Webhook WhatsApp debug de extração de telefone');
 
     const result = await handleIncomingMessage(incoming.payload, incoming.extractedText, {
       preExtractedPhone: incoming.extractedPhone,
       preExtractedText: incoming.extractedText,
+      preExtractedInstanceNumbers: incoming.extraction?.instanceNumbers || [],
       eventName: incoming.eventName,
       dedupeKey: dedupe.dedupeKey,
       messageId: dedupe.messageId,
@@ -475,7 +504,7 @@ router.post('/webhook/:event', async (req, res, next) => {
       });
     }
 
-    const debugFields = buildWebhookDebugFields(incoming.payload, incoming.extractedPhone);
+    const debugFields = buildWebhookDebugFields(incoming.payload, incoming.extraction);
 
     logger.debug(
       {
@@ -488,6 +517,7 @@ router.post('/webhook/:event', async (req, res, next) => {
     const result = await handleIncomingMessage(incoming.payload, incoming.extractedText, {
       preExtractedPhone: incoming.extractedPhone,
       preExtractedText: incoming.extractedText,
+      preExtractedInstanceNumbers: incoming.extraction?.instanceNumbers || [],
       eventName: incoming.eventName,
       dedupeKey: dedupe.dedupeKey,
       messageId: dedupe.messageId,

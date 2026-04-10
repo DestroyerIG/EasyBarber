@@ -158,8 +158,16 @@ Na configuração atual:
 - Teste envio via endpoint /send.
 - Verifique indisponibilidade da Evolution API.
 
+### Webhook ambiguo, @lid, grupos e auto-destino
+
+- O backend bloqueia resposta automaticamente quando o webhook nao identifica um telefone confiavel do cliente.
+- Eventos com identificadores bloqueados (@lid, @g.us, @broadcast, @newsletter) sao ignorados por seguranca.
+- Se o destino extraido coincidir com o numero da instancia conectada, o fluxo retorna self_target e nao envia mensagem.
+- Em payload ambiguo, o fluxo retorna ambiguous_phone e apenas registra logs para diagnostico.
+
 ## 11. Segurança Operacional
 
 - Controle acesso ao painel de WhatsApp por role e assinatura.
 - Não exponha EVOLUTION_API_KEY.
 - Evite apontar múltiplos backends para a mesma instância sem coordenação.
+- Priorize webhooks com JID direto do cliente; quando o payload vier ambiguo, a resposta deve permanecer bloqueada.

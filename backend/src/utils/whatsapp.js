@@ -2,19 +2,201 @@ const MIN_WHATSAPP_DIGITS = 10;
 const MAX_WHATSAPP_DIGITS = 15;
 const DIRECT_WHATSAPP_JID_SUFFIXES = ['@s.whatsapp.net', '@c.us'];
 const BLOCKED_WHATSAPP_JID_SUFFIXES = ['@g.us', '@lid', '@broadcast', '@newsletter'];
+const MAX_EXTRACTION_REJECTIONS = 20;
+
+const WEBHOOK_REMOTE_JID_CANDIDATES = [
+  { sourcePath: 'key.remoteJid', getValue: (payload) => payload?.key?.remoteJid },
+  { sourcePath: 'message.key.remoteJid', getValue: (payload) => payload?.message?.key?.remoteJid },
+  { sourcePath: 'data.key.remoteJid', getValue: (payload) => payload?.data?.key?.remoteJid },
+  {
+    sourcePath: 'data.messages[0].key.remoteJid',
+    getValue: (payload) => payload?.data?.messages?.[0]?.key?.remoteJid,
+  },
+  {
+    sourcePath: 'messages[0].key.remoteJid',
+    getValue: (payload) => payload?.messages?.[0]?.key?.remoteJid,
+  },
+];
+
+const WEBHOOK_BLOCKING_JID_CANDIDATES = [
+  ...WEBHOOK_REMOTE_JID_CANDIDATES,
+  { sourcePath: 'sender', getValue: (payload) => payload?.sender },
+  { sourcePath: 'from', getValue: (payload) => payload?.from },
+  { sourcePath: 'data.sender', getValue: (payload) => payload?.data?.sender },
+  { sourcePath: 'data.from', getValue: (payload) => payload?.data?.from },
+];
+
+const WEBHOOK_INSTANCE_NUMBER_CANDIDATES = [
+  (payload) => payload?.instance?.number,
+  (payload) => payload?.instance?.phone,
+  (payload) => payload?.instance?.wid,
+  (payload) => payload?.instance?.ownerJid,
+  (payload) => payload?.data?.instance?.number,
+  (payload) => payload?.data?.instance?.phone,
+  (payload) => payload?.data?.instance?.wid,
+  (payload) => payload?.data?.instance?.ownerJid,
+  (payload) => payload?.instanceData?.number,
+  (payload) => payload?.instanceData?.phone,
+  (payload) => payload?.instanceData?.wid,
+  (payload) => payload?.instanceData?.ownerJid,
+];
+
+const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
+  {
+    sourcePath: 'key.remoteJid',
+    candidateType: 'direct_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.key?.remoteJid,
+  },
+  {
+    sourcePath: 'message.key.remoteJid',
+    candidateType: 'direct_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.message?.key?.remoteJid,
+  },
+  {
+    sourcePath: 'data.key.remoteJid',
+    candidateType: 'direct_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.key?.remoteJid,
+  },
+  {
+    sourcePath: 'data.messages[0].key.remoteJid',
+    candidateType: 'direct_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.messages?.[0]?.key?.remoteJid,
+  },
+  {
+    sourcePath: 'messages[0].key.remoteJid',
+    candidateType: 'direct_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.messages?.[0]?.key?.remoteJid,
+  },
+  {
+    sourcePath: 'sender',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.sender,
+  },
+  {
+    sourcePath: 'from',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.from,
+  },
+  {
+    sourcePath: 'data.sender',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.sender,
+  },
+  {
+    sourcePath: 'data.from',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.from,
+  },
+  {
+    sourcePath: 'key.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.key?.participant,
+  },
+  {
+    sourcePath: 'message.key.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.message?.key?.participant,
+  },
+  {
+    sourcePath: 'data.key.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.key?.participant,
+  },
+  {
+    sourcePath: 'participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.participant,
+  },
+  {
+    sourcePath: 'data.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.participant,
+  },
+  {
+    sourcePath: 'data.messages[0].key.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.messages?.[0]?.key?.participant,
+  },
+  {
+    sourcePath: 'messages[0].key.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.messages?.[0]?.key?.participant,
+  },
+  {
+    sourcePath: 'senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.senderPn,
+  },
+  {
+    sourcePath: 'message.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.message?.senderPn,
+  },
+  {
+    sourcePath: 'data.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.senderPn,
+  },
+  {
+    sourcePath: 'key.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.key?.participantPn,
+  },
+  {
+    sourcePath: 'message.key.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.message?.key?.participantPn,
+  },
+  {
+    sourcePath: 'data.key.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.key?.participantPn,
+  },
+  {
+    sourcePath: 'data.messages[0].senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.messages?.[0]?.senderPn,
+  },
+  {
+    sourcePath: 'messages[0].senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.messages?.[0]?.senderPn,
+  },
+];
 
 const extractWebhookRemoteJidCandidate = (payload = {}) => {
-  const candidates = [
-    payload?.key?.remoteJid,
-    payload?.message?.key?.remoteJid,
-    payload?.data?.key?.remoteJid,
-    payload?.sender,
-    payload?.from,
-  ];
+  for (const candidate of WEBHOOK_REMOTE_JID_CANDIDATES) {
+    const value = candidate.getValue(payload);
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+  }
 
-  return (
-    candidates.find((candidate) => typeof candidate === 'string' && candidate.trim()) || null
-  );
+  return null;
 };
 
 export const normalizeWhatsAppNumber = (value) => {
@@ -69,100 +251,149 @@ const hasDirectWhatsAppJidSuffix = (value) => {
   return DIRECT_WHATSAPP_JID_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
 };
 
-const normalizeWebhookPhoneCandidate = (value, { allowNumericOnly = false } = {}) => {
+const parseWebhookPhoneCandidate = (value, { allowNumericOnly = false } = {}) => {
   if (typeof value !== 'string') {
-    return null;
+    return { phone: null, reason: 'non_string' };
   }
 
   const candidate = value.trim();
   if (!candidate) {
-    return null;
+    return { phone: null, reason: 'empty' };
   }
 
   if (hasBlockedWebhookJidSuffix(candidate)) {
-    return null;
+    return { phone: null, reason: 'blocked_jid_suffix' };
   }
 
   const isJid = candidate.includes('@');
   if (isJid && !hasDirectWhatsAppJidSuffix(candidate)) {
-    return null;
+    return { phone: null, reason: 'unsupported_jid_suffix' };
   }
 
   if (!isJid && !allowNumericOnly) {
-    return null;
+    return { phone: null, reason: 'numeric_not_allowed' };
   }
 
   const phone = candidate.split('@')[0].replace(/\D/g, '');
-
   if (phone.length < MIN_WHATSAPP_DIGITS || phone.length > MAX_WHATSAPP_DIGITS) {
-    return null;
+    return { phone: null, reason: 'invalid_digits_length' };
   }
 
-  return phone;
+  return { phone, reason: null };
 };
 
-export const extractWhatsAppPhoneFromWebhook = (payload = {}) => {
-  const primaryCandidates = [
-    { value: payload?.key?.remoteJid, allowNumericOnly: false },
-    { value: payload?.message?.key?.remoteJid, allowNumericOnly: false },
-    { value: payload?.data?.key?.remoteJid, allowNumericOnly: false },
-    { value: payload?.sender, allowNumericOnly: true },
-    { value: payload?.from, allowNumericOnly: true },
-  ];
-
-  const hasLidOnPrimaryJid = [
-    payload?.key?.remoteJid,
-    payload?.message?.key?.remoteJid,
-    payload?.data?.key?.remoteJid,
-  ].some((candidate) => typeof candidate === 'string' && candidate.trim().toLowerCase().endsWith('@lid'));
-
-  for (const candidate of primaryCandidates) {
-    const isSenderOrFrom = candidate?.value === payload?.sender || candidate?.value === payload?.from;
-    const allowNumericOnly = isSenderOrFrom
-      ? candidate.allowNumericOnly && !hasLidOnPrimaryJid
-      : candidate.allowNumericOnly;
-
-    const phone = normalizeWebhookPhoneCandidate(candidate.value, {
-      allowNumericOnly,
-    });
-
-    if (phone) {
-      return phone;
-    }
+const appendRejection = (rejections, sourcePath, reason) => {
+  if (!reason || rejections.length >= MAX_EXTRACTION_REJECTIONS) {
+    return;
   }
 
-  const fallbackCandidates = [
-    { value: payload?.key?.participant, allowNumericOnly: false },
-    { value: payload?.message?.key?.participant, allowNumericOnly: false },
-    { value: payload?.data?.key?.participant, allowNumericOnly: false },
-    { value: payload?.participant, allowNumericOnly: false },
-    { value: payload?.data?.participant, allowNumericOnly: false },
-    { value: payload?.senderPn, allowNumericOnly: true },
-    { value: payload?.message?.senderPn, allowNumericOnly: true },
-    { value: payload?.data?.senderPn, allowNumericOnly: true },
-    { value: payload?.key?.participantPn, allowNumericOnly: true },
-    { value: payload?.message?.key?.participantPn, allowNumericOnly: true },
-    { value: payload?.data?.key?.participantPn, allowNumericOnly: true },
-    { value: payload?.data?.messages?.[0]?.key?.participant, allowNumericOnly: false },
-    { value: payload?.messages?.[0]?.key?.participant, allowNumericOnly: false },
-    { value: payload?.data?.messages?.[0]?.senderPn, allowNumericOnly: true },
-    { value: payload?.messages?.[0]?.senderPn, allowNumericOnly: true },
-    { value: payload?.data?.messages?.[0]?.key?.remoteJid, allowNumericOnly: false },
-    { value: payload?.messages?.[0]?.key?.remoteJid, allowNumericOnly: false },
-  ];
+  rejections.push({ sourcePath, reason });
+};
 
-  for (const candidate of fallbackCandidates) {
-    const phone = normalizeWebhookPhoneCandidate(candidate.value, {
-      allowNumericOnly: candidate.allowNumericOnly,
-    });
-
-    if (phone) {
-      return phone;
+const findBlockedConversationCandidate = (payload = {}) => {
+  for (const candidate of WEBHOOK_BLOCKING_JID_CANDIDATES) {
+    const value = candidate.getValue(payload);
+    if (hasBlockedWebhookJidSuffix(value)) {
+      return {
+        sourcePath: candidate.sourcePath,
+        value,
+      };
     }
   }
 
   return null;
 };
+
+const normalizeKnownConnectedNumbers = (options = {}) => {
+  const values = [
+    options?.connectedNumber,
+    ...(Array.isArray(options?.connectedNumbers) ? options.connectedNumbers : []),
+  ];
+
+  const normalized = new Set();
+  for (const value of values) {
+    const phone = normalizeWhatsAppNumber(value);
+    if (phone) {
+      normalized.add(phone);
+    }
+  }
+
+  return normalized;
+};
+
+export const extractWhatsAppInstanceNumbersFromWebhook = (payload = {}, options = {}) => {
+  const numbers = normalizeKnownConnectedNumbers(options);
+
+  for (const resolver of WEBHOOK_INSTANCE_NUMBER_CANDIDATES) {
+    const value = resolver(payload);
+    const normalized = normalizeWhatsAppNumber(value);
+    if (normalized) {
+      numbers.add(normalized);
+    }
+  }
+
+  return Array.from(numbers);
+};
+
+const normalizeWebhookPhoneCandidate = (value, { allowNumericOnly = false } = {}) => {
+  const parsed = parseWebhookPhoneCandidate(value, { allowNumericOnly });
+  return parsed.phone;
+};
+
+export const extractWhatsAppPhoneFromWebhookDetailed = (payload = {}, options = {}) => {
+  const instanceNumbers = extractWhatsAppInstanceNumbersFromWebhook(payload, options);
+  const instanceNumbersSet = new Set(instanceNumbers);
+  const rejections = [];
+  const blockedConversation = findBlockedConversationCandidate(payload);
+
+  if (blockedConversation) {
+    appendRejection(rejections, blockedConversation.sourcePath, 'blocked_conversation_jid');
+
+    return {
+      phone: null,
+      sourcePath: null,
+      candidateType: null,
+      instanceNumbers,
+      rejections,
+    };
+  }
+
+  for (const candidate of WEBHOOK_PHONE_EXTRACTION_CANDIDATES) {
+    const value = candidate.getValue(payload);
+    const parsed = parseWebhookPhoneCandidate(value, {
+      allowNumericOnly: candidate.allowNumericOnly,
+    });
+
+    if (!parsed.phone) {
+      appendRejection(rejections, candidate.sourcePath, parsed.reason);
+      continue;
+    }
+
+    if (instanceNumbersSet.has(parsed.phone)) {
+      appendRejection(rejections, candidate.sourcePath, 'instance_number');
+      continue;
+    }
+
+    return {
+      phone: parsed.phone,
+      sourcePath: candidate.sourcePath,
+      candidateType: candidate.candidateType,
+      instanceNumbers,
+      rejections,
+    };
+  }
+
+  return {
+    phone: null,
+    sourcePath: null,
+    candidateType: null,
+    instanceNumbers,
+    rejections,
+  };
+};
+
+export const extractWhatsAppPhoneFromWebhook = (payload = {}, options = {}) =>
+  extractWhatsAppPhoneFromWebhookDetailed(payload, options).phone;
 
 /**
  * Extrai o telefone do REMETENTE (quem enviou a mensagem).
@@ -176,28 +407,7 @@ export const extractWhatsAppPhoneFromWebhook = (payload = {}) => {
  * Por isso priorizamos `sender` e `from` quando disponíveis.
  */
 export const extractSenderPhoneFromWebhook = (payload = {}) => {
-  // Prioridade: sender/from explícitos antes de remoteJid
-  const senderFirstCandidates = [
-    { value: payload?.sender, allowNumericOnly: true },
-    { value: payload?.from, allowNumericOnly: true },
-    { value: payload?.data?.sender, allowNumericOnly: true },
-    { value: payload?.data?.from, allowNumericOnly: true },
-    // remoteJid como fallback (válido para chat 1:1)
-    { value: payload?.key?.remoteJid, allowNumericOnly: false },
-    { value: payload?.message?.key?.remoteJid, allowNumericOnly: false },
-    { value: payload?.data?.key?.remoteJid, allowNumericOnly: false },
-    { value: payload?.data?.messages?.[0]?.key?.remoteJid, allowNumericOnly: false },
-    { value: payload?.messages?.[0]?.key?.remoteJid, allowNumericOnly: false },
-  ];
-
-  for (const candidate of senderFirstCandidates) {
-    const phone = normalizeWebhookPhoneCandidate(candidate.value, {
-      allowNumericOnly: candidate.allowNumericOnly,
-    });
-    if (phone) return phone;
-  }
-
-  return null;
+  return extractWhatsAppPhoneFromWebhook(payload);
 };
 
 export const isValidWhatsAppNumber = (value) => normalizeWhatsAppNumber(value) !== null;
