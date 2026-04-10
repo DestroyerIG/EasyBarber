@@ -54,11 +54,21 @@ export const ClientModule = () => {
   };
 
   const handleSubmitClient = async (data: ClientFormData) => {
+    // Mapeia birthDate → birth_date conforme esperado pelo backend
+    const payload = {
+      name: data.name,
+      phone: data.phone,
+      email: data.email || null,
+      birth_date: data.birthDate || null,
+      address: data.address || null,
+      notes: data.notes || null,
+    };
+
     if (editingClient) {
-      await api.put(`/clients/${editingClient.id}`, data);
+      await api.put(`/clients/${editingClient.id}`, payload);
       showToast('Cliente atualizado com sucesso', 'success');
     } else {
-      await api.post('/clients', data);
+      await api.post('/clients', payload);
       showToast('Cliente cadastrado com sucesso', 'success');
     }
     loadClients();

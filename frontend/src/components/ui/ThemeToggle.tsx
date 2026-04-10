@@ -7,15 +7,23 @@ const THEME_KEY = 'easybarber-theme';
 const LEGACY_THEME_KEY = 'barberpro-theme';
 
 export function ThemeToggle() {
-  const [isDark, setIsDark] = useState(true);
+  // Inicializa com base no que já está no <html> (aplicado pelo script inline do layout)
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof document !== 'undefined') {
+      return document.documentElement.classList.contains('dark');
+    }
+    return true;
+  });
 
   useEffect(() => {
+    // Sincroniza com localStorage na montagem
     const stored = localStorage.getItem(THEME_KEY) || localStorage.getItem(LEGACY_THEME_KEY);
-    if (stored === 'light') {
-      setIsDark(false);
-      document.documentElement.classList.remove('dark');
-    } else {
+    const dark = stored !== 'light';
+    setIsDark(dark);
+    if (dark) {
       document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
     }
   }, []);
 
@@ -36,6 +44,7 @@ export function ThemeToggle() {
       onClick={toggle}
       className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all border border-white/5"
       aria-label={isDark ? 'Ativar modo claro' : 'Ativar modo escuro'}
+      title={isDark ? 'Ativar modo claro' : 'Ativar modo escuro'}
     >
       {isDark ? <Sun size={20} /> : <Moon size={20} />}
     </button>

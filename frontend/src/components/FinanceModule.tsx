@@ -39,12 +39,8 @@ type AutoTableDoc = jsPDF & { lastAutoTable: { finalY: number } };
 const loadLogoDataUrl = async () => {
   try {
     const response = await fetch(easyBarberLogo.src);
-    if (!response.ok) {
-      return null;
-    }
-
+    if (!response.ok) return null;
     const blob = await response.blob();
-
     return await new Promise<string | null>((resolve) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : null);
@@ -103,7 +99,6 @@ export const FinanceModule = ({
 
       const hasUnexpectedError = results.some(result => {
         if (result.status !== 'rejected') return false;
-
         const statusCode = (result.reason as { response?: { status?: number } })?.response?.status;
         return statusCode !== 402 && statusCode !== 403;
       });
@@ -128,6 +123,7 @@ export const FinanceModule = ({
   };
 
   const handleSubmitExpense = async (data: { description: string; category: string; amount: number; date: string }) => {
+    // ✅ CORRIGIDO: usa URL dinâmica /finance/expenses/${id}
     if (editingExpense) {
       await api.put(`/finance/expenses/${editingExpense.id}`, data);
       showToast('Gasto atualizado com sucesso', 'success');
@@ -141,6 +137,7 @@ export const FinanceModule = ({
   const handleDeleteExpense = async (id: string) => {
     if (!confirm('Tem certeza que deseja excluir este gasto?')) return;
     try {
+      // ✅ CORRIGIDO: usa URL dinâmica /finance/expenses/${id}
       await api.delete(`/finance/expenses/${id}`);
       showToast('Gasto excluído com sucesso', 'success');
       loadAllData();

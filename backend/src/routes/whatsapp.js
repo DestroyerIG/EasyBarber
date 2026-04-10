@@ -73,7 +73,9 @@ const mapWebhookIncomingMessage = (payload) => {
     return { phone, text };
 };
 
-// Webhook local (simulador) + Evolution webhook
+// ==================== WEBHOOKS ====================
+
+// Webhook local (simulador)
 router.post('/webhook', async (req, res, next) => {
     try {
         const payload = req.body || {};
@@ -85,7 +87,7 @@ router.post('/webhook', async (req, res, next) => {
 
         const incoming = mapWebhookIncomingMessage(payload);
         if (!incoming) {
-            logger.debug({ event: payload?.event || payload?.type }, 'Webhook Evolution ignorado sem payload de mensagem util');
+            logger.debug({ event: payload?.event || payload?.type }, 'Webhook ignorado sem payload de mensagem util');
             return sendSuccess(res, { received: true, processed: false });
         }
 
@@ -95,6 +97,45 @@ router.post('/webhook', async (req, res, next) => {
         return next(error);
     }
 });
+
+// Webhook Evolution API — sub-rotas: /webhook/messages-upsert, /webhook/chats-update, etc.
+router.post('/webhook/:event', async (req, res, next) => {
+    try {
+        const payload = req.body || {};
+        const eventName = req.params.event; // ex: "messages-upsert"
+
+        logger.debug({ event: eventName, payload }, 'Webhook Evolution sub-rota recebida');
+
+        // Ignorar eventos que não são de mensagem recebida
+        if (!eventName.includes('message')) {
+            logger.debug({ event: eventName }, 'Webhook Evolution sub-rota ignorada (nao e mensagem)');
+            return sendSuccess(res, { received: true, processed: false });
+        }
+
+        // Ignorar mensagens enviadas pelo próprio bot (fromMe = true)
+        if (payload?.data?.key?.fromMe === true) {
+            logger.debug({ event: eventName }, 'Webhook ignorado — mensagem propria (fromMe)');
+            return sendSuccess(res, { received: true, processed: false });
+        }
+
+        const incoming = mapWebhookIncomingMessage({
+            ...payload,
+            event: eventName,
+        });
+
+        if (!incoming) {
+            logger.debug({ event: eventName }, 'Webhook Evolution sub-rota sem payload util');
+            return sendSuccess(res, { received: true, processed: false });
+        }
+
+        await handleIncomingMessage(incoming.phone, incoming.text);
+        return sendSuccess(res, { received: true, processed: true });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+// ==================== STATUS E CONEXÃO ====================
 
 // Status da conexão WhatsApp
 router.get('/status', ...waProtected, async (req, res, next) => {
@@ -197,7 +238,8 @@ router.post('/send', ...waProtected, async (req, res, next) => {
     }
 });
 
-// Alias legados para manter compatibilidade temporaria com frontend antigo
+// ==================== ALIASES LEGADOS ====================
+
 router.get('/qr', ...waProtected, async (req, res, next) => {
     try {
         const status = getWhatsAppStatus();
@@ -247,7 +289,6 @@ router.post('/restart', ...waProtected, async (req, res, next) => {
 
 // ==================== CONFIGURAÇÃO DE MENSAGENS ====================
 
-// Buscar configuração de mensagens do bot
 router.get('/config', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
@@ -272,7 +313,6 @@ router.get('/config', ...waProtected, async (req, res, next) => {
     }
 });
 
-// Atualizar configuração de mensagens do bot
 router.put('/config', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
@@ -348,7 +388,6 @@ router.put('/config', ...waProtected, async (req, res, next) => {
     }
 });
 
-// Resetar mensagens para padrão
 router.post('/config/reset', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
@@ -385,7 +424,6 @@ const DEFAULT_MENU_OPTIONS = [
     { order: 9, label: 'Encerrar atendimento', emoji: '🚪', handler: 'end_session' },
 ];
 
-// Listar opções do menu
 router.get('/config/menu', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
@@ -395,7 +433,6 @@ router.get('/config/menu', ...waProtected, async (req, res, next) => {
             [barbershopId]
         );
 
-        // Seed defaults se não existem
         if (result.rows.length === 0) {
             for (const opt of DEFAULT_MENU_OPTIONS) {
                 await pool.query(
@@ -417,7 +454,6 @@ router.get('/config/menu', ...waProtected, async (req, res, next) => {
     }
 });
 
-// Criar nova opção customizada
 router.post('/config/menu', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
@@ -427,7 +463,6 @@ router.post('/config/menu', ...waProtected, async (req, res, next) => {
             return res.status(400).json({ success: false, error: { message: 'Label e mensagem de resposta são obrigatórios' } });
         }
 
-        // Buscar próxima posição
         const maxOrder = await pool.query(
             'SELECT COALESCE(MAX(option_order), 0) as max_order FROM whatsapp_menu_options WHERE barbershop_id = $1',
             [barbershopId]
@@ -451,14 +486,12 @@ router.post('/config/menu', ...waProtected, async (req, res, next) => {
     }
 });
 
-// Atualizar opção do menu
 router.put('/config/menu/:id', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
         const { id } = req.params;
         const { label, emoji, active, response_message } = req.body;
 
-        // Verificar se a opção pertence à barbearia
         const existing = await pool.query(
             'SELECT * FROM whatsapp_menu_options WHERE id = $1 AND barbershop_id = $2',
             [id, barbershopId]
@@ -486,13 +519,11 @@ router.put('/config/menu/:id', ...waProtected, async (req, res, next) => {
     }
 });
 
-// Excluir opção customizada
 router.delete('/config/menu/:id', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
         const { id } = req.params;
 
-        // Verificar se a opção existe e é customizada
         const existing = await pool.query(
             'SELECT * FROM whatsapp_menu_options WHERE id = $1 AND barbershop_id = $2',
             [id, barbershopId]
@@ -513,7 +544,6 @@ router.delete('/config/menu/:id', ...waProtected, async (req, res, next) => {
             [id, barbershopId]
         );
 
-        // Reordenar opções restantes
         await pool.query(
             `UPDATE whatsapp_menu_options 
              SET option_order = option_order - 1, updated_at = CURRENT_TIMESTAMP
@@ -527,18 +557,15 @@ router.delete('/config/menu/:id', ...waProtected, async (req, res, next) => {
     }
 });
 
-// Reordenar opções do menu
 router.put('/config/menu-reorder', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;
-        const { order } = req.body; // Array de IDs na nova ordem
+        const { order } = req.body;
 
         if (!Array.isArray(order) || order.length === 0) {
             return res.status(400).json({ success: false, error: { message: 'Array de IDs é obrigatório' } });
         }
 
-        // Desabilitar temporariamente a constraint unique para reordenar
-        // Usamos valores negativos temporários para evitar conflitos
         for (let i = 0; i < order.length; i++) {
             await pool.query(
                 `UPDATE whatsapp_menu_options 
@@ -547,7 +574,6 @@ router.put('/config/menu-reorder', ...waProtected, async (req, res, next) => {
                 [-(i + 1), order[i], barbershopId]
             );
         }
-        // Agora converter para positivos
         for (let i = 0; i < order.length; i++) {
             await pool.query(
                 `UPDATE whatsapp_menu_options 
@@ -568,7 +594,6 @@ router.put('/config/menu-reorder', ...waProtected, async (req, res, next) => {
     }
 });
 
-// Resetar menu para opções padrão
 router.post('/config/menu/reset', ...waProtected, async (req, res, next) => {
     try {
         const { barbershopId } = req.user;

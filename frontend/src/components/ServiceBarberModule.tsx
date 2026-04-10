@@ -11,6 +11,7 @@ import { ServiceCard } from '@/components/services/ServiceCard';
 import { BarberCard } from '@/components/services/BarberCard';
 import { ServiceBarberModal } from '@/components/services/ServiceBarberModal';
 import type { ServiceFormData, BarberFormData } from '@/components/services/ServiceBarberModal';
+import { getApiErrorMessage } from '@/utils/handleApiError';
 
 export const ServiceBarberModule = () => {
   const [activeTab, setActiveTab] = useState<'servicos' | 'barbeiros'>('servicos');
@@ -53,34 +54,48 @@ export const ServiceBarberModule = () => {
       price: parseFloat(data.price),
       duration_minutes: parseInt(data.duration_minutes),
     };
-    if (editingItem) {
-      await api.put(`/barbershop/services/${editingItem.id}`, payload);
-      showToast('Serviço atualizado', 'success');
-    } else {
-      await api.post('/barbershop/services', payload);
-      showToast('Serviço criado', 'success');
+    try {
+      if (editingItem) {
+        await api.put(`/barbershop/services/${editingItem.id}`, payload);
+        showToast('Serviço atualizado', 'success');
+      } else {
+        await api.post('/barbershop/services', payload);
+        showToast('Serviço criado', 'success');
+      }
+      loadData();
+    } catch (error: unknown) {
+      showToast(getApiErrorMessage(error, 'Erro ao salvar serviço'), 'error');
+      throw error;
     }
-    loadData();
   };
 
   const handleBarberSubmit = async (data: BarberFormData) => {
     const payload = { name: data.name, photo: data.photo || null };
-    if (editingItem) {
-      await api.put(`/barbershop/barbers/${editingItem.id}`, payload);
-      showToast('Barbeiro atualizado', 'success');
-    } else {
-      await api.post('/barbershop/barbers', payload);
-      showToast('Barbeiro cadastrado', 'success');
+    try {
+      if (editingItem) {
+        await api.put(`/barbershop/barbers/${editingItem.id}`, payload);
+        showToast('Barbeiro atualizado', 'success');
+      } else {
+        await api.post('/barbershop/barbers', payload);
+        showToast('Barbeiro cadastrado', 'success');
+      }
+      loadData();
+    } catch (error: unknown) {
+      showToast(getApiErrorMessage(error, 'Erro ao salvar barbeiro'), 'error');
+      throw error;
     }
-    loadData();
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Tem certeza que deseja excluir?')) return;
-    const endpoint = activeTab === 'servicos' ? 'services' : 'barbers';
-    await api.delete(`/barbershop/${endpoint}/${id}`);
-    showToast('Excluído com sucesso', 'success');
-    loadData();
+    try {
+      const endpoint = activeTab === 'servicos' ? 'services' : 'barbers';
+      await api.delete(`/barbershop/${endpoint}/${id}`);
+      showToast('Excluído com sucesso', 'success');
+      loadData();
+    } catch (error: unknown) {
+      showToast(getApiErrorMessage(error, 'Erro ao excluir'), 'error');
+    }
   };
 
   if (selectedBarberForAgenda) {
