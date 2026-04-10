@@ -68,12 +68,25 @@ const parseResponseBody = async (response) => {
   }
 };
 
+const flattenMessages = (value) => {
+  if (!Array.isArray(value)) return [];
+  return value.flat(Infinity).filter(Boolean).map(String);
+};
+
 const extractErrorMessage = (payload) => {
   if (!payload) return null;
   if (typeof payload === 'string') return payload;
   if (typeof payload?.message === 'string') return payload.message;
+
+  const messageList = flattenMessages(payload?.message);
+  if (messageList.length) return messageList.join(' | ');
+
   if (typeof payload?.error === 'string') return payload.error;
   if (typeof payload?.error?.message === 'string') return payload.error.message;
+
+  const responseMessageList = flattenMessages(payload?.response?.message);
+  if (responseMessageList.length) return responseMessageList.join(' | ');
+
   return null;
 };
 
@@ -87,7 +100,15 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
   try {
     const url = `${baseURL}${normalizePath(path)}`;
 
-    logger.debug({ method, url }, 'Evolution API request');
+    logger.debug(
+      {
+        method,
+        url,
+        hasBody: body !== undefined,
+        bodyKeys: body && typeof body === 'object' ? Object.keys(body) : [],
+      },
+      'Evolution API request'
+    );
 
     const response = await fetch(url, {
       method,
@@ -101,12 +122,15 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
     if (!expectedStatuses.includes(response.status)) {
       const message = extractErrorMessage(payload) || `Evolution API respondeu com status ${response.status}`;
 
-      logger.error({
-        status: response.status,
-        payload,
-        url,
-        method,
-      }, 'Erro na Evolution API');
+      logger.error(
+        {
+          status: response.status,
+          payload,
+          url,
+          method,
+        },
+        'Erro na Evolution API'
+      );
 
       throw new EvolutionApiError(message, {
         status: response.status,
@@ -116,13 +140,7 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
 
     return payload;
   } catch (error) {
-    console.error('❌ Evolution request error:', {
-      message: error.message,
-      status: error.status,
-      details: error.details,
-    });
-
-    if (error.name === 'AbortError') {
+    if (error?.name === 'AbortError') {
       throw new EvolutionApiError('Timeout ao chamar Evolution API', {
         code: 'EVOLUTION_TIMEOUT',
       });
@@ -132,7 +150,7 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
       throw error;
     }
 
-    throw new EvolutionApiError(error.message || 'Falha de comunicacao com Evolution API', {
+    throw new EvolutionApiError(error?.message || 'Falha de comunicacao com Evolution API', {
       code: 'EVOLUTION_NETWORK_ERROR',
     });
   } finally {
@@ -140,7 +158,7 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
   }
 };
 
-const requestWithFallback = async (candidates, operationName) => {
+const requestWithFallback = async (candidates, operationName, fallbackStatuses = [404, 405, 501]) => {
   let lastError = null;
 
   for (const candidate of candidates) {
@@ -149,10 +167,48 @@ const requestWithFallback = async (candidates, operationName) => {
     } catch (error) {
       lastError = error;
 
-      if (error instanceof EvolutionApiError && [404, 405, 501].includes(error.status || 0)) {
+      if (error instanceof EvolutionApiError && fallbackStatuses.includes(error.status || 0)) {
         logger.debug(
-          { operationName, method: candidate.method, path: candidate.path },
+          {
+            operationName,
+            method: candidate.method,
+            path: candidate.path,
+            status: error.status,
+          },
           'Endpoint fallback da Evolution API'
+        );
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw lastError || new EvolutionApiError(`${operationName} indisponivel`);
+};
+
+const requestTryingPayloads = async (candidates, operationName) => {
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    try {
+      return await request(candidate);
+    } catch (error) {
+      lastError = error;
+
+      if (
+        error instanceof EvolutionApiError &&
+        [400, 404, 405, 409, 415, 422, 501].includes(error.status || 0)
+      ) {
+        logger.debug(
+          {
+            operationName,
+            method: candidate.method,
+            path: candidate.path,
+            status: error.status,
+            bodyKeys: candidate?.body ? Object.keys(candidate.body) : [],
+          },
+          'Tentando proximo payload/endpoint da Evolution API'
         );
         continue;
       }
@@ -171,6 +227,8 @@ const unwrapInstancesList = (payload) => {
   return [];
 };
 
+const normalizePhone = (value) => String(value || '').replace(/\D/g, '');
+
 export const getEvolutionConfig = () => {
   const { baseURL, instanceName, webhookUrl, timeoutMs } = getConfig();
 
@@ -182,9 +240,6 @@ export const getEvolutionConfig = () => {
   };
 };
 
-// ✅ CORRIGIDO: healthCheck agora só valida as variáveis de ambiente.
-// A Evolution API não expõe /health, então tentamos verificar a conectividade
-// listando as instâncias — rota que sempre existe na Evolution API.
 export const healthCheck = async () => {
   try {
     ensureConfigured();
@@ -199,12 +254,6 @@ export const healthCheck = async () => {
 
     return { ok: true };
   } catch (error) {
-    // Se for erro de configuração (sem URL/KEY), retorna unavailable
-    if (error instanceof EvolutionApiError && error.code === 'EVOLUTION_CONFIG_ERROR') {
-      return { ok: false, error };
-    }
-
-    // Para qualquer outro erro (rede, timeout, etc), também retorna unavailable
     return { ok: false, error };
   }
 };
@@ -226,7 +275,7 @@ export const createInstance = async () => {
           webhook_base64: true,
           webhook_events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'],
         },
-        expectedStatuses: [200, 201, 403 ,409],
+        expectedStatuses: [200, 201, 403, 409],
       },
     ],
     'createInstance'
@@ -271,6 +320,7 @@ export const getInstanceStatus = async () => {
 
     const instances = unwrapInstancesList(payload);
     const { instanceName: name } = getConfig();
+
     const current = instances.find((item) => {
       const n = item?.name || item?.instanceName || item?.instance?.instanceName;
       return n === name;
@@ -308,11 +358,10 @@ export const logoutInstance = async () => {
   );
 };
 
-const normalizePhone = (value) => String(value || '').replace(/\D/g, '');
-
 export const sendTextMessage = async ({ phone, text }) => {
   const { instanceName } = getConfig();
   const normalizedPhone = normalizePhone(phone);
+  const normalizedText = String(text || '').trim();
 
   if (!normalizedPhone) {
     throw new EvolutionApiError('Numero de telefone invalido para envio', {
@@ -320,26 +369,58 @@ export const sendTextMessage = async ({ phone, text }) => {
     });
   }
 
-  if (!text || !String(text).trim()) {
+  if (!normalizedText) {
     throw new EvolutionApiError('Texto da mensagem vazio', {
       code: 'EVOLUTION_INVALID_MESSAGE',
     });
   }
 
-  const payloads = [
-    { number: normalizedPhone, text: String(text) },
-    { number: normalizedPhone, textMessage: { text: String(text) } },
-    { instanceName, number: normalizedPhone, text: String(text) },
-    { instanceName, number: normalizedPhone, textMessage: { text: String(text) } },
+  const candidates = [
+    {
+      method: 'POST',
+      path: `/message/sendText/${instanceName}`,
+      body: {
+        number: normalizedPhone,
+        textMessage: {
+          text: normalizedText,
+        },
+      },
+    },
+    {
+      method: 'POST',
+      path: '/message/sendText',
+      body: {
+        number: normalizedPhone,
+        textMessage: {
+          text: normalizedText,
+        },
+      },
+    },
+    {
+      method: 'POST',
+      path: `/message/sendText/${instanceName}`,
+      body: {
+        instanceName,
+        number: normalizedPhone,
+        textMessage: {
+          text: normalizedText,
+        },
+      },
+    },
+    {
+      method: 'POST',
+      path: '/message/sendText',
+      body: {
+        instanceName,
+        number: normalizedPhone,
+        textMessage: {
+          text: normalizedText,
+        },
+      },
+    },
   ];
 
-  const candidates = [];
-  for (const body of payloads) {
-    candidates.push({ method: 'POST', path: `/message/sendText/${instanceName}`, body });
-    candidates.push({ method: 'POST', path: '/message/sendText', body });
-  }
-
-  return requestWithFallback(candidates, 'sendTextMessage');
+  return requestTryingPayloads(candidates, 'sendTextMessage');
 };
 
 export { EvolutionApiError };
