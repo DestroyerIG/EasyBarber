@@ -60,6 +60,8 @@ if (stripeBillingEnabled) {
 const app = express();
 const PORT = process.env.PORT || 5000;
 const API_V1 = '/api/v1';
+const API_JSON_BODY_LIMIT = process.env.API_JSON_BODY_LIMIT || '1mb';
+const WHATSAPP_WEBHOOK_BODY_LIMIT = process.env.WHATSAPP_WEBHOOK_BODY_LIMIT || '6mb';
 
 // Segurança básica
 app.use(helmet());
@@ -118,7 +120,10 @@ app.post(
   stripeWebhook
 );
 
-app.use(express.json({ limit: '1mb' }));
+// Webhook da Evolution pode incluir payloads maiores (ex.: eventos com anexos/captions).
+app.use(`${API_V1}/whatsapp/webhook`, express.json({ limit: WHATSAPP_WEBHOOK_BODY_LIMIT }));
+
+app.use(express.json({ limit: API_JSON_BODY_LIMIT }));
 
 // Request ID + logging
 app.use((req, res, next) => {

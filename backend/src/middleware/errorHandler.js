@@ -8,6 +8,30 @@ import logger from '../utils/logger.js';
  * e erros inesperados com log de stack trace completo.
  */
 export const errorHandler = (err, req, res, _next) => {
+  // Payload maior que o limite do body parser
+  if (err?.type === 'entity.too.large' || err?.status === 413 || err?.statusCode === 413) {
+    logger.warn(
+      {
+        type: err?.type,
+        statusCode: err?.statusCode || err?.status,
+        path: req.path,
+        requestId: req.id,
+        limit: err?.limit,
+        length: err?.length,
+      },
+      'Payload excede o limite permitido'
+    );
+
+    return res.status(413).json({
+      success: false,
+      message: 'Payload muito grande',
+      error: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'Payload excede o limite permitido para este endpoint',
+      },
+    });
+  }
+
   // Erros de validação Zod (compatível com Zod 3 e 4)
   if (err instanceof ZodError || err.issues) {
     const items = err.issues || err.errors || [];

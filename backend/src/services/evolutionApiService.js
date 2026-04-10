@@ -352,7 +352,7 @@ export const createInstance = async () => {
           qrcode: true,
           webhook: webhookUrl || undefined,
           webhook_by_events: false,
-          webhook_base64: true,
+          webhook_base64: false,
           webhook_events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'],
         },
         expectedStatuses: [200, 201, 403, 409],
