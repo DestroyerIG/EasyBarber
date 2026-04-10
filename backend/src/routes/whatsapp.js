@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import express from 'express';
 import { handleIncomingMessage } from '../services/whatsapp/index.js';
 import {
@@ -18,11 +19,43 @@ import { sendSuccess, sendCreated, sendError } from '../utils/response.js';
 import logger from '../utils/logger.js';
 import {
   normalizeWhatsAppNumber,
+  extractWhatsAppRemoteJidFromWebhook,
   extractWhatsAppPhoneFromWebhook,
 } from '../utils/whatsapp.js';
 
 const router = express.Router();
 const waProtected = [authMiddleware, requireTenantRoles, requireFeature('whatsapp_automation')];
+
+const WEBHOOK_MESSAGE_DEDUPE = new Map();
+const WEBHOOK_DEDUPE_TTL_MS = 10 * 60 * 1000;
+const WEBHOOK_FALLBACK_DEDUPE_TTL_MS = 15 * 1000;
+const WEBHOOK_DEDUPE_MAX_KEYS = 10000;
+
+const normalizeWebhookEventName = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[._\s]+/g, '-');
+
+const INCOMING_WEBHOOK_EVENTS = new Set([
+  'messages-upsert',
+  'message-upsert',
+  'messages',
+  'message',
+  'new-message',
+  'incoming-message',
+  'message-received',
+]);
+
+const isIncomingWebhookEvent = (eventName, { allowEmpty = true } = {}) => {
+  const normalized = normalizeWebhookEventName(eventName);
+
+  if (!normalized) {
+    return allowEmpty;
+  }
+
+  return INCOMING_WEBHOOK_EVENTS.has(normalized);
+};
 
 const extractWebhookText = (payload) => {
   const directText = [
@@ -118,10 +151,9 @@ const extractWebhookFromMe = (payload) => {
 
 const mapWebhookIncomingMessage = (payload) => {
   const normalizedPayload = normalizeWebhookEventPayload(payload);
-  const eventName = String(normalizedPayload?.event || normalizedPayload?.type || '').toLowerCase();
-  const relevantEvent = !eventName || eventName.includes('message') || eventName.includes('upsert');
+  const eventName = normalizeWebhookEventName(normalizedPayload?.event || normalizedPayload?.type || '');
 
-  if (!relevantEvent) {
+  if (!isIncomingWebhookEvent(eventName)) {
     return null;
   }
 
@@ -132,7 +164,7 @@ const mapWebhookIncomingMessage = (payload) => {
 
   const extractedPhone = extractWhatsAppPhoneFromWebhook(normalizedPayload);
 
-  if (eventName.includes('upsert') && !extractedPhone) {
+  if (!extractedPhone) {
     logger.warn(
       {
         event: eventName,
@@ -153,16 +185,148 @@ const mapWebhookIncomingMessage = (payload) => {
     return null;
   }
 
-  return { payload: normalizedPayload };
+  return {
+    payload: normalizedPayload,
+    eventName,
+    extractedPhone,
+    extractedText: text,
+  };
 };
 
-const buildWebhookDebugFields = (payload) => ({
+const buildWebhookDebugFields = (payload, extractedPhone = null) => ({
   keyRemoteJid: payload?.key?.remoteJid || null,
   messageKeyRemoteJid: payload?.message?.key?.remoteJid || null,
   sender: payload?.sender || null,
   from: payload?.from || null,
-  extractedPhone: extractWhatsAppPhoneFromWebhook(payload),
+  extractedPhone: extractedPhone || extractWhatsAppPhoneFromWebhook(payload),
 });
+
+const pruneWebhookDedupeCache = () => {
+  const now = Date.now();
+
+  for (const [key, value] of WEBHOOK_MESSAGE_DEDUPE.entries()) {
+    if (!value || value.expiresAt <= now) {
+      WEBHOOK_MESSAGE_DEDUPE.delete(key);
+    }
+  }
+
+  if (WEBHOOK_MESSAGE_DEDUPE.size <= WEBHOOK_DEDUPE_MAX_KEYS) {
+    return;
+  }
+
+  const overflow = WEBHOOK_MESSAGE_DEDUPE.size - WEBHOOK_DEDUPE_MAX_KEYS;
+  let removed = 0;
+
+  for (const key of WEBHOOK_MESSAGE_DEDUPE.keys()) {
+    WEBHOOK_MESSAGE_DEDUPE.delete(key);
+    removed += 1;
+
+    if (removed >= overflow) {
+      break;
+    }
+  }
+};
+
+const extractWebhookMessageId = (payload = {}) => {
+  const candidates = [
+    payload?.key?.id,
+    payload?.message?.key?.id,
+    payload?.data?.key?.id,
+    payload?.data?.messages?.[0]?.key?.id,
+    payload?.messages?.[0]?.key?.id,
+    payload?.key?.stanzaId,
+    payload?.message?.key?.stanzaId,
+    payload?.data?.key?.stanzaId,
+    payload?.data?.messages?.[0]?.key?.stanzaId,
+    payload?.messages?.[0]?.key?.stanzaId,
+  ];
+
+  return (
+    candidates.find((value) => typeof value === 'string' && value.trim())?.trim() || null
+  );
+};
+
+const extractWebhookMessageTimestamp = (payload = {}) => {
+  const candidates = [
+    payload?.key?.messageTimestamp,
+    payload?.message?.key?.messageTimestamp,
+    payload?.data?.key?.messageTimestamp,
+    payload?.data?.messages?.[0]?.key?.messageTimestamp,
+    payload?.messages?.[0]?.key?.messageTimestamp,
+    payload?.key?.timestamp,
+    payload?.message?.key?.timestamp,
+    payload?.data?.key?.timestamp,
+    payload?.data?.messages?.[0]?.key?.timestamp,
+    payload?.messages?.[0]?.key?.timestamp,
+    payload?.timestamp,
+    payload?.data?.timestamp,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' || typeof candidate === 'number') {
+      const value = String(candidate).trim();
+      if (value) {
+        return value;
+      }
+    }
+  }
+
+  return null;
+};
+
+const registerWebhookMessageDeduplication = ({
+  payload,
+  eventName,
+  extractedPhone,
+  extractedText,
+}) => {
+  pruneWebhookDedupeCache();
+
+  const messageId = extractWebhookMessageId(payload);
+  let dedupeKey = null;
+  let ttlMs = WEBHOOK_DEDUPE_TTL_MS;
+
+  if (messageId) {
+    dedupeKey = `id:${messageId}`;
+  } else {
+    ttlMs = WEBHOOK_FALLBACK_DEDUPE_TTL_MS;
+
+    const remoteJid = extractWhatsAppRemoteJidFromWebhook(payload) || '';
+    const messageTimestamp = extractWebhookMessageTimestamp(payload) || '';
+    const normalizedText = String(extractedText || '').trim().toLowerCase();
+    const seed = [
+      normalizeWebhookEventName(eventName),
+      extractedPhone || '',
+      remoteJid,
+      messageTimestamp,
+      normalizedText,
+    ].join('|');
+
+    const hash = crypto.createHash('sha1').update(seed).digest('hex');
+    dedupeKey = `fallback:${hash}`;
+  }
+
+  const now = Date.now();
+  const cached = WEBHOOK_MESSAGE_DEDUPE.get(dedupeKey);
+
+  if (cached && cached.expiresAt > now) {
+    return {
+      deduped: true,
+      dedupeKey,
+      messageId,
+    };
+  }
+
+  WEBHOOK_MESSAGE_DEDUPE.set(dedupeKey, {
+    expiresAt: now + ttlMs,
+  });
+
+  return {
+    deduped: false,
+    dedupeKey,
+    messageId,
+  };
+};
 
 // ==================== WEBHOOKS ====================
 
@@ -170,6 +334,13 @@ const buildWebhookDebugFields = (payload) => ({
 router.post('/webhook', async (req, res, next) => {
   try {
     const payload = req.body || {};
+
+    logger.warn(
+      {
+        route: '/api/v1/whatsapp/webhook',
+      },
+      'Webhook legado recebido. Recomenda-se migrar para /api/v1/whatsapp/webhook/messages-upsert'
+    );
 
     const incoming = mapWebhookIncomingMessage(payload);
 
@@ -187,15 +358,45 @@ router.post('/webhook', async (req, res, next) => {
       return sendSuccess(res, { received: true, processed: false });
     }
 
-    const debugFields = buildWebhookDebugFields(incoming.payload);
+    const dedupe = registerWebhookMessageDeduplication(incoming);
+
+    if (dedupe.deduped) {
+      logger.debug(
+        {
+          event: incoming.eventName,
+          dedupeKey: dedupe.dedupeKey,
+          messageId: dedupe.messageId,
+          phone: incoming.extractedPhone,
+        },
+        'Webhook ignorado por deduplicacao'
+      );
+
+      return sendSuccess(res, {
+        received: true,
+        processed: false,
+        deduped: true,
+        reason: 'duplicate_message',
+      });
+    }
+
+    const debugFields = buildWebhookDebugFields(incoming.payload, incoming.extractedPhone);
 
     logger.debug(debugFields, 'Webhook WhatsApp debug de extração de telefone');
 
-    const result = await handleIncomingMessage(incoming.payload);
+    const result = await handleIncomingMessage(incoming.payload, incoming.extractedText, {
+      preExtractedPhone: incoming.extractedPhone,
+      preExtractedText: incoming.extractedText,
+      eventName: incoming.eventName,
+      dedupeKey: dedupe.dedupeKey,
+      messageId: dedupe.messageId,
+    });
 
     logger.debug(
       {
         phone: debugFields.extractedPhone,
+        event: incoming.eventName,
+        dedupeKey: dedupe.dedupeKey,
+        messageId: dedupe.messageId,
         processed: result?.ok,
         ignored: result?.ignored,
         reason: result?.reason,
@@ -206,6 +407,7 @@ router.post('/webhook', async (req, res, next) => {
     return sendSuccess(res, {
       received: true,
       processed: Boolean(result?.ok),
+      deduped: false,
       ignored: Boolean(result?.ignored),
       reason: result?.reason || null,
     });
@@ -218,7 +420,7 @@ router.post('/webhook', async (req, res, next) => {
 router.post('/webhook/:event', async (req, res, next) => {
   try {
     const payload = req.body || {};
-    const eventName = String(req.params.event || '').toLowerCase();
+    const eventName = normalizeWebhookEventName(req.params.event || '');
 
     logger.debug(
       {
@@ -228,8 +430,7 @@ router.post('/webhook/:event', async (req, res, next) => {
       'Webhook Evolution sub-rota recebida'
     );
 
-    // Ignora eventos que não são de mensagem
-    if (!eventName.includes('message')) {
+    if (!isIncomingWebhookEvent(eventName, { allowEmpty: false })) {
       logger.debug({ event: eventName }, 'Webhook Evolution sub-rota ignorada (nao e mensagem)');
       return sendSuccess(res, { received: true, processed: false });
     }
@@ -253,7 +454,28 @@ router.post('/webhook/:event', async (req, res, next) => {
       return sendSuccess(res, { received: true, processed: false });
     }
 
-    const debugFields = buildWebhookDebugFields(incoming.payload);
+    const dedupe = registerWebhookMessageDeduplication(incoming);
+
+    if (dedupe.deduped) {
+      logger.debug(
+        {
+          event: eventName,
+          dedupeKey: dedupe.dedupeKey,
+          messageId: dedupe.messageId,
+          phone: incoming.extractedPhone,
+        },
+        'Webhook Evolution ignorado por deduplicacao'
+      );
+
+      return sendSuccess(res, {
+        received: true,
+        processed: false,
+        deduped: true,
+        reason: 'duplicate_message',
+      });
+    }
+
+    const debugFields = buildWebhookDebugFields(incoming.payload, incoming.extractedPhone);
 
     logger.debug(
       {
@@ -263,12 +485,20 @@ router.post('/webhook/:event', async (req, res, next) => {
       'Webhook Evolution messages-upsert debug de extração de telefone'
     );
 
-    const result = await handleIncomingMessage(incoming.payload);
+    const result = await handleIncomingMessage(incoming.payload, incoming.extractedText, {
+      preExtractedPhone: incoming.extractedPhone,
+      preExtractedText: incoming.extractedText,
+      eventName: incoming.eventName,
+      dedupeKey: dedupe.dedupeKey,
+      messageId: dedupe.messageId,
+    });
 
     logger.debug(
       {
         event: eventName,
         phone: debugFields.extractedPhone,
+        dedupeKey: dedupe.dedupeKey,
+        messageId: dedupe.messageId,
         processed: result?.ok,
         ignored: result?.ignored,
         reason: result?.reason,
@@ -279,6 +509,7 @@ router.post('/webhook/:event', async (req, res, next) => {
     return sendSuccess(res, {
       received: true,
       processed: Boolean(result?.ok),
+      deduped: false,
       ignored: Boolean(result?.ignored),
       reason: result?.reason || null,
     });
