@@ -250,14 +250,6 @@ const buildWebhookPayloadSummary = (payload = {}) => ({
   from: payload?.from || payload?.data?.from || null,
 });
 
-const hasWebhookRemoteJid = (payload = {}) => {
-  return Boolean(
-    payload?.key?.remoteJid ||
-      payload?.message?.key?.remoteJid ||
-      payload?.data?.key?.remoteJid
-  );
-};
-
 const resolveIncomingMessageInput = (phoneOrPayload, text) => {
   const isPayloadInput =
     phoneOrPayload && typeof phoneOrPayload === 'object' && !Array.isArray(phoneOrPayload);
@@ -276,10 +268,8 @@ const resolveIncomingMessageInput = (phoneOrPayload, text) => {
     };
   }
 
-  const hasRemoteJid = hasWebhookRemoteJid(phoneOrPayload);
-
   return {
-    normalizedPhone: hasRemoteJid ? extractWhatsAppPhoneFromWebhook(phoneOrPayload) : null,
+    normalizedPhone: extractWhatsAppPhoneFromWebhook(phoneOrPayload),
     normalizedText: extractTextFromWebhook(phoneOrPayload),
     remoteJidOriginal: extractWhatsAppRemoteJidFromWebhook(phoneOrPayload),
     payloadSummary: buildWebhookPayloadSummary(phoneOrPayload),

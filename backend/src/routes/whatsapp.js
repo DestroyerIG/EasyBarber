@@ -116,14 +116,6 @@ const extractWebhookFromMe = (payload) => {
   return candidates.find((value) => typeof value === 'boolean') ?? false;
 };
 
-const hasWebhookRemoteJid = (payload) => {
-  return Boolean(
-    payload?.key?.remoteJid ||
-      payload?.message?.key?.remoteJid ||
-      payload?.data?.key?.remoteJid
-  );
-};
-
 const mapWebhookIncomingMessage = (payload) => {
   const normalizedPayload = normalizeWebhookEventPayload(payload);
   const eventName = String(normalizedPayload?.event || normalizedPayload?.type || '').toLowerCase();
@@ -138,14 +130,19 @@ const mapWebhookIncomingMessage = (payload) => {
     return null;
   }
 
-  if (eventName.includes('upsert') && !hasWebhookRemoteJid(normalizedPayload)) {
+  const extractedPhone = extractWhatsAppPhoneFromWebhook(normalizedPayload);
+
+  if (eventName.includes('upsert') && !extractedPhone) {
     logger.warn(
       {
         event: eventName,
+        keyRemoteJid: normalizedPayload?.key?.remoteJid || null,
+        messageKeyRemoteJid: normalizedPayload?.message?.key?.remoteJid || null,
         sender: normalizedPayload?.sender || null,
         from: normalizedPayload?.from || null,
+        extractedPhone,
       },
-      'Webhook ignorado: messages-upsert sem remoteJid valido'
+      'Webhook ignorado: messages-upsert sem telefone extraivel'
     );
     return null;
   }

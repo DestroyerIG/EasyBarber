@@ -47,6 +47,8 @@ export function ClientFormModal({ isOpen, onClose, onSubmit, editingClient }: Cl
     try {
       await onSubmit(formData);
       onClose();
+    } catch {
+      // O erro já é tratado por quem chamou o modal; mantemos aberto para correção.
     } finally {
       setSubmitting(false);
     }

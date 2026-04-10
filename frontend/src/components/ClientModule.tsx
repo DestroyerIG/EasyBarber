@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/ui';
 import { ClientDetailPanel } from '@/components/clients/ClientDetailPanel';
 import { ClientFormModal } from '@/components/clients/ClientFormModal';
 import type { ClientFormData } from '@/components/clients/ClientFormModal';
+import { getApiErrorMessage } from '@/utils/handleApiError';
 import { UserPlus, Search, ChevronRight, User } from 'lucide-react';
 import type { Client, Appointment } from '@/types';
 
@@ -64,14 +65,22 @@ export const ClientModule = () => {
       notes: data.notes || null,
     };
 
-    if (editingClient) {
-      await api.put(`/clients/${editingClient.id}`, payload);
-      showToast('Cliente atualizado com sucesso', 'success');
-    } else {
-      await api.post('/clients', payload);
-      showToast('Cliente cadastrado com sucesso', 'success');
+    try {
+      if (editingClient) {
+        await api.put(`/clients/${editingClient.id}`, payload);
+        showToast('Cliente atualizado com sucesso', 'success');
+      } else {
+        await api.post('/clients', payload);
+        showToast('Cliente cadastrado com sucesso', 'success');
+      }
+      await loadClients();
+    } catch (error) {
+      const fallback = editingClient
+        ? 'Erro ao atualizar cliente'
+        : 'Erro ao cadastrar cliente';
+      showToast(getApiErrorMessage(error, fallback), 'error');
+      throw error;
     }
-    loadClients();
   };
 
   const filteredClients = clients.filter(c =>
