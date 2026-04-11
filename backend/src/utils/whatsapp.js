@@ -2,6 +2,7 @@ const MIN_WHATSAPP_DIGITS = 10;
 const MAX_WHATSAPP_DIGITS = 15;
 const DIRECT_WHATSAPP_JID_SUFFIXES = ['@s.whatsapp.net', '@c.us'];
 const BLOCKED_WHATSAPP_JID_SUFFIXES = ['@g.us', '@lid', '@broadcast', '@newsletter'];
+const BLOCKED_SEND_JID_SUFFIXES = ['@lid', '@g.us', '@broadcast', '@newsletter'];
 const HARD_BLOCKED_CONVERSATION_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
 const MAX_EXTRACTION_REJECTIONS = 20;
 
@@ -246,6 +247,30 @@ const extractWebhookRemoteJidCandidate = (payload = {}) => {
   return null;
 };
 
+const hasBlockedSendJidSuffix = (value) => {
+  if (typeof value !== 'string') return false;
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+
+  if (normalized === 'status@broadcast') {
+    return true;
+  }
+
+  return BLOCKED_SEND_JID_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
+};
+
+export const isInvalidJidContext = (jid) => hasBlockedSendJidSuffix(jid);
+
+export const isValidPhone = (phone) => {
+  if (typeof phone !== 'string') return false;
+
+  const candidate = phone.trim();
+  if (!candidate) return false;
+
+  return /^\d{10,15}$/.test(candidate);
+};
+
 export const normalizePhone = (value) => {
   if (value === null || value === undefined) return null;
 
@@ -273,6 +298,56 @@ export const normalizePhone = (value) => {
 };
 
 export const normalizeWhatsAppNumber = (value) => normalizePhone(value);
+
+export const normalizePhoneForSend = (value) => {
+  if (value === null || value === undefined) return null;
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  if (hasBlockedSendJidSuffix(raw)) {
+    return null;
+  }
+
+  const lowered = raw.toLowerCase();
+  let candidate = raw;
+
+  if (lowered.endsWith('@s.whatsapp.net')) {
+    candidate = raw.slice(0, -'@s.whatsapp.net'.length);
+  } else if (lowered.endsWith('@c.us')) {
+    candidate = raw.slice(0, -'@c.us'.length);
+  } else if (raw.includes('@')) {
+    candidate = raw.split('@')[0];
+  }
+
+  const digits = candidate.replace(/\D/g, '');
+  if (!isValidPhone(digits)) {
+    return null;
+  }
+
+  return digits;
+};
+
+export const resolveReplyDestination = ({ phone, remoteJidOriginal } = {}) => {
+  if (isInvalidJidContext(remoteJidOriginal)) {
+    return null;
+  }
+
+  const normalizedPhone = normalizePhoneForSend(phone);
+  if (normalizedPhone) {
+    return normalizedPhone;
+  }
+
+  if (typeof remoteJidOriginal !== 'string' || !remoteJidOriginal.trim()) {
+    return null;
+  }
+
+  if (hasBlockedSendJidSuffix(remoteJidOriginal)) {
+    return null;
+  }
+
+  return normalizePhoneForSend(remoteJidOriginal);
+};
 
 export const extractWhatsAppRemoteJidFromWebhook = (payload = {}) => {
   const remoteJid = extractWebhookRemoteJidCandidate(payload);

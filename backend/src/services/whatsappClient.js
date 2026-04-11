@@ -10,7 +10,33 @@ import {
   EvolutionApiError,
 } from './evolutionApiService.js';
 import logger from '../utils/logger.js';
-import { normalizeWhatsAppNumber } from '../utils/whatsapp.js';
+import {
+  normalizeWhatsAppNumber,
+  isInvalidJidContext,
+  isValidPhone,
+  normalizePhoneForSend,
+  resolveReplyDestination,
+} from '../utils/whatsapp.js';
+
+const resolveBlockedJidContextReason = (jid) => {
+  const normalized = String(jid || '').trim().toLowerCase();
+
+  if (!normalized) return 'blocked_invalid_context';
+  if (normalized === 'status@broadcast' || normalized.endsWith('@broadcast')) {
+    return 'blocked_broadcast_context';
+  }
+  if (normalized.endsWith('@lid')) {
+    return 'blocked_lid_context';
+  }
+  if (normalized.endsWith('@g.us')) {
+    return 'blocked_group_context';
+  }
+  if (normalized.endsWith('@newsletter')) {
+    return 'blocked_newsletter_context';
+  }
+
+  return 'blocked_invalid_context';
+};
 
 const STATUS = {
   UNAVAILABLE: 'unavailable',
@@ -385,21 +411,51 @@ export const disconnectWhatsApp = async () => {
 
 export const sendWhatsAppText = async (phone, message, context = {}) => {
   const rawPhone = String(phone ?? '').trim();
-  const normalizedPhone = normalizeWhatsAppNumber(rawPhone);
+  const normalizedPhone = normalizePhoneForSend(rawPhone);
   const normalizedMessage = String(message || '').trim();
   const remoteJidOriginal =
     typeof context?.remoteJidOriginal === 'string' && context.remoteJidOriginal.trim()
       ? context.remoteJidOriginal.trim()
       : null;
   const endpoint = `/message/sendText/${getEvolutionConfig().instanceName}`;
+  const resolvedDestination = resolveReplyDestination({
+    phone: rawPhone,
+    remoteJidOriginal,
+  });
+  const destinationSource = normalizedPhone ? 'phone' : resolvedDestination ? 'remoteJidOriginal' : null;
 
-  if (!normalizedPhone || rawPhone !== normalizedPhone) {
+  if (isInvalidJidContext(remoteJidOriginal)) {
     logger.warn(
       {
-        phone: rawPhone,
+        phone: normalizedPhone || rawPhone || null,
         remoteJidOriginal,
+        reason: resolveBlockedJidContextReason(remoteJidOriginal),
       },
-      'Envio WhatsApp ignorado: telefone nao normalizado ou invalido'
+      'Envio WhatsApp ignorado: contexto de JID bloqueado'
+    );
+    return false;
+  }
+
+  if (!isValidPhone(normalizedPhone || '')) {
+    logger.warn(
+      {
+        phone: normalizedPhone || rawPhone || null,
+        remoteJidOriginal,
+        reason: 'invalid_phone',
+      },
+      'Envio WhatsApp ignorado: telefone invalido'
+    );
+    return false;
+  }
+
+  if (!resolvedDestination) {
+    logger.warn(
+      {
+        phone: normalizedPhone || rawPhone || null,
+        remoteJidOriginal,
+        reason: 'invalid_destination',
+      },
+      'Envio WhatsApp ignorado: destino invalido para resposta'
     );
     return false;
   }
@@ -407,8 +463,9 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   if (!normalizedMessage) {
     logger.warn(
       {
-        phone: normalizedPhone,
+        phone: normalizedPhone || rawPhone || null,
         remoteJidOriginal,
+        reason: 'empty_message',
       },
       'Envio WhatsApp ignorado: mensagem vazia'
     );
@@ -416,10 +473,14 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   }
 
   try {
-    await sendTextMessage({
-      phone: normalizedPhone,
+    const sendResult = await sendTextMessage({
+      phone: resolvedDestination,
       text: normalizedMessage,
+      remoteJidOriginal,
     });
+
+    const payloadShapeUsed = sendResult?.meta?.payloadShape || null;
+    const endpointUsed = sendResult?.meta?.endpoint || endpoint;
 
     // Se estava em estado inconsistente local, tenta ressincronizar
     if (waState.status !== STATUS.CONNECTED) {
@@ -433,9 +494,12 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
 
     logger.info(
       {
-        phone: normalizedPhone,
+        phone: normalizedPhone || rawPhone || null,
         remoteJidOriginal,
-        endpoint,
+        resolvedDestination,
+        destinationSource,
+        endpoint: endpointUsed,
+        payloadShapeUsed,
         messageLength: normalizedMessage.length,
       },
       'Mensagem enviada via Evolution API'
@@ -446,8 +510,10 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
     logger.error(
       {
         err: error,
-        phone: normalizedPhone,
+        phone: normalizedPhone || rawPhone || null,
         remoteJidOriginal,
+        resolvedDestination,
+        destinationSource,
         endpoint,
         status: error?.status || null,
         evolutionErrorPayload: error?.details || null,

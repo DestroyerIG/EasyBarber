@@ -1,5 +1,5 @@
 import logger from '../utils/logger.js';
-import { normalizeWhatsAppNumber } from '../utils/whatsapp.js';
+import { normalizePhoneForSend } from '../utils/whatsapp.js';
 
 const DEFAULT_TIMEOUT_MS = 10000;
 const DEFAULT_RETRY_ATTEMPTS = 1;
@@ -267,13 +267,29 @@ const requestWithFallback = async (candidates, operationName, fallbackStatuses =
 const requestTryingPayloads = async (
   candidates,
   operationName,
-  fallbackStatuses = [400, 409, 415, 422]
+  fallbackStatuses = [400, 409, 415, 422],
+  options = {}
 ) => {
+  const includeMeta = Boolean(options?.includeMeta);
   let lastError = null;
 
-  for (const candidate of candidates) {
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    const payloadShape = describePayloadShape(candidate?.body);
+
     try {
-      return await request(candidate);
+      const payload = await request(candidate);
+
+      if (includeMeta) {
+        return {
+          payload,
+          payloadShape,
+          candidate,
+          candidateIndex: index,
+        };
+      }
+
+      return payload;
     } catch (error) {
       lastError = error;
 
@@ -288,6 +304,7 @@ const requestTryingPayloads = async (
             path: candidate.path,
             status: error.status,
             bodyKeys: candidate?.body ? Object.keys(candidate.body) : [],
+            payloadShape,
           },
           'Tentando proximo payload da Evolution API'
         );
@@ -299,6 +316,57 @@ const requestTryingPayloads = async (
   }
 
   throw lastError || new EvolutionApiError(`${operationName} indisponivel`);
+};
+
+const describePayloadShape = (body) => {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return 'empty';
+  }
+
+  const keys = Object.keys(body).sort();
+
+  if (keys.includes('instanceName') && keys.includes('number') && keys.includes('textMessage')) {
+    return 'instanceName+number+textMessage';
+  }
+
+  if (keys.includes('number') && keys.includes('textMessage')) {
+    return 'number+textMessage';
+  }
+
+  return keys.join('+') || 'empty';
+};
+
+const filterIncompatibleSendTextCandidates = (candidates = [], context = {}) => {
+  const filtered = [];
+
+  for (const candidate of candidates) {
+    const rawDestination = candidate?.body?.number;
+    const normalizedDestination = normalizePhoneForSend(rawDestination);
+
+    if (!normalizedDestination) {
+      logger.warn(
+        {
+          endpoint: candidate?.path || null,
+          payloadShape: describePayloadShape(candidate?.body),
+          phone: context?.phone || null,
+          remoteJidOriginal: context?.remoteJidOriginal || null,
+          resolvedDestination: null,
+        },
+        'Payload de envio Evolution descartado: destino incompatível'
+      );
+      continue;
+    }
+
+    filtered.push({
+      ...candidate,
+      body: {
+        ...(candidate.body || {}),
+        number: normalizedDestination,
+      },
+    });
+  }
+
+  return filtered;
 };
 
 const unwrapInstancesList = (payload) => {
@@ -438,9 +506,9 @@ export const logoutInstance = async () => {
   );
 };
 
-export const sendTextMessage = async ({ phone, text }) => {
+export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null }) => {
   const { instanceName } = getConfig();
-  const normalizedPhone = normalizeWhatsAppNumber(phone);
+  const normalizedPhone = normalizePhoneForSend(phone);
   const normalizedText = String(text || '').trim();
 
   if (!normalizedPhone) {
@@ -479,7 +547,45 @@ export const sendTextMessage = async ({ phone, text }) => {
     },
   ];
 
-  return requestTryingPayloads(candidates, 'sendTextMessage', [400, 409, 415, 422]);
+  const compatibleCandidates = filterIncompatibleSendTextCandidates(candidates, {
+    phone,
+    remoteJidOriginal,
+  });
+
+  if (!compatibleCandidates.length) {
+    throw new EvolutionApiError('Numero de telefone invalido para envio', {
+      code: 'EVOLUTION_INVALID_PHONE',
+    });
+  }
+
+  logger.debug(
+    {
+      phone,
+      remoteJidOriginal,
+      resolvedDestination: normalizedPhone,
+      endpoint: `/message/sendText/${instanceName}`,
+      payloadShapes: compatibleCandidates.map((candidate) => describePayloadShape(candidate?.body)),
+    },
+    'Enviando mensagem de texto para Evolution API'
+  );
+
+  const requestResult = await requestTryingPayloads(
+    compatibleCandidates,
+    'sendTextMessage',
+    [400, 409, 415, 422],
+    { includeMeta: true }
+  );
+
+  return {
+    payload: requestResult?.payload ?? null,
+    meta: {
+      endpoint: requestResult?.candidate?.path || `/message/sendText/${instanceName}`,
+      payloadShape: requestResult?.payloadShape || null,
+      candidateIndex: typeof requestResult?.candidateIndex === 'number'
+        ? requestResult.candidateIndex
+        : null,
+    },
+  };
 };
 
 export { EvolutionApiError };

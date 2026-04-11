@@ -4,7 +4,11 @@ import {
   extractWhatsAppPhoneFromWebhook,
   extractWhatsAppPhoneFromWebhookDetailed,
   extractWhatsAppInstanceNumbersFromWebhook,
+  isInvalidJidContext,
+  isValidPhone,
   normalizePhone,
+  normalizePhoneForSend,
+  resolveReplyDestination,
 } from '../utils/whatsapp.js';
 
 describe('whatsapp webhook phone extraction', () => {
@@ -213,5 +217,51 @@ describe('whatsapp webhook phone extraction', () => {
     expect(normalizePhone(' +55 (83) 96311-811@s.whatsapp.net ')).toBe('558396311811');
     expect(normalizePhone('558396311811@c.us')).toBe('558396311811');
     expect(normalizePhone('236197968359561@lid')).toBeNull();
+  });
+
+  it('normalizes destination for send payloads', () => {
+    expect(normalizePhoneForSend(' +55 (83) 96311-811@s.whatsapp.net ')).toBe('558396311811');
+    expect(normalizePhoneForSend('558396311811@c.us')).toBe('558396311811');
+    expect(normalizePhoneForSend('236197968359561@lid')).toBeNull();
+    expect(normalizePhoneForSend('120363012345678901@g.us')).toBeNull();
+  });
+
+  it('blocks reply destination when context jid is invalid', () => {
+    const destination = resolveReplyDestination({
+      phone: '558396311811',
+      remoteJidOriginal: '236197968359561@lid',
+    });
+
+    expect(destination).toBeNull();
+  });
+
+  it('falls back to remoteJidOriginal only when it is not blocked', () => {
+    expect(
+      resolveReplyDestination({
+        phone: null,
+        remoteJidOriginal: '558396311811@s.whatsapp.net',
+      })
+    ).toBe('558396311811');
+
+    expect(
+      resolveReplyDestination({
+        phone: null,
+        remoteJidOriginal: '236197968359561@lid',
+      })
+    ).toBeNull();
+  });
+
+  it('validates blocked jid contexts for send', () => {
+    expect(isInvalidJidContext('236197968359561@lid')).toBe(true);
+    expect(isInvalidJidContext('120363012345678901@g.us')).toBe(true);
+    expect(isInvalidJidContext('status@broadcast')).toBe(true);
+    expect(isInvalidJidContext('5511999999999@s.whatsapp.net')).toBe(false);
+  });
+
+  it('validates canonical phone format for send', () => {
+    expect(isValidPhone('558396311811')).toBe(true);
+    expect(isValidPhone('5583')).toBe(false);
+    expect(isValidPhone('558396311811000000')).toBe(false);
+    expect(isValidPhone('55 83 96311-811')).toBe(false);
   });
 });
