@@ -1,3 +1,10 @@
+/**
+ * whatsappFlowService.js
+ *
+ * Fluxo completo do bot WhatsApp com máquina de estados baseada em sessões.
+ * Restaura: menu → serviço → nome → barbeiro → data → hora → confirmação
+ */
+
 import logger from '../../utils/logger.js';
 import pool from '../../config/database.js';
 import { sendWhatsAppMessage, buildWelcomeMessage } from './whatsappMessageService.js';
@@ -8,16 +15,29 @@ import {
   extractWhatsAppInstanceNumbersFromWebhook,
   extractWhatsAppRemoteJidFromWebhook,
 } from '../../utils/whatsapp.js';
+import {
+  getSession,
+  isSessionExpired,
+  createSession,
+  updateSession,
+  deleteSession,
+} from './whatsappSessionService.js';
+import { getBotConfig, getMenuOptions } from './whatsappConfigService.js';
+import { STEPS, RATING_TEXTS } from './whatsappConstants.js';
+import {
+  handleCancelAppointment,
+  handleConfirmCancel,
+  handleRescheduleAppointment,
+  handleConfirmReschedule,
+  handlePostAttendanceEvaluation,
+  handleSendRating,
+} from './whatsappBookingService.js';
+
+// ==================== HELPERS INTERNOS ====================
 
 const normalizeText = (value) => {
-  if (typeof value === 'string') {
-    return value.trim();
-  }
-
-  if (typeof value === 'number') {
-    return String(value).trim();
-  }
-
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number') return String(value).trim();
   return '';
 };
 
@@ -28,13 +48,8 @@ const normalizeWebhookEventName = (value) =>
     .replace(/[._\s]+/g, '-');
 
 const isWebhookBooleanTrue = (value) => {
-  if (value === true) return true;
-  if (value === 1) return true;
-
-  if (typeof value !== 'string') {
-    return false;
-  }
-
+  if (value === true || value === 1) return true;
+  if (typeof value !== 'string') return false;
   const normalized = value.trim().toLowerCase();
   return normalized === 'true' || normalized === '1';
 };
@@ -51,32 +66,127 @@ const INCOMING_MESSAGE_EVENTS = new Set([
   'messageset',
 ]);
 
-const resolveFlowBarbershopId = async () => {
-  const configuredBarbershopId =
-    typeof process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID === 'string' &&
-    process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID.trim()
-      ? process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID.trim()
-      : null;
+const isGreeting = (text) => {
+  const normalized = normalizeText(text).toLowerCase();
+  return [
+    'oi', 'ola', 'olá', 'menu', 'inicio', 'início',
+    'bom dia', 'boa tarde', 'boa noite',
+  ].includes(normalized);
+};
 
-  const connectedNumber = normalizeWhatsAppNumber(getWhatsAppStatus()?.connectedNumber);
+const normalizeChoice = (text) => {
+  const cleaned = normalizeText(text).toLowerCase();
+  if (!cleaned) return null;
+
+  const numericMatch = cleaned.match(/^(\d{1,2})$/);
+  if (numericMatch) return Number(numericMatch[1]);
+
+  const emojiMap = {
+    '1️⃣': 1, '2️⃣': 2, '3️⃣': 3, '4️⃣': 4, '5️⃣': 5,
+    '6️⃣': 6, '7️⃣': 7, '8️⃣': 8, '9️⃣': 9, '🔟': 10,
+  };
+  if (emojiMap[cleaned]) return emojiMap[cleaned];
+
+  return null;
+};
+
+const isFromMe = (payload = {}) => {
+  const candidates = [
+    payload?.fromMe,
+    payload?.key?.fromMe,
+    payload?.data?.fromMe,
+    payload?.data?.key?.fromMe,
+    payload?.data?.messages?.[0]?.key?.fromMe,
+    payload?.messages?.[0]?.key?.fromMe,
+  ];
+  return candidates.some((value) => isWebhookBooleanTrue(value));
+};
+
+const isIncomingMessageEvent = (payload = {}) => {
+  const eventName = normalizeWebhookEventName(
+    payload?.event || payload?.type || payload?.data?.event || payload?.data?.type || ''
+  );
+  if (!eventName) return true;
+  return INCOMING_MESSAGE_EVENTS.has(eventName);
+};
+
+const extractTextFromWebhook = (payload = {}) => {
+  const candidates = [
+    payload?.text,
+    payload?.body,
+    payload?.message,
+    payload?.content,
+    payload?.data?.text,
+    payload?.data?.body,
+    payload?.data?.message,
+    payload?.data?.content,
+    payload?.message?.text,
+    payload?.message?.body,
+    payload?.message?.conversation,
+    payload?.message?.extendedTextMessage?.text,
+    payload?.data?.message?.conversation,
+    payload?.data?.message?.extendedTextMessage?.text,
+    payload?.data?.messages?.[0]?.message?.conversation,
+    payload?.data?.messages?.[0]?.message?.extendedTextMessage?.text,
+    payload?.messages?.[0]?.message?.conversation,
+    payload?.messages?.[0]?.message?.extendedTextMessage?.text,
+  ];
+  for (const candidate of candidates) {
+    const normalized = normalizeText(candidate);
+    if (normalized) return normalized;
+  }
+  return '';
+};
+
+const buildWebhookPayloadSummary = (payload = {}) => ({
+  event: payload?.event || payload?.type || payload?.data?.event || payload?.data?.type || null,
+  keyRemoteJid: payload?.key?.remoteJid || payload?.data?.key?.remoteJid || null,
+  messageKeyRemoteJid: payload?.message?.key?.remoteJid || null,
+  sender: payload?.sender || payload?.data?.sender || null,
+  participant:
+    payload?.key?.participant ||
+    payload?.data?.key?.participant ||
+    payload?.message?.key?.participant ||
+    payload?.data?.participant ||
+    null,
+  from: payload?.from || payload?.data?.from || null,
+  fromMe:
+    payload?.fromMe || payload?.key?.fromMe || payload?.data?.fromMe ||
+    payload?.data?.key?.fromMe || null,
+});
+
+const mergeKnownInstanceNumbers = (values = []) => {
+  const normalized = new Set();
+  for (const value of values) {
+    const phone = normalizeWhatsAppNumber(value);
+    if (phone) normalized.add(phone);
+  }
+  return Array.from(normalized);
+};
+
+const resolveConnectedNumber = () =>
+  normalizeWhatsAppNumber(getWhatsAppStatus()?.connectedNumber);
+
+// ==================== RESOLUÇÃO DE BARBERSHOP ====================
+
+const resolveFlowBarbershopId = async () => {
+  const connectedNumber = resolveConnectedNumber();
 
   if (connectedNumber) {
     try {
+      // Tenta match exato primeiro
       const result = await pool.query(
-        `SELECT id
-         FROM barbershops
+        `SELECT id FROM barbershops
          WHERE regexp_replace(COALESCE(whatsapp, ''), '\\D', '', 'g') = $1
+            OR regexp_replace(COALESCE(whatsapp, ''), '\\D', '', 'g') = $2
          ORDER BY created_at ASC NULLS LAST, id ASC
          LIMIT 2`,
-        [connectedNumber]
+        [connectedNumber, connectedNumber.replace(/^55/, '')]
       );
 
       if (result.rows.length > 1) {
         logger.warn(
-          {
-            connectedNumber,
-            matches: result.rows.length,
-          },
+          { connectedNumber, matches: result.rows.length },
           'Multiplas barbearias encontradas para o mesmo WhatsApp conectado; usando o primeiro match'
         );
       }
@@ -85,28 +195,21 @@ const resolveFlowBarbershopId = async () => {
         return result.rows[0].id;
       }
     } catch (error) {
-      logger.warn(
-        {
-          err: error,
-          connectedNumber,
-        },
-        'Falha ao resolver barbershop pelo numero conectado do WhatsApp'
-      );
+      logger.warn({ err: error, connectedNumber }, 'Falha ao resolver barbershop pelo numero conectado do WhatsApp');
     }
   }
 
-  if (configuredBarbershopId) {
-    return configuredBarbershopId;
-  }
+  const configuredId = typeof process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID === 'string' &&
+    process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID.trim()
+    ? process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID.trim()
+    : null;
+
+  if (configuredId) return configuredId;
 
   try {
     const result = await pool.query(
-      `SELECT id
-       FROM barbershops
-       ORDER BY id ASC
-       LIMIT 1`
+      `SELECT id FROM barbershops WHERE active = true ORDER BY id ASC LIMIT 1`
     );
-
     return result.rows[0]?.id || null;
   } catch (error) {
     logger.warn({ err: error }, 'Falha ao resolver barbershop fallback no fluxo WhatsApp');
@@ -114,115 +217,15 @@ const resolveFlowBarbershopId = async () => {
   }
 };
 
-const normalizeChoice = (text) => {
-  const cleaned = normalizeText(text).toLowerCase();
-
-  if (!cleaned) return null;
-
-  const numericMatch = cleaned.match(/^(\d{1,2})$/);
-  if (numericMatch) {
-    return Number(numericMatch[1]);
-  }
-
-  const emojiMap = {
-    '1️⃣': 1,
-    '2️⃣': 2,
-    '3️⃣': 3,
-    '4️⃣': 4,
-    '5️⃣': 5,
-    '6️⃣': 6,
-    '7️⃣': 7,
-    '8️⃣': 8,
-    '9️⃣': 9,
-    '🔟': 10,
-  };
-
-  if (emojiMap[cleaned]) {
-    return emojiMap[cleaned];
-  }
-
-  return null;
-};
-
-const isGreeting = (text) => {
-  const normalized = normalizeText(text).toLowerCase();
-  return [
-    'oi',
-    'ola',
-    'olá',
-    'menu',
-    'inicio',
-    'início',
-    'bom dia',
-    'boa tarde',
-    'boa noite',
-  ].includes(normalized);
-};
-
-const getBotConfig = async (barbershopId) => {
-  if (!barbershopId) {
-    return null;
-  }
-
-  try {
-    const configResult = await pool.query(
-      `
-      SELECT *
-      FROM whatsapp_bot_config
-      WHERE barbershop_id = $1
-      ORDER BY updated_at DESC NULLS LAST, id DESC
-      LIMIT 1
-      `,
-      [barbershopId]
-    );
-
-    return configResult.rows[0] || null;
-  } catch (error) {
-    logger.warn({ err: error, barbershopId }, 'Falha ao buscar configuracao do bot WhatsApp');
-    return null;
-  }
-};
-
-const getMenuOptions = async (barbershopId) => {
-  if (!barbershopId) {
-    return [];
-  }
-
-  try {
-    const result = await pool.query(
-      `
-      SELECT *
-      FROM whatsapp_menu_options
-      WHERE active = true
-        AND barbershop_id = $1
-      ORDER BY option_order ASC
-      `,
-      [barbershopId]
-    );
-
-    return result.rows || [];
-  } catch (error) {
-    logger.warn({ err: error, barbershopId }, 'Falha ao buscar opcoes do menu WhatsApp');
-    return [];
-  }
-};
+// ==================== CONSTRUÇÃO DO MENU ====================
 
 const getBarbershopName = async (barbershopId) => {
-  if (!barbershopId) {
-    return 'EasyBarber';
-  }
-
+  if (!barbershopId) return 'EasyBarber';
   try {
     const result = await pool.query(
-      `
-      SELECT name
-      FROM barbershops
-      WHERE id = $1
-      LIMIT 1
-      `,
+      `SELECT name FROM barbershops WHERE id = $1 LIMIT 1`,
       [barbershopId]
     );
-
     return result.rows[0]?.name || 'EasyBarber';
   } catch (error) {
     logger.warn({ err: error, barbershopId }, 'Falha ao buscar nome da barbearia');
@@ -232,9 +235,12 @@ const getBarbershopName = async (barbershopId) => {
 
 const buildFallbackWelcomeMessage = (barbershopName) => {
   return [
-    `Olá 👋 Bem-vindo à ${barbershopName}!`,
+    `Olá 👋 Bem-vindo à *${barbershopName}*!`,
     '',
-    'Digite uma opção:',
+    'Me chame de *EasyBarber Bot* 🤖 e estou aqui para agilizar seu atendimento.',
+    '',
+    'Como posso ajudar hoje?',
+    '',
     '1️⃣ *Agendar um horário* 💈',
     '2️⃣ *Ver nossos serviços* 📋',
     '3️⃣ *Cancelar agendamento* ❌',
@@ -254,158 +260,522 @@ const buildMenuMessage = async (barbershopId) => {
     getBarbershopName(barbershopId),
   ]);
 
-  if (!options.length) {
+  if (!options || !options.length) {
     return buildFallbackWelcomeMessage(barbershopName);
   }
 
   return buildWelcomeMessage(
-    config?.welcome_header || 'Olá 👋 Bem-vindo!',
-    options.map((item) => ({
-      label: item.label,
-      emoji: item.emoji,
-    })),
+    config?.welcome_header || 'Olá 👋 Bem-vindo à {nome_barbearia}!\n\nComo posso ajudar hoje?',
+    options.map((item) => ({ label: item.label, emoji: item.emoji })),
     barbershopName
   );
 };
 
-const getMenuOptionByChoice = async (choice, barbershopId) => {
-  if (!choice || !barbershopId) return null;
-
-  try {
-    const result = await pool.query(
-      `
-      SELECT *
-      FROM whatsapp_menu_options
-      WHERE active = true
-        AND barbershop_id = $2
-        AND option_order = $1
-      LIMIT 1
-      `,
-      [choice, barbershopId]
-    );
-
-    return result.rows[0] || null;
-  } catch (error) {
-    logger.warn({ err: error, choice, barbershopId }, 'Falha ao buscar opcao de menu');
-    return null;
-  }
-};
-
-const buildSystemHandlerResponse = async (option, barbershopId) => {
-  const config = await getBotConfig(barbershopId);
-
-  switch (option.handler) {
-    case 'schedule':
-      return config?.ask_name_message || 'Perfeito. Para iniciar seu agendamento, envie seu nome completo.';
-
-    case 'view_services':
-      return option.response_message || 'Em breve vou listar nossos serviços disponíveis.';
-
-    case 'cancel':
-      return config?.cancel_list_message || 'Para cancelamento, envie seu nome completo para localizar seus agendamentos.';
-
-    case 'reschedule':
-      return config?.reschedule_list_message || 'Para reagendar, envie seu nome completo para localizar seus agendamentos.';
-
-    case 'rating':
-      return config?.rating_question_message || 'Como foi seu atendimento? Responda com uma nota de 1 a 5.';
-
-    case 'promotions':
-      return config?.promotions_message || 'No momento não há promoções ativas.';
-
-    case 'instagram':
-      return config?.instagram_message || 'Siga nosso Instagram para novidades.';
-
-    case 'attendant':
-      return config?.attendant_message || 'Certo. Vou encaminhar você para atendimento humano.';
-
-    case 'end_session':
-      return config?.end_session_message || 'Atendimento encerrado. Quando quiser, envie "oi" para começar novamente.';
-
-    default:
-      return option.response_message || 'Opção recebida com sucesso.';
-  }
-};
-
-const buildInvalidOptionMessage = async (barbershopId) => {
-  const config = await getBotConfig(barbershopId);
+// Exportada para uso no whatsappBookingService
+export const goBackToMainMenu = async (phone, barbershopId) => {
+  await deleteSession(phone, barbershopId);
+  await createSession(phone, barbershopId);
   const menuMessage = await buildMenuMessage(barbershopId);
-
-  return [
-    config?.invalid_option_message || 'Opção inválida. Escolha uma opção do menu.',
-    '',
-    menuMessage,
-  ].join('\n');
+  return { message: menuMessage };
 };
 
-const extractTextFromWebhook = (payload = {}) => {
-  const candidates = [
-    payload?.text,
-    payload?.body,
-    payload?.message,
-    payload?.content,
-    payload?.data?.text,
-    payload?.data?.body,
-    payload?.data?.message,
-    payload?.data?.content,
-    payload?.message?.text,
-    payload?.message?.body,
-    payload?.message?.conversation,
-    payload?.message?.extendedTextMessage?.text,
-    payload?.data?.message?.conversation,
-    payload?.data?.message?.extendedTextMessage?.text,
-  ];
+// ==================== HANDLERS DE STEPS ====================
 
-  for (const candidate of candidates) {
-    const normalized = normalizeText(candidate);
-    if (normalized) {
-      return normalized;
+const handleMenuStep = async (phone, text, barbershopId, config, sendContext) => {
+  const choice = normalizeChoice(text);
+
+  if (!choice) {
+    const menu = await buildMenuMessage(barbershopId);
+    await sendWhatsAppMessage(phone, config.invalid_option_message + '\n\n' + menu, sendContext);
+    return { ok: true };
+  }
+
+  // Busca opção do menu
+  const optionResult = await pool.query(
+    `SELECT * FROM whatsapp_menu_options
+     WHERE active = true AND barbershop_id = $1 AND option_order = $2
+     LIMIT 1`,
+    [barbershopId, choice]
+  );
+
+  if (!optionResult.rows.length) {
+    const menu = await buildMenuMessage(barbershopId);
+    await sendWhatsAppMessage(phone, config.invalid_option_message + '\n\n' + menu, sendContext);
+    return { ok: true };
+  }
+
+  const option = optionResult.rows[0];
+
+  // Opção personalizada (type=custom)
+  if (option.type === 'custom' && option.response_message) {
+    await sendWhatsAppMessage(phone, option.response_message, sendContext);
+    await deleteSession(phone, barbershopId);
+    return { ok: true };
+  }
+
+  // Handlers de sistema
+  switch (option.handler) {
+    case 'schedule': {
+      // Verifica se cliente já tem nome cadastrado
+      const clientResult = await pool.query(
+        `SELECT id, name FROM clients WHERE phone = $1 AND barbershop_id = $2 LIMIT 1`,
+        [phone, barbershopId]
+      );
+
+      if (clientResult.rows.length > 0) {
+        // Cliente já cadastrado, vai direto para serviço
+        await updateSession(phone, barbershopId, STEPS.CHOOSE_SERVICE, {
+          clientId: clientResult.rows[0].id,
+          clientName: clientResult.rows[0].name,
+        });
+        const services = await pool.query(
+          `SELECT id, name, price, duration_minutes FROM services WHERE barbershop_id = $1 AND active = true ORDER BY name`,
+          [barbershopId]
+        );
+        if (!services.rows.length) {
+          await sendWhatsAppMessage(phone, 'Desculpe, não há serviços disponíveis no momento.', sendContext);
+          await deleteSession(phone, barbershopId);
+          return { ok: true };
+        }
+        let msg = '💈 *Escolha o serviço:*\n\n';
+        services.rows.forEach((s, i) => {
+          msg += `${i + 1}️⃣ *${s.name}* — R$ ${Number(s.price).toFixed(2)} (${s.duration_minutes} min)\n`;
+        });
+        msg += '\n0️⃣ Voltar ao menu';
+        await sendWhatsAppMessage(phone, msg, sendContext);
+        await updateSession(phone, barbershopId, STEPS.CHOOSE_SERVICE, {
+          clientId: clientResult.rows[0].id,
+          clientName: clientResult.rows[0].name,
+          services: services.rows,
+        });
+      } else {
+        // Cliente novo, pede o nome
+        await updateSession(phone, barbershopId, STEPS.ASK_NAME, {});
+        await sendWhatsAppMessage(phone, config.ask_name_message, sendContext);
+      }
+      return { ok: true };
+    }
+
+    case 'view_services': {
+      const services = await pool.query(
+        `SELECT name, price, duration_minutes FROM services WHERE barbershop_id = $1 AND active = true ORDER BY name`,
+        [barbershopId]
+      );
+      if (!services.rows.length) {
+        await sendWhatsAppMessage(phone, 'Não há serviços cadastrados no momento.', sendContext);
+      } else {
+        let msg = '📋 *Nossos serviços:*\n\n';
+        services.rows.forEach((s) => {
+          msg += `💈 *${s.name}* — R$ ${Number(s.price).toFixed(2)} (${s.duration_minutes} min)\n`;
+        });
+        await sendWhatsAppMessage(phone, msg, sendContext);
+      }
+      await deleteSession(phone, barbershopId);
+      return { ok: true };
+    }
+
+    case 'cancel': {
+      const result = await handleCancelAppointment(phone, barbershopId, config);
+      await sendWhatsAppMessage(phone, result.message, sendContext);
+      return { ok: true };
+    }
+
+    case 'reschedule': {
+      const result = await handleRescheduleAppointment(phone, barbershopId, config);
+      await sendWhatsAppMessage(phone, result.message, sendContext);
+      return { ok: true };
+    }
+
+    case 'rating': {
+      const result = await handlePostAttendanceEvaluation(phone, barbershopId, config);
+      await sendWhatsAppMessage(phone, result.message, sendContext);
+      return { ok: true };
+    }
+
+    case 'promotions': {
+      await sendWhatsAppMessage(phone, config.promotions_message, sendContext);
+      await deleteSession(phone, barbershopId);
+      return { ok: true };
+    }
+
+    case 'instagram': {
+      const barbershopResult = await pool.query(
+        `SELECT instagram_handle FROM barbershops WHERE id = $1 LIMIT 1`,
+        [barbershopId]
+      );
+      const instagramHandle = barbershopResult.rows[0]?.instagram_handle || '@suabarbearia';
+      const msg = config.instagram_message.replace('{instagram_handle}', instagramHandle);
+      await sendWhatsAppMessage(phone, msg, sendContext);
+      await deleteSession(phone, barbershopId);
+      return { ok: true };
+    }
+
+    case 'attendant': {
+      await sendWhatsAppMessage(phone, config.attendant_message, sendContext);
+      await deleteSession(phone, barbershopId);
+      return { ok: true };
+    }
+
+    case 'end_session': {
+      await sendWhatsAppMessage(phone, config.end_session_message, sendContext);
+      await deleteSession(phone, barbershopId);
+      return { ok: true };
+    }
+
+    default: {
+      const menu = await buildMenuMessage(barbershopId);
+      await sendWhatsAppMessage(phone, config.invalid_option_message + '\n\n' + menu, sendContext);
+      return { ok: true };
+    }
+  }
+};
+
+const handleAskNameStep = async (phone, text, barbershopId, config, sendContext) => {
+  if (text === '0' || text.toLowerCase() === 'menu') {
+    const result = await goBackToMainMenu(phone, barbershopId);
+    await sendWhatsAppMessage(phone, result.message, sendContext);
+    return { ok: true };
+  }
+
+  const name = text.trim();
+  if (name.split(' ').length < 2 || name.length < 3) {
+    await sendWhatsAppMessage(phone, config.name_validation_message, sendContext);
+    return { ok: true };
+  }
+
+  // Cria ou atualiza o cliente
+  const existingClient = await pool.query(
+    `SELECT id FROM clients WHERE phone = $1 AND barbershop_id = $2 LIMIT 1`,
+    [phone, barbershopId]
+  );
+
+  let clientId;
+  if (existingClient.rows.length > 0) {
+    clientId = existingClient.rows[0].id;
+    await pool.query(
+      `UPDATE clients SET name = $1 WHERE id = $2`,
+      [name, clientId]
+    );
+  } else {
+    const newClient = await pool.query(
+      `INSERT INTO clients (barbershop_id, name, phone) VALUES ($1, $2, $3) RETURNING id`,
+      [barbershopId, name, phone]
+    );
+    clientId = newClient.rows[0].id;
+  }
+
+  // Busca serviços
+  const services = await pool.query(
+    `SELECT id, name, price, duration_minutes FROM services WHERE barbershop_id = $1 AND active = true ORDER BY name`,
+    [barbershopId]
+  );
+
+  if (!services.rows.length) {
+    await sendWhatsAppMessage(phone, 'Desculpe, não há serviços disponíveis no momento.', sendContext);
+    await deleteSession(phone, barbershopId);
+    return { ok: true };
+  }
+
+  let msg = `✅ Olá, *${name}*! Bem-vindo!\n\n💈 *Escolha o serviço:*\n\n`;
+  services.rows.forEach((s, i) => {
+    msg += `${i + 1}️⃣ *${s.name}* — R$ ${Number(s.price).toFixed(2)} (${s.duration_minutes} min)\n`;
+  });
+  msg += '\n0️⃣ Voltar ao menu';
+
+  await updateSession(phone, barbershopId, STEPS.CHOOSE_SERVICE, {
+    clientId,
+    clientName: name,
+    services: services.rows,
+  });
+
+  await sendWhatsAppMessage(phone, msg, sendContext);
+  return { ok: true };
+};
+
+const handleChooseServiceStep = async (phone, text, barbershopId, sessionData, config, sendContext) => {
+  if (text === '0' || text.toLowerCase() === 'menu') {
+    const result = await goBackToMainMenu(phone, barbershopId);
+    await sendWhatsAppMessage(phone, result.message, sendContext);
+    return { ok: true };
+  }
+
+  const choice = normalizeChoice(text);
+  const services = sessionData.services || [];
+
+  if (!choice || choice < 1 || choice > services.length) {
+    let msg = `${config.invalid_option_message}\n\n💈 *Escolha o serviço:*\n\n`;
+    services.forEach((s, i) => {
+      msg += `${i + 1}️⃣ *${s.name}* — R$ ${Number(s.price).toFixed(2)} (${s.duration_minutes} min)\n`;
+    });
+    msg += '\n0️⃣ Voltar ao menu';
+    await sendWhatsAppMessage(phone, msg, sendContext);
+    return { ok: true };
+  }
+
+  const selectedService = services[choice - 1];
+
+  // Busca barbeiros ativos
+  const barbers = await pool.query(
+    `SELECT id, name FROM barbers WHERE barbershop_id = $1 AND active = true ORDER BY name`,
+    [barbershopId]
+  );
+
+  if (!barbers.rows.length) {
+    await sendWhatsAppMessage(phone, 'Desculpe, não há barbeiros disponíveis no momento.', sendContext);
+    await deleteSession(phone, barbershopId);
+    return { ok: true };
+  }
+
+  await updateSession(phone, barbershopId, STEPS.CHOOSE_BARBER, {
+    ...sessionData,
+    serviceId: selectedService.id,
+    serviceName: selectedService.name,
+    servicePrice: selectedService.price,
+    serviceDuration: selectedService.duration_minutes,
+    barbers: barbers.rows,
+  });
+
+  let msg = `✅ *${selectedService.name}* selecionado!\n\n👨‍🦱 *Escolha o barbeiro:*\n\n`;
+  barbers.rows.forEach((b, i) => {
+    msg += `${i + 1}️⃣ *${b.name}*\n`;
+  });
+  msg += '\n0️⃣ Voltar ao menu';
+
+  await sendWhatsAppMessage(phone, msg, sendContext);
+  return { ok: true };
+};
+
+const handleChooseBarberStep = async (phone, text, barbershopId, sessionData, config, sendContext) => {
+  if (text === '0' || text.toLowerCase() === 'menu') {
+    const result = await goBackToMainMenu(phone, barbershopId);
+    await sendWhatsAppMessage(phone, result.message, sendContext);
+    return { ok: true };
+  }
+
+  const choice = normalizeChoice(text);
+  const barbers = sessionData.barbers || [];
+
+  if (!choice || choice < 1 || choice > barbers.length) {
+    let msg = `${config.invalid_option_message}\n\n👨‍🦱 *Escolha o barbeiro:*\n\n`;
+    barbers.forEach((b, i) => {
+      msg += `${i + 1}️⃣ *${b.name}*\n`;
+    });
+    msg += '\n0️⃣ Voltar ao menu';
+    await sendWhatsAppMessage(phone, msg, sendContext);
+    return { ok: true };
+  }
+
+  const selectedBarber = barbers[choice - 1];
+
+  // Gera os próximos 7 dias
+  const today = new Date();
+  const dates = [];
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(today);
+    date.setDate(date.getDate() + i);
+    dates.push(date);
+  }
+
+  await updateSession(phone, barbershopId, STEPS.CHOOSE_DATE, {
+    ...sessionData,
+    barberId: selectedBarber.id,
+    barberName: selectedBarber.name,
+    availableDates: dates.map((d) => d.toISOString().split('T')[0]),
+  });
+
+  let msg = `✅ *${selectedBarber.name}* selecionado!\n\n📅 *Escolha a data:*\n\n`;
+  dates.forEach((date, index) => {
+    const day = date.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
+    msg += `${index + 1}️⃣ ${day}\n`;
+  });
+  msg += '\n0️⃣ Voltar ao menu';
+
+  await sendWhatsAppMessage(phone, msg, sendContext);
+  return { ok: true };
+};
+
+const handleChooseDateStep = async (phone, text, barbershopId, sessionData, config, sendContext) => {
+  if (text === '0' || text.toLowerCase() === 'menu') {
+    const result = await goBackToMainMenu(phone, barbershopId);
+    await sendWhatsAppMessage(phone, result.message, sendContext);
+    return { ok: true };
+  }
+
+  const choice = normalizeChoice(text);
+  const availableDates = sessionData.availableDates || [];
+
+  if (!choice || choice < 1 || choice > availableDates.length) {
+    let msg = `${config.invalid_option_message}\n\n📅 *Escolha a data:*\n\n`;
+    availableDates.forEach((dateStr, index) => {
+      const date = new Date(dateStr + 'T12:00:00');
+      const day = date.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
+      msg += `${index + 1}️⃣ ${day}\n`;
+    });
+    msg += '\n0️⃣ Voltar ao menu';
+    await sendWhatsAppMessage(phone, msg, sendContext);
+    return { ok: true };
+  }
+
+  const selectedDate = availableDates[choice - 1];
+
+  // Busca horários já ocupados para o barbeiro nessa data
+  const bookedResult = await pool.query(
+    `SELECT time FROM appointments
+     WHERE barbershop_id = $1 AND barber_id = $2 AND date = $3 AND status != 'cancelado'`,
+    [barbershopId, sessionData.barberId, selectedDate]
+  );
+  const bookedTimes = new Set(bookedResult.rows.map((r) => r.time.substring(0, 5)));
+
+  // Busca configurações de horário da barbearia
+  const settingsResult = await pool.query(
+    `SELECT opening_time, closing_time, slot_interval_minutes FROM barbershop_settings WHERE barbershop_id = $1 LIMIT 1`,
+    [barbershopId]
+  );
+
+  const openingTime = settingsResult.rows[0]?.opening_time || '09:00:00';
+  const closingTime = settingsResult.rows[0]?.closing_time || '19:00:00';
+  const slotInterval = settingsResult.rows[0]?.slot_interval_minutes || 30;
+  const serviceDuration = sessionData.serviceDuration || slotInterval;
+
+  const openingMinutes = parseInt(openingTime.split(':')[0]) * 60 + parseInt(openingTime.split(':')[1]);
+  const closingMinutes = parseInt(closingTime.split(':')[0]) * 60 + parseInt(closingTime.split(':')[1]);
+
+  const availableSlots = [];
+  for (let minutes = openingMinutes; minutes + serviceDuration <= closingMinutes; minutes += slotInterval) {
+    const h = String(Math.floor(minutes / 60)).padStart(2, '0');
+    const m = String(minutes % 60).padStart(2, '0');
+    const timeStr = `${h}:${m}`;
+    if (!bookedTimes.has(timeStr)) {
+      availableSlots.push(timeStr);
     }
   }
 
-  return '';
-};
-
-const buildWebhookPayloadSummary = (payload = {}) => ({
-  event:
-    payload?.event ||
-    payload?.type ||
-    payload?.data?.event ||
-    payload?.data?.type ||
-    null,
-  keyRemoteJid: payload?.key?.remoteJid || payload?.data?.key?.remoteJid || null,
-  messageKeyRemoteJid: payload?.message?.key?.remoteJid || null,
-  sender: payload?.sender || payload?.data?.sender || null,
-  participant:
-    payload?.key?.participant ||
-    payload?.data?.key?.participant ||
-    payload?.message?.key?.participant ||
-    payload?.data?.participant ||
-    null,
-  from: payload?.from || payload?.data?.from || null,
-  fromMe:
-    payload?.fromMe ||
-    payload?.key?.fromMe ||
-    payload?.data?.fromMe ||
-    payload?.data?.key?.fromMe ||
-    null,
-});
-
-const mergeKnownInstanceNumbers = (values = []) => {
-  const normalized = new Set();
-
-  for (const value of values) {
-    const phone = normalizeWhatsAppNumber(value);
-    if (phone) {
-      normalized.add(phone);
-    }
+  if (!availableSlots.length) {
+    await sendWhatsAppMessage(phone, config.no_slots_message, sendContext);
+    return { ok: true };
   }
 
-  return Array.from(normalized);
+  await updateSession(phone, barbershopId, STEPS.CHOOSE_TIME, {
+    ...sessionData,
+    selectedDate,
+    availableSlots,
+  });
+
+  const dateFormatted = new Date(selectedDate + 'T12:00:00').toLocaleDateString('pt-BR', {
+    weekday: 'long', day: '2-digit', month: '2-digit',
+  });
+
+  let msg = `📅 *${dateFormatted}*\n\n⏰ *Horários disponíveis:*\n\n`;
+  availableSlots.forEach((slot, index) => {
+    msg += `${index + 1}️⃣ ${slot}\n`;
+  });
+  msg += '\n0️⃣ Voltar ao menu';
+
+  await sendWhatsAppMessage(phone, msg, sendContext);
+  return { ok: true };
 };
 
-const resolveConnectedNumber = () =>
-  normalizeWhatsAppNumber(getWhatsAppStatus()?.connectedNumber);
+const handleChooseTimeStep = async (phone, text, barbershopId, sessionData, config, sendContext) => {
+  if (text === '0' || text.toLowerCase() === 'menu') {
+    const result = await goBackToMainMenu(phone, barbershopId);
+    await sendWhatsAppMessage(phone, result.message, sendContext);
+    return { ok: true };
+  }
+
+  const choice = normalizeChoice(text);
+  const availableSlots = sessionData.availableSlots || [];
+
+  if (!choice || choice < 1 || choice > availableSlots.length) {
+    let msg = `${config.invalid_option_message}\n\n⏰ *Horários disponíveis:*\n\n`;
+    availableSlots.forEach((slot, index) => {
+      msg += `${index + 1}️⃣ ${slot}\n`;
+    });
+    msg += '\n0️⃣ Voltar ao menu';
+    await sendWhatsAppMessage(phone, msg, sendContext);
+    return { ok: true };
+  }
+
+  const selectedTime = availableSlots[choice - 1];
+  const selectedDate = sessionData.selectedDate;
+
+  // Verifica conflito de última hora (race condition)
+  const conflictCheck = await pool.query(
+    `SELECT id FROM appointments
+     WHERE barbershop_id = $1 AND barber_id = $2 AND date = $3 AND time = $4 AND status != 'cancelado'`,
+    [barbershopId, sessionData.barberId, selectedDate, selectedTime + ':00']
+  );
+
+  if (conflictCheck.rows.length > 0) {
+    await sendWhatsAppMessage(
+      phone,
+      '⚠️ Este horário acabou de ser reservado. Por favor, escolha outro horário.',
+      sendContext
+    );
+    // Recarrega horários disponíveis
+    const bookedResult = await pool.query(
+      `SELECT time FROM appointments
+       WHERE barbershop_id = $1 AND barber_id = $2 AND date = $3 AND status != 'cancelado'`,
+      [barbershopId, sessionData.barberId, selectedDate]
+    );
+    const bookedTimes = new Set(bookedResult.rows.map((r) => r.time.substring(0, 5)));
+    const newSlots = availableSlots.filter((s) => !bookedTimes.has(s));
+
+    if (!newSlots.length) {
+      await sendWhatsAppMessage(phone, config.no_slots_message, sendContext);
+      return { ok: true };
+    }
+
+    let msg = `⏰ *Horários disponíveis:*\n\n`;
+    newSlots.forEach((slot, index) => {
+      msg += `${index + 1}️⃣ ${slot}\n`;
+    });
+    msg += '\n0️⃣ Voltar ao menu';
+
+    await updateSession(phone, barbershopId, STEPS.CHOOSE_TIME, {
+      ...sessionData,
+      availableSlots: newSlots,
+    });
+
+    await sendWhatsAppMessage(phone, msg, sendContext);
+    return { ok: true };
+  }
+
+  // Cria o agendamento
+  const newAppointment = await pool.query(
+    `INSERT INTO appointments (barbershop_id, client_id, barber_id, service_id, date, time, status)
+     VALUES ($1, $2, $3, $4, $5, $6, 'confirmado') RETURNING id`,
+    [
+      barbershopId,
+      sessionData.clientId,
+      sessionData.barberId,
+      sessionData.serviceId,
+      selectedDate,
+      selectedTime + ':00',
+    ]
+  );
+
+  logger.info(
+    { appointmentId: newAppointment.rows[0].id, phone, barbershopId },
+    'Agendamento criado via WhatsApp bot'
+  );
+
+  const dateFormatted = new Date(selectedDate + 'T12:00:00').toLocaleDateString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+  });
+
+  const confirmationMsg = config.confirmation_message
+    .replace('{servico}', sessionData.serviceName || '')
+    .replace('{barbeiro}', sessionData.barberName || '')
+    .replace('{data}', dateFormatted)
+    .replace('{horario}', selectedTime)
+    .replace('{valor}', Number(sessionData.servicePrice).toFixed(2));
+
+  await sendWhatsAppMessage(phone, confirmationMsg, sendContext);
+  await deleteSession(phone, barbershopId);
+  return { ok: true };
+};
+
+// ==================== HANDLER PRINCIPAL ====================
 
 const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
   const isPayloadInput =
@@ -424,7 +794,6 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
 
   if (!isPayloadInput) {
     const normalizedPhone = normalizeWhatsAppNumber(phoneOrPayload);
-
     return {
       normalizedPhone,
       normalizedText: normalizeText(text),
@@ -435,10 +804,6 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
       payloadSummary: null,
       phoneExtraction: null,
       knownInstanceNumbers: baseKnownInstanceNumbers,
-      sources: {
-        phone: 'direct_input',
-        text: 'direct_input',
-      },
     };
   }
 
@@ -456,54 +821,14 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
     ...(Array.isArray(extraction.instanceNumbers) ? extraction.instanceNumbers : []),
   ]);
 
-  const normalizedPhone = preExtractedPhone || extraction.phone;
-  const normalizedText = preExtractedText || extractTextFromWebhook(phoneOrPayload);
-
   return {
-    normalizedPhone,
-    normalizedText,
+    normalizedPhone: preExtractedPhone || extraction.phone,
+    normalizedText: preExtractedText || extractTextFromWebhook(phoneOrPayload),
     remoteJidOriginal: extractWhatsAppRemoteJidFromWebhook(phoneOrPayload),
     payloadSummary: buildWebhookPayloadSummary(phoneOrPayload),
     phoneExtraction: extraction,
     knownInstanceNumbers,
-    sources: {
-      phone: preExtractedPhone
-        ? 'pre_extracted'
-        : extraction.phone
-          ? 'payload_extractor'
-          : 'payload_extractor_ambiguous',
-      text: preExtractedText ? 'pre_extracted' : 'payload_extractor',
-    },
   };
-};
-
-const isIncomingMessageEvent = (payload = {}) => {
-  const eventName = normalizeWebhookEventName(
-    payload?.event ||
-      payload?.type ||
-      payload?.data?.event ||
-      payload?.data?.type ||
-      ''
-  );
-
-  if (!eventName) {
-    return true;
-  }
-
-  return INCOMING_MESSAGE_EVENTS.has(eventName);
-};
-
-const isFromMe = (payload = {}) => {
-  const candidates = [
-    payload?.fromMe,
-    payload?.key?.fromMe,
-    payload?.data?.fromMe,
-    payload?.data?.key?.fromMe,
-    payload?.data?.messages?.[0]?.key?.fromMe,
-    payload?.messages?.[0]?.key?.fromMe,
-  ];
-
-  return candidates.some((value) => isWebhookBooleanTrue(value));
 };
 
 export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) => {
@@ -520,79 +845,61 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     payloadSummary,
     phoneExtraction,
     knownInstanceNumbers,
-    sources,
   } = resolveIncomingMessageInput(phoneOrPayload, text, options);
+
   const sendContext = remoteJidOriginal ? { remoteJidOriginal } : {};
 
   try {
+    // Guard: mensagem enviada pela própria instância
     if (payloadFromMe) {
       logger.debug(
-        {
-          remoteJid: remoteJidOriginal,
-          eventName: options?.eventName || null,
-        },
+        { remoteJid: remoteJidOriginal, eventName: options?.eventName || null },
         'Mensagem recebida ignorada: payload marcado como fromMe'
       );
       return { ok: false, ignored: true, reason: 'self_target' };
     }
 
+    // Guard: telefone não identificado
     if (!normalizedPhone) {
-      const invalidPhoneReason = payloadSummary ? 'ambiguous_phone' : 'invalid_phone';
-
       logger.warn(
         {
-          phone: !payloadSummary ? phoneOrPayload : null,
           authorPhone: null,
-          sourcePath: phoneExtraction?.sourcePath || options?.preExtractedSourcePath || null,
-          confidence: phoneExtraction?.confidence || options?.preExtractedConfidence || null,
+          sourcePath: phoneExtraction?.sourcePath || null,
+          confidence: phoneExtraction?.confidence || null,
           remoteJid: remoteJidOriginal,
           payload: payloadSummary,
-          sender: phoneExtraction?.sender || payloadSummary?.sender || null,
-          participant: phoneExtraction?.participant || payloadSummary?.participant || null,
-          fromMe: phoneExtraction?.fromMe ?? payloadFromMe,
-          phoneExtraction,
           knownInstanceNumbers,
-          sources,
           text: normalizedText || null,
           eventName: options?.eventName || null,
         },
         'Mensagem recebida ignorada: telefone nao confiavel para resposta'
       );
-      return { ok: false, ignored: true, reason: invalidPhoneReason };
+      return { ok: false, ignored: true, reason: 'ambiguous_phone' };
     }
 
+    // Guard: texto vazio
     if (!normalizedText) {
       logger.debug(
-        {
-          phone: normalizedPhone,
-          eventName: options?.eventName || null,
-          sources,
-        },
+        { phone: normalizedPhone, eventName: options?.eventName || null },
         'Mensagem recebida ignorada: texto vazio'
       );
       return { ok: false, ignored: true, reason: 'empty_text' };
     }
 
+    // Guard: mensagem da própria instância
     if (knownInstanceNumbers.includes(normalizedPhone)) {
       logger.warn(
-        {
-          phone: normalizedPhone,
-          knownInstanceNumbers,
-          remoteJid: remoteJidOriginal,
-          eventName: options?.eventName || null,
-        },
+        { phone: normalizedPhone, knownInstanceNumbers, eventName: options?.eventName || null },
         'Mensagem recebida ignorada: destino resolve para numero da instancia'
       );
       return { ok: false, ignored: true, reason: 'self_target' };
     }
 
+    // Resolve a barbearia
     const barbershopId = await resolveFlowBarbershopId();
     if (!barbershopId) {
       logger.warn(
-        {
-          phone: normalizedPhone,
-          eventName: options?.eventName || null,
-        },
+        { phone: normalizedPhone, eventName: options?.eventName || null },
         'Mensagem recebida ignorada: barbershop nao resolvido para o fluxo WhatsApp'
       );
       return { ok: false, ignored: true, reason: 'barbershop_not_resolved' };
@@ -601,14 +908,10 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     logger.info(
       {
         phone: normalizedPhone,
-        authorPhone: normalizedPhone,
         text: normalizedText,
-        sourcePath: phoneExtraction?.sourcePath || options?.preExtractedSourcePath || null,
-        confidence: phoneExtraction?.confidence || options?.preExtractedConfidence || null,
+        sourcePath: phoneExtraction?.sourcePath || null,
+        confidence: phoneExtraction?.confidence || null,
         remoteJidOriginal,
-        sender: phoneExtraction?.sender || payloadSummary?.sender || null,
-        participant: phoneExtraction?.participant || payloadSummary?.participant || null,
-        fromMe: phoneExtraction?.fromMe ?? payloadFromMe,
         barbershopId,
         eventName: options?.eventName || null,
         dedupeKey: options?.dedupeKey || null,
@@ -617,92 +920,107 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       'Processando mensagem recebida no fluxo WhatsApp'
     );
 
+    // Busca config do bot
+    const config = await getBotConfig(barbershopId);
+
+    // Saudação → reseta sessão e exibe menu
     if (isGreeting(normalizedText)) {
+      await deleteSession(normalizedPhone, barbershopId);
+      await createSession(normalizedPhone, barbershopId);
       const menuMessage = await buildMenuMessage(barbershopId);
       const sent = await sendWhatsAppMessage(normalizedPhone, menuMessage, sendContext);
-
-      return {
-        ok: sent,
-        ignored: false,
-        reason: sent ? null : 'send_failed',
-      };
+      return { ok: sent, ignored: false, reason: sent ? null : 'send_failed' };
     }
 
-    const choice = normalizeChoice(normalizedText);
+    // Busca sessão atual
+    let session = await getSession(normalizedPhone, barbershopId);
 
-    if (!choice) {
-      const invalidMessage = await buildInvalidOptionMessage(barbershopId);
-      const sent = await sendWhatsAppMessage(normalizedPhone, invalidMessage, sendContext);
-
-      return {
-        ok: sent,
-        ignored: false,
-        reason: sent ? null : 'send_failed',
-      };
+    // Sessão expirada ou inexistente → exibe menu
+    if (!session || isSessionExpired(session)) {
+      if (session) {
+        await deleteSession(normalizedPhone, barbershopId);
+        const expiredMsg = config.session_expired_message ||
+          '⏰ Sua sessão expirou. Digite qualquer coisa para começar novamente.';
+        await sendWhatsAppMessage(normalizedPhone, expiredMsg, sendContext);
+      }
+      await createSession(normalizedPhone, barbershopId);
+      const menuMessage = await buildMenuMessage(barbershopId);
+      const sent = await sendWhatsAppMessage(normalizedPhone, menuMessage, sendContext);
+      return { ok: sent, ignored: false, reason: sent ? null : 'send_failed' };
     }
 
-    const option = await getMenuOptionByChoice(choice, barbershopId);
+    const currentStep = session.step;
+    const sessionData = typeof session.data === 'object' ? session.data : {};
 
-    if (!option) {
-      const invalidMessage = await buildInvalidOptionMessage(barbershopId);
-      const sent = await sendWhatsAppMessage(normalizedPhone, invalidMessage, sendContext);
-
-      return {
-        ok: sent,
-        ignored: false,
-        reason: sent ? null : 'send_failed',
-      };
-    }
-
-    let reply = null;
-
-    if (option.type === 'custom') {
-      reply = option.response_message || 'Opção personalizada recebida.';
-    } else {
-      reply = await buildSystemHandlerResponse(option, barbershopId);
-    }
-
-    if (!reply || !String(reply).trim()) {
-      logger.warn(
-        {
-          phone: normalizedPhone,
-          barbershopId,
-          optionOrder: option.option_order,
-          handler: option.handler,
-        },
-        'Resposta do fluxo WhatsApp vazia'
-      );
-
-      return { ok: false, ignored: true, reason: 'empty_reply' };
-    }
-
-    const sent = await sendWhatsAppMessage(normalizedPhone, reply, sendContext);
-
-    if (!sent) {
-      logger.warn(
-        {
-          phone: normalizedPhone,
-          barbershopId,
-        },
-        'Mensagem nao enviada pelo provider WhatsApp'
-      );
-      return { ok: false, ignored: false, reason: 'send_failed' };
-    }
-
-    logger.info(
-      {
-        phone: normalizedPhone,
-        barbershopId,
-        optionOrder: option.option_order,
-        handler: option.handler,
-      },
-      'Resposta enviada com sucesso no fluxo WhatsApp'
+    logger.debug(
+      { phone: normalizedPhone, barbershopId, step: currentStep, text: normalizedText },
+      'Processando step do fluxo WhatsApp'
     );
 
+    let stepResult = { ok: false };
+
+    switch (currentStep) {
+      case STEPS.MENU:
+        stepResult = await handleMenuStep(normalizedPhone, normalizedText, barbershopId, config, sendContext);
+        break;
+
+      case STEPS.ASK_NAME:
+        stepResult = await handleAskNameStep(normalizedPhone, normalizedText, barbershopId, config, sendContext);
+        break;
+
+      case STEPS.CHOOSE_SERVICE:
+        stepResult = await handleChooseServiceStep(normalizedPhone, normalizedText, barbershopId, sessionData, config, sendContext);
+        break;
+
+      case STEPS.CHOOSE_BARBER:
+        stepResult = await handleChooseBarberStep(normalizedPhone, normalizedText, barbershopId, sessionData, config, sendContext);
+        break;
+
+      case STEPS.CHOOSE_DATE:
+        stepResult = await handleChooseDateStep(normalizedPhone, normalizedText, barbershopId, sessionData, config, sendContext);
+        break;
+
+      case STEPS.CHOOSE_TIME:
+        stepResult = await handleChooseTimeStep(normalizedPhone, normalizedText, barbershopId, sessionData, config, sendContext);
+        break;
+
+      case STEPS.CONFIRM_CANCEL: {
+        const result = await handleConfirmCancel(normalizedPhone, normalizedText, barbershopId, sessionData, config);
+        await sendWhatsAppMessage(normalizedPhone, result.message, sendContext);
+        stepResult = { ok: true };
+        break;
+      }
+
+      case STEPS.CONFIRM_RESCHEDULE: {
+        const result = await handleConfirmReschedule(normalizedPhone, normalizedText, barbershopId, sessionData, config);
+        await sendWhatsAppMessage(normalizedPhone, result.message, sendContext);
+        stepResult = { ok: true };
+        break;
+      }
+
+      case STEPS.SEND_RATING: {
+        const result = await handleSendRating(normalizedPhone, normalizedText, barbershopId, sessionData, config);
+        await sendWhatsAppMessage(normalizedPhone, result.message, sendContext);
+        stepResult = { ok: true };
+        break;
+      }
+
+      default: {
+        // Step desconhecido → reseta para o menu
+        logger.warn({ phone: normalizedPhone, step: currentStep }, 'Step desconhecido, resetando sessão');
+        await deleteSession(normalizedPhone, barbershopId);
+        await createSession(normalizedPhone, barbershopId);
+        const menuMessage = await buildMenuMessage(barbershopId);
+        const sent = await sendWhatsAppMessage(normalizedPhone, menuMessage, sendContext);
+        stepResult = { ok: sent };
+        break;
+      }
+    }
+
     return {
-      ok: true,
+      ok: stepResult.ok,
       ignored: false,
-      reason: null,
+      reason: stepResult.ok ? null : 'send_failed',
     };
   } catch (error) {
     logger.error(
@@ -724,6 +1042,8 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     };
   }
 };
+
+// ==================== WEBHOOK HANDLER ====================
 
 export const handleWebhook = async (req, res) => {
   try {
@@ -747,14 +1067,16 @@ export const handleWebhook = async (req, res) => {
     }
 
     const text = extractTextFromWebhook(payload);
+    const connectedNumber = resolveConnectedNumber();
     const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload, {
-      connectedNumbers: mergeKnownInstanceNumbers([resolveConnectedNumber()]),
+      connectedNumbers: mergeKnownInstanceNumbers([connectedNumber]),
       messageText: text,
     });
     const phone = extraction.phone;
     const eventName = normalizeWebhookEventName(
       payload?.event || payload?.type || payload?.data?.event || payload?.data?.type || ''
     );
+
     const result = await handleIncomingMessage(payload, text, {
       preExtractedPhone: phone,
       preExtractedText: text,
@@ -766,18 +1088,11 @@ export const handleWebhook = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: {
-        phone,
-        text,
-        result,
-      },
+      data: { phone, text, result },
     });
   } catch (error) {
     logger.error(
-      {
-        err: error,
-        payload: buildWebhookPayloadSummary(req.body ?? {}),
-      },
+      { err: error, payload: buildWebhookPayloadSummary(req.body ?? {}) },
       'Erro ao processar webhook WhatsApp'
     );
 
