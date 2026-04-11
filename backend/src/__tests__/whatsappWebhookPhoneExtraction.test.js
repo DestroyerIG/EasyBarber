@@ -92,6 +92,30 @@ describe('whatsapp webhook phone extraction', () => {
     expect(extraction.candidateType).toBe('participant_jid');
   });
 
+  it('does not use sender/from fallback when remoteJid is @lid and trusted fields are missing', () => {
+    const payload = {
+      key: {
+        remoteJid: '236197968359561@lid',
+      },
+      sender: '5511888888888@s.whatsapp.net',
+      from: '5511777777777@s.whatsapp.net',
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
+
+    expect(extraction.phone).toBeNull();
+    expect(extraction.rejections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourcePath: 'key.remoteJid', reason: 'blocked_jid_suffix' }),
+      ])
+    );
+    expect(
+      extraction.rejections.some(
+        (rejection) => rejection.sourcePath === 'sender' || rejection.sourcePath === 'from'
+      )
+    ).toBe(false);
+  });
+
   it('rejects any candidate that resolves to instance number', () => {
     const payload = {
       key: {

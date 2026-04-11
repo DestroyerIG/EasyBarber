@@ -4,6 +4,7 @@ const DIRECT_WHATSAPP_JID_SUFFIXES = ['@s.whatsapp.net', '@c.us'];
 const BLOCKED_WHATSAPP_JID_SUFFIXES = ['@g.us', '@lid', '@broadcast', '@newsletter'];
 const HARD_BLOCKED_CONVERSATION_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
 const LID_WHATSAPP_JID_SUFFIX = '@lid';
+const LID_UNTRUSTED_CANDIDATE_TYPES = new Set(['sender_jid']);
 const MAX_EXTRACTION_REJECTIONS = 20;
 
 const WEBHOOK_REMOTE_JID_CANDIDATES = [
@@ -382,8 +383,12 @@ const resolveWebhookPhoneExtractionCandidates = (payload = {}) => {
     return WEBHOOK_PHONE_EXTRACTION_CANDIDATES;
   }
 
-  // @lid exige fallback controlado: prioriza participant/senderPn e deixa sender/from por ultimo.
-  return WEBHOOK_PHONE_EXTRACTION_CANDIDATES
+  // @lid exige fallback controlado: aceita apenas candidatos confiaveis e ignora sender/from.
+  const trustedLidCandidates = WEBHOOK_PHONE_EXTRACTION_CANDIDATES.filter(
+    (candidate) => !LID_UNTRUSTED_CANDIDATE_TYPES.has(candidate.candidateType)
+  );
+
+  return trustedLidCandidates
     .map((candidate, index) => ({
       candidate,
       index,

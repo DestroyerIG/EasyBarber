@@ -61,6 +61,37 @@ describe('whatsappFlowService guards', () => {
     expect(mockPoolQuery).not.toHaveBeenCalled();
   });
 
+  it('returns ambiguous_phone for @lid payload even when sender/from are present', async () => {
+    mockGetWhatsAppStatus.mockReturnValue({
+      connectedNumber: null,
+    });
+
+    const payload = {
+      key: {
+        remoteJid: '236197968359561@lid',
+      },
+      sender: '5511888888888@s.whatsapp.net',
+      from: '5511777777777@s.whatsapp.net',
+      message: {
+        conversation: 'oi',
+      },
+    };
+
+    const result = await handleIncomingMessage(payload, 'oi', {
+      eventName: 'messages-upsert',
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        ignored: true,
+        reason: 'ambiguous_phone',
+      })
+    );
+    expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
+    expect(mockPoolQuery).not.toHaveBeenCalled();
+  });
+
   it('returns self_target when payload fromMe arrives as string true', async () => {
     const payload = {
       key: {
