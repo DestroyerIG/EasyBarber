@@ -2,6 +2,8 @@ const MIN_WHATSAPP_DIGITS = 10;
 const MAX_WHATSAPP_DIGITS = 15;
 const DIRECT_WHATSAPP_JID_SUFFIXES = ['@s.whatsapp.net', '@c.us'];
 const BLOCKED_WHATSAPP_JID_SUFFIXES = ['@g.us', '@lid', '@broadcast', '@newsletter'];
+const HARD_BLOCKED_CONVERSATION_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
+const LID_WHATSAPP_JID_SUFFIX = '@lid';
 const MAX_EXTRACTION_REJECTIONS = 20;
 
 const WEBHOOK_REMOTE_JID_CANDIDATES = [
@@ -16,14 +18,6 @@ const WEBHOOK_REMOTE_JID_CANDIDATES = [
     sourcePath: 'messages[0].key.remoteJid',
     getValue: (payload) => payload?.messages?.[0]?.key?.remoteJid,
   },
-];
-
-const WEBHOOK_BLOCKING_JID_CANDIDATES = [
-  ...WEBHOOK_REMOTE_JID_CANDIDATES,
-  { sourcePath: 'sender', getValue: (payload) => payload?.sender },
-  { sourcePath: 'from', getValue: (payload) => payload?.from },
-  { sourcePath: 'data.sender', getValue: (payload) => payload?.data?.sender },
-  { sourcePath: 'data.from', getValue: (payload) => payload?.data?.from },
 ];
 
 const WEBHOOK_INSTANCE_NUMBER_CANDIDATES = [
@@ -188,6 +182,37 @@ const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
   },
 ];
 
+const LID_WEBHOOK_PHONE_EXTRACTION_PRIORITY = {
+  'key.remoteJid': 10,
+  'message.key.remoteJid': 11,
+  'data.key.remoteJid': 12,
+  'data.messages[0].key.remoteJid': 13,
+  'messages[0].key.remoteJid': 14,
+
+  'key.participant': 20,
+  'message.key.participant': 21,
+  'data.key.participant': 22,
+  participant: 23,
+  'data.participant': 24,
+
+  senderPn: 30,
+  'message.senderPn': 31,
+  'data.senderPn': 32,
+  'key.participantPn': 33,
+  'message.key.participantPn': 34,
+  'data.key.participantPn': 35,
+
+  'data.messages[0].key.participant': 40,
+  'messages[0].key.participant': 41,
+  'data.messages[0].senderPn': 42,
+  'messages[0].senderPn': 43,
+
+  sender: 50,
+  from: 51,
+  'data.sender': 52,
+  'data.from': 53,
+};
+
 const extractWebhookRemoteJidCandidate = (payload = {}) => {
   for (const candidate of WEBHOOK_REMOTE_JID_CANDIDATES) {
     const value = candidate.getValue(payload);
@@ -245,6 +270,21 @@ const hasBlockedWebhookJidSuffix = (value) => {
   return BLOCKED_WHATSAPP_JID_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
 };
 
+const hasHardBlockedConversationJidSuffix = (value) => {
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim().toLowerCase();
+
+  if (!normalized) return false;
+  if (normalized === 'status@broadcast') return true;
+
+  return HARD_BLOCKED_CONVERSATION_JID_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
+};
+
+const hasLidWebhookJidSuffix = (value) => {
+  if (typeof value !== 'string') return false;
+  return value.trim().toLowerCase().endsWith(LID_WHATSAPP_JID_SUFFIX);
+};
+
 const hasDirectWhatsAppJidSuffix = (value) => {
   if (typeof value !== 'string') return false;
   const normalized = value.trim().toLowerCase();
@@ -291,9 +331,9 @@ const appendRejection = (rejections, sourcePath, reason) => {
 };
 
 const findBlockedConversationCandidate = (payload = {}) => {
-  for (const candidate of WEBHOOK_BLOCKING_JID_CANDIDATES) {
+  for (const candidate of WEBHOOK_REMOTE_JID_CANDIDATES) {
     const value = candidate.getValue(payload);
-    if (hasBlockedWebhookJidSuffix(value)) {
+    if (hasHardBlockedConversationJidSuffix(value)) {
       return {
         sourcePath: candidate.sourcePath,
         value,
@@ -335,6 +375,25 @@ export const extractWhatsAppInstanceNumbersFromWebhook = (payload = {}, options 
   return Array.from(numbers);
 };
 
+const resolveWebhookPhoneExtractionCandidates = (payload = {}) => {
+  const remoteJid = extractWebhookRemoteJidCandidate(payload);
+
+  if (!hasLidWebhookJidSuffix(remoteJid)) {
+    return WEBHOOK_PHONE_EXTRACTION_CANDIDATES;
+  }
+
+  // @lid exige fallback controlado: prioriza participant/senderPn e deixa sender/from por ultimo.
+  return WEBHOOK_PHONE_EXTRACTION_CANDIDATES
+    .map((candidate, index) => ({
+      candidate,
+      index,
+      priority:
+        LID_WEBHOOK_PHONE_EXTRACTION_PRIORITY[candidate.sourcePath] ?? Number.MAX_SAFE_INTEGER,
+    }))
+    .sort((left, right) => left.priority - right.priority || left.index - right.index)
+    .map(({ candidate }) => candidate);
+};
+
 const normalizeWebhookPhoneCandidate = (value, { allowNumericOnly = false } = {}) => {
   const parsed = parseWebhookPhoneCandidate(value, { allowNumericOnly });
   return parsed.phone;
@@ -345,6 +404,7 @@ export const extractWhatsAppPhoneFromWebhookDetailed = (payload = {}, options = 
   const instanceNumbersSet = new Set(instanceNumbers);
   const rejections = [];
   const blockedConversation = findBlockedConversationCandidate(payload);
+  const candidates = resolveWebhookPhoneExtractionCandidates(payload);
 
   if (blockedConversation) {
     appendRejection(rejections, blockedConversation.sourcePath, 'blocked_conversation_jid');
@@ -358,7 +418,7 @@ export const extractWhatsAppPhoneFromWebhookDetailed = (payload = {}, options = 
     };
   }
 
-  for (const candidate of WEBHOOK_PHONE_EXTRACTION_CANDIDATES) {
+  for (const candidate of candidates) {
     const value = candidate.getValue(payload);
     const parsed = parseWebhookPhoneCandidate(value, {
       allowNumericOnly: candidate.allowNumericOnly,

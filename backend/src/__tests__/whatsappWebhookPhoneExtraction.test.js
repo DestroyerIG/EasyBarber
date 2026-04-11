@@ -22,16 +22,39 @@ describe('whatsapp webhook phone extraction', () => {
     expect(extractWhatsAppPhoneFromWebhook(payload)).toBe('5511999999999');
   });
 
-  it('blocks @lid payloads and does not fallback to numeric fields', () => {
+  it('prefers key.participant over senderPn when remoteJid is @lid', () => {
     const payload = {
       key: {
-        remoteJid: '5511991111111@lid',
+        remoteJid: '236197968359561@lid',
+        participant: '5511991111111@s.whatsapp.net',
       },
       senderPn: '5511888888888',
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
+
+    expect(extraction.phone).toBe('5511991111111');
+    expect(extraction.sourcePath).toBe('key.participant');
+    expect(extraction.candidateType).toBe('participant_jid');
+    expect(extraction.rejections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourcePath: 'key.remoteJid', reason: 'blocked_jid_suffix' }),
+      ])
+    );
+  });
+
+  it('falls back to senderPn before nested participant candidates for @lid payloads', () => {
+    const payload = {
+      key: {
+        remoteJid: '236197968359561@lid',
+      },
+      senderPn: '5511777777777',
       data: {
         messages: [
           {
-            senderPn: '5511777777777',
+            key: {
+              participant: '5511666666666@s.whatsapp.net',
+            },
           },
         ],
       },
@@ -41,12 +64,32 @@ describe('whatsapp webhook phone extraction', () => {
       connectedNumbers: ['5511888888888'],
     });
 
-    expect(extraction.phone).toBeNull();
-    expect(extraction.rejections).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ reason: 'blocked_conversation_jid' }),
-      ])
-    );
+    expect(extraction.phone).toBe('5511777777777');
+    expect(extraction.sourcePath).toBe('senderPn');
+    expect(extraction.candidateType).toBe('numeric_fallback');
+  });
+
+  it('uses data.messages[0].key.participant when remoteJid is @lid and senderPn is unavailable', () => {
+    const payload = {
+      key: {
+        remoteJid: '236197968359561@lid',
+      },
+      data: {
+        messages: [
+          {
+            key: {
+              participant: '5511666666666@s.whatsapp.net',
+            },
+          },
+        ],
+      },
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
+
+    expect(extraction.phone).toBe('5511666666666');
+    expect(extraction.sourcePath).toBe('data.messages[0].key.participant');
+    expect(extraction.candidateType).toBe('participant_jid');
   });
 
   it('rejects any candidate that resolves to instance number', () => {
