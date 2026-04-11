@@ -444,6 +444,7 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
 
   const extraction = extractWhatsAppPhoneFromWebhookDetailed(phoneOrPayload, {
     connectedNumbers: baseKnownInstanceNumbers,
+    messageText: preExtractedText || normalizeText(text),
   });
 
   const payloadInstanceNumbers = extractWhatsAppInstanceNumbersFromWebhook(phoneOrPayload, {
@@ -745,11 +746,12 @@ export const handleWebhook = async (req, res) => {
       });
     }
 
+    const text = extractTextFromWebhook(payload);
     const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload, {
       connectedNumbers: mergeKnownInstanceNumbers([resolveConnectedNumber()]),
+      messageText: text,
     });
     const phone = extraction.phone;
-    const text = extractTextFromWebhook(payload);
     const eventName = normalizeWebhookEventName(
       payload?.event || payload?.type || payload?.data?.event || payload?.data?.type || ''
     );

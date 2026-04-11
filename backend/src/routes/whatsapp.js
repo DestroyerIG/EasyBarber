@@ -186,12 +186,16 @@ const mapWebhookIncomingMessage = (payload) => {
     return null;
   }
 
+  const text = extractWebhookText(normalizedPayload);
+
   const extraction = resolveIncomingAuthor(
     normalizedPayload,
-    buildWebhookPhoneExtractionOptions()
+    {
+      ...buildWebhookPhoneExtractionOptions(),
+      messageText: text,
+    }
   );
   const extractedPhone = extraction.authorPhone;
-  const text = extractWebhookText(normalizedPayload);
 
   if (!extractedPhone) {
     logger.warn(
@@ -246,9 +250,13 @@ const mapWebhookIncomingMessage = (payload) => {
 };
 
 const buildWebhookDebugFields = (payload, extraction = null) => {
+  const text = extractWebhookText(payload);
   const resolvedExtraction =
     extraction ||
-    resolveIncomingAuthor(payload, buildWebhookPhoneExtractionOptions());
+    resolveIncomingAuthor(payload, {
+      ...buildWebhookPhoneExtractionOptions(),
+      messageText: text,
+    });
 
   return {
     keyRemoteJid: payload?.key?.remoteJid || null,

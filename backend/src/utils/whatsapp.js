@@ -8,6 +8,13 @@ const MAX_EXTRACTION_REJECTIONS = 20;
 const INCOMING_AUTHOR_MIN_SCORE = 60;
 const INCOMING_AUTHOR_HIGH_CONFIDENCE_MIN = 90;
 const INCOMING_AUTHOR_MEDIUM_CONFIDENCE_MIN = 75;
+const INCOMING_AUTHOR_SENDER_FALLBACK_SOURCE_PATHS = new Set([
+  'sender',
+  'data.sender',
+  'message.sender',
+  'data.messages[0].sender',
+  'messages[0].sender',
+]);
 
 const WEBHOOK_REMOTE_JID_CANDIDATES = [
   { sourcePath: 'key.remoteJid', getValue: (payload) => payload?.key?.remoteJid },
@@ -58,6 +65,27 @@ const WEBHOOK_PUSH_NAME_CANDIDATES = [
   (payload) => payload?.message?.key?.pushName,
   (payload) => payload?.data?.messages?.[0]?.key?.pushName,
   (payload) => payload?.messages?.[0]?.key?.pushName,
+];
+
+const WEBHOOK_TEXT_CANDIDATES = [
+  (payload) => payload?.text,
+  (payload) => payload?.body,
+  (payload) => payload?.message,
+  (payload) => payload?.content,
+  (payload) => payload?.data?.text,
+  (payload) => payload?.data?.body,
+  (payload) => payload?.data?.message,
+  (payload) => payload?.data?.content,
+  (payload) => payload?.message?.text,
+  (payload) => payload?.message?.body,
+  (payload) => payload?.message?.conversation,
+  (payload) => payload?.message?.extendedTextMessage?.text,
+  (payload) => payload?.data?.message?.conversation,
+  (payload) => payload?.data?.message?.extendedTextMessage?.text,
+  (payload) => payload?.data?.messages?.[0]?.message?.conversation,
+  (payload) => payload?.data?.messages?.[0]?.message?.extendedTextMessage?.text,
+  (payload) => payload?.messages?.[0]?.message?.conversation,
+  (payload) => payload?.messages?.[0]?.message?.extendedTextMessage?.text,
 ];
 
 const WEBHOOK_FROM_ME_CANDIDATES = [
@@ -330,6 +358,26 @@ const extractWebhookParticipantCandidate = (payload = {}) =>
 
 const extractWebhookPushNameCandidate = (payload = {}) =>
   getFirstStringCandidate(payload, WEBHOOK_PUSH_NAME_CANDIDATES);
+
+const extractIncomingTextCandidate = (payload = {}, options = {}) => {
+  const directText =
+    typeof options?.messageText === 'string' && options.messageText.trim()
+      ? options.messageText.trim()
+      : null;
+
+  if (directText) {
+    return directText;
+  }
+
+  for (const resolver of WEBHOOK_TEXT_CANDIDATES) {
+    const value = resolver(payload);
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return '';
+};
 
 const resolveIncomingConversationKind = (remoteJidOriginal) => {
   if (typeof remoteJidOriginal !== 'string' || !remoteJidOriginal.trim()) {
@@ -735,7 +783,14 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
   const sender = extractWebhookSenderCandidate(payload);
   const participant = extractWebhookParticipantCandidate(payload);
   const pushName = extractWebhookPushNameCandidate(payload);
+  const incomingText = extractIncomingTextCandidate(payload, options);
   const candidates = resolveWebhookPhoneExtractionCandidates(payload);
+
+  const serializeCandidates = () =>
+    matchedCandidates
+      .slice()
+      .sort((left, right) => right.score - left.score || left.index - right.index)
+      .map(({ index: _index, ...candidate }) => candidate);
 
   if (fromMe) {
     appendRejection(rejections, 'fromMe', 'self_message');
@@ -863,6 +918,14 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
 
   const bestCandidate = rankedCandidates[0] || null;
   const secondCandidate = rankedCandidates[1] || null;
+  const normalizedSenderPhone = normalizeWhatsAppNumber(sender);
+  const senderFallbackCandidate = normalizedSenderPhone
+    ? rankedCandidates.find(
+        (candidate) =>
+          INCOMING_AUTHOR_SENDER_FALLBACK_SOURCE_PATHS.has(candidate.sourcePath) &&
+          candidate.phone === normalizedSenderPhone
+      ) || null
+    : null;
 
   if (!bestCandidate) {
     return {
@@ -877,7 +940,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       fromMe,
       instanceNumbers,
       rejections,
-      candidates: matchedCandidates.map(({ index: _index, ...candidate }) => candidate),
+      candidates: serializeCandidates(),
     };
   }
 
@@ -900,13 +963,44 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       fromMe,
       instanceNumbers,
       rejections,
-      candidates: matchedCandidates
-        .sort((left, right) => right.score - left.score || left.index - right.index)
-        .map(({ index: _index, ...candidate }) => candidate),
+      candidates: serializeCandidates(),
     };
   }
 
   if (bestCandidate.score < INCOMING_AUTHOR_MIN_SCORE) {
+    const hasBetterCandidateThanSender = senderFallbackCandidate
+      ? rankedCandidates.some(
+          (candidate) =>
+            candidate.phone !== senderFallbackCandidate.phone &&
+            candidate.score > senderFallbackCandidate.score
+        )
+      : false;
+    const shouldPromoteSenderFallback =
+      !fromMe &&
+      Boolean(incomingText) &&
+      senderFallbackCandidate &&
+      !hasBetterCandidateThanSender;
+
+    if (shouldPromoteSenderFallback) {
+      return {
+        authorPhone: senderFallbackCandidate.phone,
+        sourcePath: senderFallbackCandidate.sourcePath,
+        candidateType: senderFallbackCandidate.candidateType,
+        confidence:
+          senderFallbackCandidate.confidence === 'none'
+            ? 'low'
+            : senderFallbackCandidate.confidence,
+        remoteJidOriginal,
+        sender,
+        participant,
+        pushName,
+        fromMe,
+        instanceNumbers,
+        rejections,
+        candidates: serializeCandidates(),
+      };
+    }
+
     appendRejection(rejections, bestCandidate.sourcePath, 'low_confidence_author');
 
     return {
@@ -921,9 +1015,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       fromMe,
       instanceNumbers,
       rejections,
-      candidates: matchedCandidates
-        .sort((left, right) => right.score - left.score || left.index - right.index)
-        .map(({ index: _index, ...candidate }) => candidate),
+      candidates: serializeCandidates(),
     };
   }
 
@@ -939,9 +1031,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
     fromMe,
     instanceNumbers,
     rejections,
-    candidates: matchedCandidates
-      .sort((left, right) => right.score - left.score || left.index - right.index)
-      .map(({ index: _index, ...candidate }) => candidate),
+    candidates: serializeCandidates(),
   };
 };
 
