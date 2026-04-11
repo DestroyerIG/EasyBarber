@@ -8,6 +8,7 @@ import {
   isValidPhone,
   normalizePhone,
   normalizePhoneForSend,
+  resolveIncomingAuthor,
   resolveReplyDestination,
 } from '../utils/whatsapp.js';
 
@@ -29,7 +30,7 @@ describe('whatsapp webhook phone extraction', () => {
     expect(extractPhoneFromPayload(payload)).toBe('5511999999999');
   });
 
-  it('prefers senderPn over participant when remoteJid is @lid', () => {
+  it('prefers participant over senderPn when remoteJid is @lid', () => {
     const payload = {
       key: {
         remoteJid: '236197968359561@lid',
@@ -40,12 +41,13 @@ describe('whatsapp webhook phone extraction', () => {
 
     const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
 
-    expect(extraction.phone).toBe('5511888888888');
-    expect(extraction.sourcePath).toBe('senderPn');
-    expect(extraction.candidateType).toBe('numeric_fallback');
+    expect(extraction.phone).toBe('5511991111111');
+    expect(extraction.sourcePath).toBe('key.participant');
+    expect(extraction.candidateType).toBe('participant_jid');
+    expect(extraction.confidence).toBe('high');
   });
 
-  it('falls back to senderPn before nested participant candidates for @lid payloads', () => {
+  it('prefers nested participant over senderPn for @lid payloads', () => {
     const payload = {
       key: {
         remoteJid: '236197968359561@lid',
@@ -66,9 +68,9 @@ describe('whatsapp webhook phone extraction', () => {
       connectedNumbers: ['5511888888888'],
     });
 
-    expect(extraction.phone).toBe('5511777777777');
-    expect(extraction.sourcePath).toBe('senderPn');
-    expect(extraction.candidateType).toBe('numeric_fallback');
+    expect(extraction.phone).toBe('5511666666666');
+    expect(extraction.sourcePath).toBe('data.messages[0].key.participant');
+    expect(extraction.candidateType).toBe('participant_jid');
   });
 
   it('uses data.messages[0].key.participant when remoteJid is @lid and senderPn is unavailable', () => {
@@ -94,7 +96,7 @@ describe('whatsapp webhook phone extraction', () => {
     expect(extraction.candidateType).toBe('participant_jid');
   });
 
-  it('uses sender fallback when remoteJid is @lid', () => {
+  it('treats sender-only @lid payload as ambiguous author', () => {
     const payload = {
       key: {
         remoteJid: '236197968359561@lid',
@@ -105,12 +107,15 @@ describe('whatsapp webhook phone extraction', () => {
 
     const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
 
-    expect(extraction.phone).toBe('5511888888888');
-    expect(extraction.sourcePath).toBe('sender');
-    expect(extraction.candidateType).toBe('sender_jid');
+    expect(extraction.phone).toBeNull();
+    expect(extraction.rejections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ reason: 'low_confidence_author' }),
+      ])
+    );
   });
 
-  it('extracts sender from messages.upsert payload when remoteJid is @lid', () => {
+  it('does not trust sender-only messages.upsert payload when remoteJid is @lid', () => {
     const payload = {
       event: 'messages.upsert',
       sender: '558396311811@s.whatsapp.net',
@@ -127,9 +132,33 @@ describe('whatsapp webhook phone extraction', () => {
 
     const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
 
-    expect(extraction.phone).toBe('558396311811');
-    expect(extraction.sourcePath).toBe('sender');
-    expect(extraction.candidateType).toBe('sender_jid');
+    expect(extraction.phone).toBeNull();
+    expect(extraction.rejections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ reason: 'low_confidence_author' }),
+      ])
+    );
+  });
+
+  it('resolves direct remoteJid as real author even when sender diverges', () => {
+    const payload = {
+      key: {
+        remoteJid: '5511999999999@s.whatsapp.net',
+      },
+      sender: '5511888888888@s.whatsapp.net',
+      data: {
+        key: {
+          fromMe: false,
+        },
+      },
+    };
+
+    const author = resolveIncomingAuthor(payload);
+
+    expect(author.authorPhone).toBe('5511999999999');
+    expect(author.sourcePath).toBe('key.remoteJid');
+    expect(author.confidence).toBe('high');
+    expect(author.remoteJidOriginal).toBe('5511999999999@s.whatsapp.net');
   });
 
   it('rejects any candidate that resolves to instance number', () => {

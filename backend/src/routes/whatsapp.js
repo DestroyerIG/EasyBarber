@@ -20,7 +20,7 @@ import logger from '../utils/logger.js';
 import {
   normalizeWhatsAppNumber,
   extractWhatsAppRemoteJidFromWebhook,
-  extractWhatsAppPhoneFromWebhookDetailed,
+  resolveIncomingAuthor,
 } from '../utils/whatsapp.js';
 
 const router = express.Router();
@@ -186,20 +186,29 @@ const mapWebhookIncomingMessage = (payload) => {
     return null;
   }
 
-  const extraction = extractWhatsAppPhoneFromWebhookDetailed(
+  const extraction = resolveIncomingAuthor(
     normalizedPayload,
     buildWebhookPhoneExtractionOptions()
   );
-  const extractedPhone = extraction.phone;
+  const extractedPhone = extraction.authorPhone;
+  const text = extractWebhookText(normalizedPayload);
 
   if (!extractedPhone) {
     logger.warn(
       {
         event: eventName,
+        text: text || null,
+        authorPhone: null,
+        sourcePath: extraction.sourcePath,
+        confidence: extraction.confidence,
+        remoteJidOriginal: extraction.remoteJidOriginal,
         keyRemoteJid: normalizedPayload?.key?.remoteJid || null,
         messageKeyRemoteJid: normalizedPayload?.message?.key?.remoteJid || null,
-        sender: normalizedPayload?.sender || null,
+        sender: extraction.sender || normalizedPayload?.sender || null,
+        participant: extraction.participant || normalizedPayload?.participant || null,
+        fromMe: extraction.fromMe,
         from: normalizedPayload?.from || null,
+        authorCandidates: extraction.candidates,
         extractionRejections: extraction.rejections,
         instanceNumbers: extraction.instanceNumbers,
       },
@@ -208,11 +217,24 @@ const mapWebhookIncomingMessage = (payload) => {
     return null;
   }
 
-  const text = extractWebhookText(normalizedPayload);
-
   if (!text) {
     return null;
   }
+
+  logger.info(
+    {
+      event: eventName,
+      text,
+      authorPhone: extraction.authorPhone,
+      sourcePath: extraction.sourcePath,
+      confidence: extraction.confidence,
+      remoteJidOriginal: extraction.remoteJidOriginal,
+      sender: extraction.sender || normalizedPayload?.sender || null,
+      participant: extraction.participant || normalizedPayload?.participant || null,
+      fromMe: extraction.fromMe,
+    },
+    'Autor da mensagem WhatsApp resolvido'
+  );
 
   return {
     payload: normalizedPayload,
@@ -226,16 +248,21 @@ const mapWebhookIncomingMessage = (payload) => {
 const buildWebhookDebugFields = (payload, extraction = null) => {
   const resolvedExtraction =
     extraction ||
-    extractWhatsAppPhoneFromWebhookDetailed(payload, buildWebhookPhoneExtractionOptions());
+    resolveIncomingAuthor(payload, buildWebhookPhoneExtractionOptions());
 
   return {
     keyRemoteJid: payload?.key?.remoteJid || null,
     messageKeyRemoteJid: payload?.message?.key?.remoteJid || null,
-    sender: payload?.sender || null,
+    sender: resolvedExtraction.sender || payload?.sender || null,
+    participant: resolvedExtraction.participant || payload?.participant || null,
+    fromMe: resolvedExtraction.fromMe,
     from: payload?.from || null,
-    extractedPhone: resolvedExtraction.phone,
+    extractedPhone: resolvedExtraction.authorPhone,
     extractionSourcePath: resolvedExtraction.sourcePath,
     extractionCandidateType: resolvedExtraction.candidateType,
+    extractionConfidence: resolvedExtraction.confidence,
+    remoteJidOriginal: resolvedExtraction.remoteJidOriginal,
+    authorCandidates: resolvedExtraction.candidates,
     extractionRejections: resolvedExtraction.rejections,
     instanceNumbers: resolvedExtraction.instanceNumbers,
   };

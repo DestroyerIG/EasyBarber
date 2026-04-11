@@ -376,7 +376,19 @@ const buildWebhookPayloadSummary = (payload = {}) => ({
   keyRemoteJid: payload?.key?.remoteJid || payload?.data?.key?.remoteJid || null,
   messageKeyRemoteJid: payload?.message?.key?.remoteJid || null,
   sender: payload?.sender || payload?.data?.sender || null,
+  participant:
+    payload?.key?.participant ||
+    payload?.data?.key?.participant ||
+    payload?.message?.key?.participant ||
+    payload?.data?.participant ||
+    null,
   from: payload?.from || payload?.data?.from || null,
+  fromMe:
+    payload?.fromMe ||
+    payload?.key?.fromMe ||
+    payload?.data?.fromMe ||
+    payload?.data?.key?.fromMe ||
+    null,
 });
 
 const mergeKnownInstanceNumbers = (values = []) => {
@@ -529,11 +541,18 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       logger.warn(
         {
           phone: !payloadSummary ? phoneOrPayload : null,
+          authorPhone: null,
+          sourcePath: phoneExtraction?.sourcePath || options?.preExtractedSourcePath || null,
+          confidence: phoneExtraction?.confidence || options?.preExtractedConfidence || null,
           remoteJid: remoteJidOriginal,
           payload: payloadSummary,
+          sender: phoneExtraction?.sender || payloadSummary?.sender || null,
+          participant: phoneExtraction?.participant || payloadSummary?.participant || null,
+          fromMe: phoneExtraction?.fromMe ?? payloadFromMe,
           phoneExtraction,
           knownInstanceNumbers,
           sources,
+          text: normalizedText || null,
           eventName: options?.eventName || null,
         },
         'Mensagem recebida ignorada: telefone nao confiavel para resposta'
@@ -581,7 +600,14 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     logger.info(
       {
         phone: normalizedPhone,
+        authorPhone: normalizedPhone,
         text: normalizedText,
+        sourcePath: phoneExtraction?.sourcePath || options?.preExtractedSourcePath || null,
+        confidence: phoneExtraction?.confidence || options?.preExtractedConfidence || null,
+        remoteJidOriginal,
+        sender: phoneExtraction?.sender || payloadSummary?.sender || null,
+        participant: phoneExtraction?.participant || payloadSummary?.participant || null,
+        fromMe: phoneExtraction?.fromMe ?? payloadFromMe,
         barbershopId,
         eventName: options?.eventName || null,
         dedupeKey: options?.dedupeKey || null,
@@ -731,6 +757,8 @@ export const handleWebhook = async (req, res) => {
       preExtractedPhone: phone,
       preExtractedText: text,
       preExtractedInstanceNumbers: extraction.instanceNumbers,
+      preExtractedSourcePath: extraction.sourcePath,
+      preExtractedConfidence: extraction.confidence,
       eventName,
     });
 

@@ -5,6 +5,9 @@ const BLOCKED_WHATSAPP_JID_SUFFIXES = ['@g.us', '@lid', '@broadcast', '@newslett
 const BLOCKED_SEND_JID_SUFFIXES = ['@lid', '@g.us', '@broadcast', '@newsletter'];
 const HARD_BLOCKED_CONVERSATION_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
 const MAX_EXTRACTION_REJECTIONS = 20;
+const INCOMING_AUTHOR_MIN_SCORE = 60;
+const INCOMING_AUTHOR_HIGH_CONFIDENCE_MIN = 90;
+const INCOMING_AUTHOR_MEDIUM_CONFIDENCE_MIN = 75;
 
 const WEBHOOK_REMOTE_JID_CANDIDATES = [
   { sourcePath: 'key.remoteJid', getValue: (payload) => payload?.key?.remoteJid },
@@ -18,6 +21,52 @@ const WEBHOOK_REMOTE_JID_CANDIDATES = [
     sourcePath: 'messages[0].key.remoteJid',
     getValue: (payload) => payload?.messages?.[0]?.key?.remoteJid,
   },
+];
+
+const WEBHOOK_SENDER_CANDIDATES = [
+  (payload) => payload?.sender,
+  (payload) => payload?.data?.sender,
+  (payload) => payload?.message?.sender,
+  (payload) => payload?.data?.messages?.[0]?.sender,
+  (payload) => payload?.messages?.[0]?.sender,
+  (payload) => payload?.from,
+  (payload) => payload?.data?.from,
+  (payload) => payload?.message?.from,
+  (payload) => payload?.data?.messages?.[0]?.from,
+  (payload) => payload?.messages?.[0]?.from,
+];
+
+const WEBHOOK_PARTICIPANT_CANDIDATES = [
+  (payload) => payload?.key?.participant,
+  (payload) => payload?.data?.key?.participant,
+  (payload) => payload?.message?.key?.participant,
+  (payload) => payload?.participant,
+  (payload) => payload?.data?.participant,
+  (payload) => payload?.message?.participant,
+  (payload) => payload?.data?.messages?.[0]?.key?.participant,
+  (payload) => payload?.messages?.[0]?.key?.participant,
+];
+
+const WEBHOOK_PUSH_NAME_CANDIDATES = [
+  (payload) => payload?.pushName,
+  (payload) => payload?.data?.pushName,
+  (payload) => payload?.message?.pushName,
+  (payload) => payload?.data?.messages?.[0]?.pushName,
+  (payload) => payload?.messages?.[0]?.pushName,
+  (payload) => payload?.key?.pushName,
+  (payload) => payload?.data?.key?.pushName,
+  (payload) => payload?.message?.key?.pushName,
+  (payload) => payload?.data?.messages?.[0]?.key?.pushName,
+  (payload) => payload?.messages?.[0]?.key?.pushName,
+];
+
+const WEBHOOK_FROM_ME_CANDIDATES = [
+  (payload) => payload?.fromMe,
+  (payload) => payload?.key?.fromMe,
+  (payload) => payload?.data?.fromMe,
+  (payload) => payload?.data?.key?.fromMe,
+  (payload) => payload?.data?.messages?.[0]?.key?.fromMe,
+  (payload) => payload?.messages?.[0]?.key?.fromMe,
 ];
 
 const WEBHOOK_INSTANCE_NUMBER_CANDIDATES = [
@@ -247,6 +296,71 @@ const extractWebhookRemoteJidCandidate = (payload = {}) => {
   return null;
 };
 
+const getFirstStringCandidate = (payload = {}, resolvers = []) => {
+  for (const resolver of resolvers) {
+    const value = resolver(payload);
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+};
+
+const normalizeWebhookBoolean = (value) => {
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0) return false;
+
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'true' || normalized === '1';
+};
+
+const extractWebhookFromMe = (payload = {}) =>
+  WEBHOOK_FROM_ME_CANDIDATES.some((resolver) => normalizeWebhookBoolean(resolver(payload)));
+
+const extractWebhookSenderCandidate = (payload = {}) =>
+  getFirstStringCandidate(payload, WEBHOOK_SENDER_CANDIDATES);
+
+const extractWebhookParticipantCandidate = (payload = {}) =>
+  getFirstStringCandidate(payload, WEBHOOK_PARTICIPANT_CANDIDATES);
+
+const extractWebhookPushNameCandidate = (payload = {}) =>
+  getFirstStringCandidate(payload, WEBHOOK_PUSH_NAME_CANDIDATES);
+
+const resolveIncomingConversationKind = (remoteJidOriginal) => {
+  if (typeof remoteJidOriginal !== 'string' || !remoteJidOriginal.trim()) {
+    return 'unknown';
+  }
+
+  const normalized = remoteJidOriginal.trim().toLowerCase();
+
+  if (normalized === 'status@broadcast' || normalized.endsWith('@broadcast')) {
+    return 'broadcast';
+  }
+
+  if (normalized.endsWith('@newsletter')) {
+    return 'newsletter';
+  }
+
+  if (normalized.endsWith('@g.us')) {
+    return 'group';
+  }
+
+  if (normalized.endsWith('@lid')) {
+    return 'lid';
+  }
+
+  if (normalized.endsWith('@s.whatsapp.net') || normalized.endsWith('@c.us')) {
+    return 'direct';
+  }
+
+  return 'unknown';
+};
+
 const hasBlockedSendJidSuffix = (value) => {
   if (typeof value !== 'string') return false;
 
@@ -416,6 +530,138 @@ const parseWebhookPhoneCandidate = (value, { allowNumericOnly = false } = {}) =>
   return { phone, reason: null };
 };
 
+const classifyAuthorCandidateRole = (candidate) => {
+  if (!candidate || typeof candidate !== 'object') {
+    return 'unknown';
+  }
+
+  if (candidate.candidateType === 'direct_jid') {
+    return 'remote_jid';
+  }
+
+  if (candidate.candidateType === 'participant_jid') {
+    return 'participant_jid';
+  }
+
+  if (candidate.candidateType === 'sender_jid') {
+    return 'sender_jid';
+  }
+
+  if (candidate.candidateType === 'numeric_fallback') {
+    return candidate.sourcePath.includes('participant')
+      ? 'participant_numeric'
+      : 'sender_numeric';
+  }
+
+  return 'unknown';
+};
+
+const getBaseAuthorScore = (conversationKind, authorRole) => {
+  const byConversation = {
+    direct: {
+      remote_jid: 95,
+      participant_jid: 86,
+      participant_numeric: 78,
+      sender_numeric: 72,
+      sender_jid: 65,
+    },
+    lid: {
+      participant_jid: 95,
+      participant_numeric: 90,
+      sender_numeric: 70,
+      sender_jid: 40,
+      remote_jid: 0,
+    },
+    group: {
+      participant_jid: 95,
+      participant_numeric: 86,
+      sender_numeric: 60,
+      sender_jid: 52,
+      remote_jid: 0,
+    },
+    unknown: {
+      participant_jid: 86,
+      remote_jid: 80,
+      participant_numeric: 74,
+      sender_numeric: 65,
+      sender_jid: 55,
+    },
+  };
+
+  const normalizedKind = byConversation[conversationKind] ? conversationKind : 'unknown';
+  return byConversation[normalizedKind][authorRole] ?? 0;
+};
+
+const getAuthorSourcePathBoost = (sourcePath = '') => {
+  if (sourcePath.startsWith('key.') || sourcePath.startsWith('data.key.')) {
+    return 6;
+  }
+
+  if (sourcePath.startsWith('message.key.')) {
+    return 5;
+  }
+
+  if (sourcePath.includes('messages[0].key.')) {
+    return 3;
+  }
+
+  if (sourcePath === 'sender' || sourcePath === 'data.sender') {
+    return 1;
+  }
+
+  return 0;
+};
+
+const mapScoreToConfidence = (score) => {
+  if (score >= INCOMING_AUTHOR_HIGH_CONFIDENCE_MIN) {
+    return 'high';
+  }
+
+  if (score >= INCOMING_AUTHOR_MEDIUM_CONFIDENCE_MIN) {
+    return 'medium';
+  }
+
+  if (score >= INCOMING_AUTHOR_MIN_SCORE) {
+    return 'low';
+  }
+
+  return 'none';
+};
+
+const scoreIncomingAuthorCandidate = ({
+  candidate,
+  phone,
+  remoteJidOriginal,
+  conversationKind,
+}) => {
+  const authorRole = classifyAuthorCandidateRole(candidate);
+  let score = getBaseAuthorScore(conversationKind, authorRole) + getAuthorSourcePathBoost(candidate.sourcePath);
+
+  const normalizedRemoteJidPhone = normalizeWhatsAppNumber(remoteJidOriginal);
+
+  if (authorRole === 'remote_jid' && normalizedRemoteJidPhone && phone === normalizedRemoteJidPhone) {
+    score += 4;
+  }
+
+  if (
+    (authorRole === 'sender_jid' || authorRole === 'sender_numeric') &&
+    normalizedRemoteJidPhone &&
+    phone === normalizedRemoteJidPhone
+  ) {
+    score += 3;
+  }
+
+  if (authorRole === 'participant_jid' || authorRole === 'participant_numeric') {
+    score += 2;
+  }
+
+  return {
+    score,
+    authorRole,
+    confidence: mapScoreToConfidence(score),
+  };
+};
+
 const appendRejection = (rejections, sourcePath, reason) => {
   if (
     !reason ||
@@ -478,31 +724,79 @@ const resolveWebhookPhoneExtractionCandidates = (payload = {}) => {
   return WEBHOOK_PHONE_EXTRACTION_CANDIDATES;
 };
 
-const normalizeWebhookPhoneCandidate = (value, { allowNumericOnly = false } = {}) => {
-  const parsed = parseWebhookPhoneCandidate(value, { allowNumericOnly });
-  return parsed.phone;
-};
-
-export const extractWhatsAppPhoneFromWebhookDetailed = (payload = {}, options = {}) => {
+export const resolveIncomingAuthor = (payload = {}, options = {}) => {
   const instanceNumbers = extractWhatsAppInstanceNumbersFromWebhook(payload, options);
   const instanceNumbersSet = new Set(instanceNumbers);
   const rejections = [];
   const blockedConversation = findBlockedConversationCandidate(payload);
+  const remoteJidOriginal = extractWhatsAppRemoteJidFromWebhook(payload);
+  const conversationKind = resolveIncomingConversationKind(remoteJidOriginal);
+  const fromMe = extractWebhookFromMe(payload);
+  const sender = extractWebhookSenderCandidate(payload);
+  const participant = extractWebhookParticipantCandidate(payload);
+  const pushName = extractWebhookPushNameCandidate(payload);
   const candidates = resolveWebhookPhoneExtractionCandidates(payload);
+
+  if (fromMe) {
+    appendRejection(rejections, 'fromMe', 'self_message');
+
+    return {
+      authorPhone: null,
+      sourcePath: null,
+      candidateType: null,
+      confidence: 'none',
+      remoteJidOriginal,
+      sender,
+      participant,
+      pushName,
+      fromMe,
+      instanceNumbers,
+      rejections,
+      candidates: [],
+    };
+  }
 
   if (blockedConversation) {
     appendRejection(rejections, blockedConversation.sourcePath, 'blocked_conversation_jid');
 
     return {
-      phone: null,
+      authorPhone: null,
       sourcePath: null,
       candidateType: null,
+      confidence: 'none',
+      remoteJidOriginal,
+      sender,
+      participant,
+      pushName,
+      fromMe,
       instanceNumbers,
       rejections,
+      candidates: [],
     };
   }
 
-  for (const candidate of candidates) {
+  if (conversationKind === 'broadcast' || conversationKind === 'newsletter') {
+    appendRejection(rejections, 'key.remoteJid', 'blocked_conversation_jid');
+
+    return {
+      authorPhone: null,
+      sourcePath: null,
+      candidateType: null,
+      confidence: 'none',
+      remoteJidOriginal,
+      sender,
+      participant,
+      pushName,
+      fromMe,
+      instanceNumbers,
+      rejections,
+      candidates: [],
+    };
+  }
+
+  const matchedCandidates = [];
+
+  for (const [index, candidate] of candidates.entries()) {
     const value = candidate.getValue(payload);
     const parsed = parseWebhookPhoneCandidate(value, {
       allowNumericOnly: candidate.allowNumericOnly,
@@ -510,29 +804,163 @@ export const extractWhatsAppPhoneFromWebhookDetailed = (payload = {}, options = 
 
     if (!parsed.phone) {
       appendRejection(rejections, candidate.sourcePath, parsed.reason);
+
+      if (typeof value === 'string' && value.trim()) {
+        matchedCandidates.push({
+          sourcePath: candidate.sourcePath,
+          candidateType: candidate.candidateType,
+          rawValue: value.trim(),
+          phone: null,
+          score: 0,
+          confidence: 'none',
+          rejectedReason: parsed.reason,
+          index,
+        });
+      }
       continue;
     }
 
     if (instanceNumbersSet.has(parsed.phone)) {
       appendRejection(rejections, candidate.sourcePath, 'instance_number');
+
+      matchedCandidates.push({
+        sourcePath: candidate.sourcePath,
+        candidateType: candidate.candidateType,
+        rawValue: typeof value === 'string' ? value.trim() : value,
+        phone: parsed.phone,
+        score: 0,
+        confidence: 'none',
+        rejectedReason: 'instance_number',
+        index,
+      });
+
       continue;
     }
 
-    return {
+    const scoredCandidate = scoreIncomingAuthorCandidate({
+      candidate,
       phone: parsed.phone,
+      remoteJidOriginal,
+      conversationKind,
+    });
+
+    matchedCandidates.push({
       sourcePath: candidate.sourcePath,
       candidateType: candidate.candidateType,
+      rawValue: typeof value === 'string' ? value.trim() : value,
+      phone: parsed.phone,
+      score: scoredCandidate.score,
+      confidence: scoredCandidate.confidence,
+      authorRole: scoredCandidate.authorRole,
+      rejectedReason: null,
+      index,
+    });
+  }
+
+  const rankedCandidates = matchedCandidates
+    .filter((candidate) => candidate.phone && !candidate.rejectedReason)
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+
+  const bestCandidate = rankedCandidates[0] || null;
+  const secondCandidate = rankedCandidates[1] || null;
+
+  if (!bestCandidate) {
+    return {
+      authorPhone: null,
+      sourcePath: null,
+      candidateType: null,
+      confidence: 'none',
+      remoteJidOriginal,
+      sender,
+      participant,
+      pushName,
+      fromMe,
       instanceNumbers,
       rejections,
+      candidates: matchedCandidates.map(({ index: _index, ...candidate }) => candidate),
+    };
+  }
+
+  if (
+    secondCandidate &&
+    secondCandidate.score === bestCandidate.score &&
+    secondCandidate.phone !== bestCandidate.phone
+  ) {
+    appendRejection(rejections, bestCandidate.sourcePath, 'ambiguous_author_candidates');
+
+    return {
+      authorPhone: null,
+      sourcePath: null,
+      candidateType: null,
+      confidence: 'none',
+      remoteJidOriginal,
+      sender,
+      participant,
+      pushName,
+      fromMe,
+      instanceNumbers,
+      rejections,
+      candidates: matchedCandidates
+        .sort((left, right) => right.score - left.score || left.index - right.index)
+        .map(({ index: _index, ...candidate }) => candidate),
+    };
+  }
+
+  if (bestCandidate.score < INCOMING_AUTHOR_MIN_SCORE) {
+    appendRejection(rejections, bestCandidate.sourcePath, 'low_confidence_author');
+
+    return {
+      authorPhone: null,
+      sourcePath: null,
+      candidateType: null,
+      confidence: 'none',
+      remoteJidOriginal,
+      sender,
+      participant,
+      pushName,
+      fromMe,
+      instanceNumbers,
+      rejections,
+      candidates: matchedCandidates
+        .sort((left, right) => right.score - left.score || left.index - right.index)
+        .map(({ index: _index, ...candidate }) => candidate),
     };
   }
 
   return {
-    phone: null,
-    sourcePath: null,
-    candidateType: null,
+    authorPhone: bestCandidate.phone,
+    sourcePath: bestCandidate.sourcePath,
+    candidateType: bestCandidate.candidateType,
+    confidence: bestCandidate.confidence,
+    remoteJidOriginal,
+    sender,
+    participant,
+    pushName,
+    fromMe,
     instanceNumbers,
     rejections,
+    candidates: matchedCandidates
+      .sort((left, right) => right.score - left.score || left.index - right.index)
+      .map(({ index: _index, ...candidate }) => candidate),
+  };
+};
+
+export const extractWhatsAppPhoneFromWebhookDetailed = (payload = {}, options = {}) => {
+  const authorResolution = resolveIncomingAuthor(payload, options);
+
+  return {
+    phone: authorResolution.authorPhone,
+    sourcePath: authorResolution.sourcePath,
+    candidateType: authorResolution.candidateType,
+    confidence: authorResolution.confidence,
+    remoteJidOriginal: authorResolution.remoteJidOriginal,
+    sender: authorResolution.sender,
+    participant: authorResolution.participant,
+    pushName: authorResolution.pushName,
+    fromMe: authorResolution.fromMe,
+    instanceNumbers: authorResolution.instanceNumbers,
+    rejections: authorResolution.rejections,
+    candidates: authorResolution.candidates,
   };
 };
 
@@ -543,15 +971,7 @@ export const extractPhoneFromPayload = (payload = {}, options = {}) =>
   extractWhatsAppPhoneFromWebhookDetailed(payload, options).phone;
 
 /**
- * Extrai o telefone do REMETENTE (quem enviou a mensagem).
- *
- * Na Evolution API, para mensagens recebidas em chat 1:1:
- *   - key.remoteJid = JID do remetente ✅
- *   - sender        = JID do remetente (pode estar presente ou não)
- *
- * O problema: em alguns formatos de payload, o `remoteJid` pode conter
- * o número da instância/bot ao invés do cliente que enviou.
- * Por isso priorizamos `sender` e `from` quando disponíveis.
+ * Extrai telefone para resposta a partir da resolução explícita do autor.
  */
 export const extractSenderPhoneFromWebhook = (payload = {}) => {
   return extractWhatsAppPhoneFromWebhook(payload);

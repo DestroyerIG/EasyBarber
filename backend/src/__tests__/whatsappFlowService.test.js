@@ -61,7 +61,7 @@ describe('whatsappFlowService guards', () => {
     expect(mockPoolQuery).not.toHaveBeenCalled();
   });
 
-  it('uses sender fallback for @lid payload when sender/from are present', async () => {
+  it('returns ambiguous_phone for sender-only @lid payload', async () => {
     mockGetWhatsAppStatus.mockReturnValue({
       connectedNumber: null,
     });
@@ -85,11 +85,11 @@ describe('whatsappFlowService guards', () => {
       expect.objectContaining({
         ok: false,
         ignored: true,
-        reason: 'barbershop_not_resolved',
+        reason: 'ambiguous_phone',
       })
     );
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
-    expect(mockPoolQuery).toHaveBeenCalled();
+    expect(mockPoolQuery).not.toHaveBeenCalled();
   });
 
   it('returns self_target when payload fromMe arrives as string true', async () => {
