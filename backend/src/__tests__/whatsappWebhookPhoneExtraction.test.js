@@ -257,22 +257,22 @@ describe('whatsapp webhook phone extraction', () => {
     expect(normalizePhoneForSend('120363012345678901@g.us')).toBeNull();
   });
 
-  it('blocks reply destination when context jid is invalid', () => {
+  it('resolves reply destination from phone even when context jid is invalid', () => {
     const destination = resolveReplyDestination({
       phone: '558396311811',
       remoteJidOriginal: '236197968359561@lid',
     });
 
-    expect(destination).toBeNull();
+    expect(destination).toBe('558396311811');
   });
 
-  it('falls back to remoteJidOriginal only when it is not blocked', () => {
+  it('does not fallback to remoteJidOriginal when phone is absent', () => {
     expect(
       resolveReplyDestination({
         phone: null,
         remoteJidOriginal: '558396311811@s.whatsapp.net',
       })
-    ).toBe('558396311811');
+    ).toBeNull();
 
     expect(
       resolveReplyDestination({

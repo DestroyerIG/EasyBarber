@@ -490,25 +490,13 @@ export const normalizePhoneForSend = (value) => {
   return digits;
 };
 
-export const resolveReplyDestination = ({ phone, remoteJidOriginal } = {}) => {
-  if (isInvalidJidContext(remoteJidOriginal)) {
-    return null;
-  }
-
+export const resolveReplyDestination = ({ phone } = {}) => {
   const normalizedPhone = normalizePhoneForSend(phone);
-  if (normalizedPhone) {
-    return normalizedPhone;
-  }
-
-  if (typeof remoteJidOriginal !== 'string' || !remoteJidOriginal.trim()) {
+  if (!normalizedPhone || !isValidPhone(normalizedPhone)) {
     return null;
   }
 
-  if (hasBlockedSendJidSuffix(remoteJidOriginal)) {
-    return null;
-  }
-
-  return normalizePhoneForSend(remoteJidOriginal);
+  return normalizedPhone;
 };
 
 export const extractWhatsAppRemoteJidFromWebhook = (payload = {}) => {

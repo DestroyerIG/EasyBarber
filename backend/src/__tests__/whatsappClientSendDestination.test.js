@@ -66,13 +66,18 @@ describe('whatsappClient destination resolution', () => {
     });
   });
 
-  it('blocks send when remoteJidOriginal is @lid', async () => {
+  it('sends using canonical phone even when remoteJidOriginal is @lid', async () => {
     const sent = await sendWhatsAppText('558396311811', 'Ola', {
       remoteJidOriginal: '236197968359561@lid',
     });
 
-    expect(sent).toBe(false);
-    expect(mockSendTextMessage).not.toHaveBeenCalled();
+    expect(sent).toBe(true);
+    expect(mockSendTextMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phone: '558396311811',
+        text: 'Ola',
+      })
+    );
   });
 
   it('sends when phone is valid and context is compatible', async () => {
@@ -98,12 +103,17 @@ describe('whatsappClient destination resolution', () => {
     expect(mockSendTextMessage).not.toHaveBeenCalled();
   });
 
-  it('blocks send when remoteJidOriginal is group jid', async () => {
+  it('sends using canonical phone even when remoteJidOriginal is group jid', async () => {
     const sent = await sendWhatsAppText('558396311811', 'Oi', {
       remoteJidOriginal: '120363012345678901@g.us',
     });
 
-    expect(sent).toBe(false);
-    expect(mockSendTextMessage).not.toHaveBeenCalled();
+    expect(sent).toBe(true);
+    expect(mockSendTextMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phone: '558396311811',
+        text: 'Oi',
+      })
+    );
   });
 });
