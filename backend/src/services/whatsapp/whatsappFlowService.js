@@ -27,6 +27,18 @@ const normalizeWebhookEventName = (value) =>
     .toLowerCase()
     .replace(/[._\s]+/g, '-');
 
+const isWebhookBooleanTrue = (value) => {
+  if (value === true) return true;
+  if (value === 1) return true;
+
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'true' || normalized === '1';
+};
+
 const INCOMING_MESSAGE_EVENTS = new Set([
   'messages-upsert',
   'message-upsert',
@@ -469,17 +481,25 @@ const isIncomingMessageEvent = (payload = {}) => {
 };
 
 const isFromMe = (payload = {}) => {
-  return Boolean(
-    payload?.fromMe === true ||
-      payload?.key?.fromMe === true ||
-      payload?.data?.fromMe === true ||
-      payload?.data?.key?.fromMe === true ||
-      payload?.data?.messages?.[0]?.key?.fromMe === true ||
-      payload?.messages?.[0]?.key?.fromMe === true
-  );
+  const candidates = [
+    payload?.fromMe,
+    payload?.key?.fromMe,
+    payload?.data?.fromMe,
+    payload?.data?.key?.fromMe,
+    payload?.data?.messages?.[0]?.key?.fromMe,
+    payload?.messages?.[0]?.key?.fromMe,
+  ];
+
+  return candidates.some((value) => isWebhookBooleanTrue(value));
 };
 
 export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) => {
+  const payloadFromMe =
+    phoneOrPayload &&
+    typeof phoneOrPayload === 'object' &&
+    !Array.isArray(phoneOrPayload) &&
+    isFromMe(phoneOrPayload);
+
   const {
     normalizedPhone,
     normalizedText,
@@ -492,6 +512,17 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
   const sendContext = remoteJidOriginal ? { remoteJidOriginal } : {};
 
   try {
+    if (payloadFromMe) {
+      logger.debug(
+        {
+          remoteJid: remoteJidOriginal,
+          eventName: options?.eventName || null,
+        },
+        'Mensagem recebida ignorada: payload marcado como fromMe'
+      );
+      return { ok: false, ignored: true, reason: 'self_target' };
+    }
+
     if (!normalizedPhone) {
       const invalidPhoneReason = payloadSummary ? 'ambiguous_phone' : 'invalid_phone';
 

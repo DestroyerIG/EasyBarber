@@ -57,6 +57,18 @@ const isIncomingWebhookEvent = (eventName, { allowEmpty = true } = {}) => {
   return INCOMING_WEBHOOK_EVENTS.has(normalized);
 };
 
+const isWebhookBooleanTrue = (value) => {
+  if (value === true) return true;
+  if (value === 1) return true;
+
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'true' || normalized === '1';
+};
+
 const extractWebhookText = (payload) => {
   const directText = [
     payload?.message,
@@ -146,7 +158,7 @@ const extractWebhookFromMe = (payload) => {
     payload?.messages?.[0]?.key?.fromMe,
   ];
 
-  return candidates.find((value) => typeof value === 'boolean') ?? false;
+  return candidates.some((value) => isWebhookBooleanTrue(value));
 };
 
 const buildWebhookPhoneExtractionOptions = () => {
