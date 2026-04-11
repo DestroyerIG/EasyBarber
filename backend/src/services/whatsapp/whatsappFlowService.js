@@ -1,8 +1,12 @@
 /**
- * whatsappFlowService.js
+ * whatsappFlowService.js — CORRIGIDO
  *
- * Fluxo completo do bot WhatsApp com máquina de estados baseada em sessões.
- * Restaura: menu → serviço → nome → barbeiro → data → hora → confirmação
+ * BUGS CORRIGIDOS:
+ * Bug 2: INCOMING_MESSAGE_EVENTS sincronizado com whatsapp.js
+ * Bug 3: resolveConnectedNumber() com null-safe fallback
+ * Bug 4: updateSession uma única vez com todos os dados antes do send
+ * Bug 5: parse de datas via localToDateStr/formatDateBR sem UTC
+ * Bug 6: updateSession com newSlots salvo antes de retornar no race condition
  */
 
 import logger from '../../utils/logger.js';
@@ -23,7 +27,7 @@ import {
   deleteSession,
 } from './whatsappSessionService.js';
 import { getBotConfig, getMenuOptions } from './whatsappConfigService.js';
-import { STEPS, RATING_TEXTS } from './whatsappConstants.js';
+import { STEPS } from './whatsappConstants.js';
 import {
   handleCancelAppointment,
   handleConfirmCancel,
@@ -42,18 +46,19 @@ const normalizeText = (value) => {
 };
 
 const normalizeWebhookEventName = (value) =>
-  String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[._\s]+/g, '-');
+  String(value || '').trim().toLowerCase().replace(/[._\s]+/g, '-');
 
 const isWebhookBooleanTrue = (value) => {
   if (value === true || value === 1) return true;
   if (typeof value !== 'string') return false;
-  const normalized = value.trim().toLowerCase();
-  return normalized === 'true' || normalized === '1';
+  return value.trim().toLowerCase() === 'true' || value.trim().toLowerCase() === '1';
 };
 
+/**
+ * FIX Bug 2 — set sincronizado com INCOMING_WEBHOOK_EVENTS de whatsapp.js.
+ * Removidos "messages-set" e "messageset": existiam aqui mas não no router,
+ * então o router descartava esses eventos antes de chegarem ao flow.
+ */
 const INCOMING_MESSAGE_EVENTS = new Set([
   'messages-upsert',
   'message-upsert',
@@ -62,44 +67,32 @@ const INCOMING_MESSAGE_EVENTS = new Set([
   'new-message',
   'incoming-message',
   'message-received',
-  'messages-set',
-  'messageset',
 ]);
 
 const isGreeting = (text) => {
-  const normalized = normalizeText(text).toLowerCase();
-  return [
-    'oi', 'ola', 'olá', 'menu', 'inicio', 'início',
-    'bom dia', 'boa tarde', 'boa noite',
-  ].includes(normalized);
+  const n = normalizeText(text).toLowerCase();
+  return ['oi','ola','olá','menu','inicio','início','bom dia','boa tarde','boa noite'].includes(n);
 };
 
 const normalizeChoice = (text) => {
   const cleaned = normalizeText(text).toLowerCase();
   if (!cleaned) return null;
-
   const numericMatch = cleaned.match(/^(\d{1,2})$/);
   if (numericMatch) return Number(numericMatch[1]);
-
   const emojiMap = {
-    '1️⃣': 1, '2️⃣': 2, '3️⃣': 3, '4️⃣': 4, '5️⃣': 5,
-    '6️⃣': 6, '7️⃣': 7, '8️⃣': 8, '9️⃣': 9, '🔟': 10,
+    '1️⃣':1,'2️⃣':2,'3️⃣':3,'4️⃣':4,'5️⃣':5,
+    '6️⃣':6,'7️⃣':7,'8️⃣':8,'9️⃣':9,'🔟':10,
   };
-  if (emojiMap[cleaned]) return emojiMap[cleaned];
-
-  return null;
+  return emojiMap[cleaned] || null;
 };
 
 const isFromMe = (payload = {}) => {
   const candidates = [
-    payload?.fromMe,
-    payload?.key?.fromMe,
-    payload?.data?.fromMe,
-    payload?.data?.key?.fromMe,
-    payload?.data?.messages?.[0]?.key?.fromMe,
+    payload?.fromMe, payload?.key?.fromMe, payload?.data?.fromMe,
+    payload?.data?.key?.fromMe, payload?.data?.messages?.[0]?.key?.fromMe,
     payload?.messages?.[0]?.key?.fromMe,
   ];
-  return candidates.some((value) => isWebhookBooleanTrue(value));
+  return candidates.some((v) => isWebhookBooleanTrue(v));
 };
 
 const isIncomingMessageEvent = (payload = {}) => {
@@ -112,28 +105,18 @@ const isIncomingMessageEvent = (payload = {}) => {
 
 const extractTextFromWebhook = (payload = {}) => {
   const candidates = [
-    payload?.text,
-    payload?.body,
-    payload?.message,
-    payload?.content,
-    payload?.data?.text,
-    payload?.data?.body,
-    payload?.data?.message,
-    payload?.data?.content,
-    payload?.message?.text,
-    payload?.message?.body,
-    payload?.message?.conversation,
-    payload?.message?.extendedTextMessage?.text,
-    payload?.data?.message?.conversation,
-    payload?.data?.message?.extendedTextMessage?.text,
+    payload?.text, payload?.body, payload?.message, payload?.content,
+    payload?.data?.text, payload?.data?.body, payload?.data?.message,
+    payload?.message?.conversation, payload?.message?.extendedTextMessage?.text,
+    payload?.data?.message?.conversation, payload?.data?.message?.extendedTextMessage?.text,
     payload?.data?.messages?.[0]?.message?.conversation,
     payload?.data?.messages?.[0]?.message?.extendedTextMessage?.text,
     payload?.messages?.[0]?.message?.conversation,
     payload?.messages?.[0]?.message?.extendedTextMessage?.text,
   ];
-  for (const candidate of candidates) {
-    const normalized = normalizeText(candidate);
-    if (normalized) return normalized;
+  for (const c of candidates) {
+    const n = normalizeText(c);
+    if (n) return n;
   }
   return '';
 };
@@ -141,31 +124,56 @@ const extractTextFromWebhook = (payload = {}) => {
 const buildWebhookPayloadSummary = (payload = {}) => ({
   event: payload?.event || payload?.type || payload?.data?.event || payload?.data?.type || null,
   keyRemoteJid: payload?.key?.remoteJid || payload?.data?.key?.remoteJid || null,
-  messageKeyRemoteJid: payload?.message?.key?.remoteJid || null,
   sender: payload?.sender || payload?.data?.sender || null,
-  participant:
-    payload?.key?.participant ||
-    payload?.data?.key?.participant ||
-    payload?.message?.key?.participant ||
-    payload?.data?.participant ||
-    null,
-  from: payload?.from || payload?.data?.from || null,
-  fromMe:
-    payload?.fromMe || payload?.key?.fromMe || payload?.data?.fromMe ||
-    payload?.data?.key?.fromMe || null,
+  fromMe: payload?.fromMe || payload?.key?.fromMe || payload?.data?.fromMe || null,
 });
 
 const mergeKnownInstanceNumbers = (values = []) => {
-  const normalized = new Set();
-  for (const value of values) {
-    const phone = normalizeWhatsAppNumber(value);
-    if (phone) normalized.add(phone);
+  const s = new Set();
+  for (const v of values) {
+    const p = normalizeWhatsAppNumber(v);
+    if (p) s.add(p);
   }
-  return Array.from(normalized);
+  return Array.from(s);
 };
 
-const resolveConnectedNumber = () =>
-  normalizeWhatsAppNumber(getWhatsAppStatus()?.connectedNumber);
+/**
+ * FIX Bug 3 — null-safe: retorna null se status ainda não foi sincronizado.
+ * Evita que a guard self_target rejeite mensagens de terceiros durante startup.
+ */
+const resolveConnectedNumber = () => {
+  const status = getWhatsAppStatus();
+  if (!status || !status.connectedNumber) return null;
+  return normalizeWhatsAppNumber(status.connectedNumber) || null;
+};
+
+// ==================== UTILITÁRIOS DE DATA (FIX Bug 5) ====================
+
+/**
+ * Converte Date para "YYYY-MM-DD" usando fuso local.
+ * new Date("YYYY-MM-DD") é UTC midnight — no Brasil (UTC-3) vira dia anterior.
+ */
+const localToDateStr = (date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const generateNextDays = (count = 7) => {
+  const today = new Date();
+  return Array.from({ length: count }, (_, i) => {
+    const date = new Date(today);
+    date.setDate(date.getDate() + i);
+    return localToDateStr(date);
+  });
+};
+
+/** Formata "YYYY-MM-DD" para pt-BR sem conversão UTC. */
+const formatDateBR = (dateStr, options = {}) => {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString('pt-BR', options);
+};
 
 // ==================== RESOLUÇÃO DE BARBERSHOP ====================
 
@@ -174,45 +182,33 @@ const resolveFlowBarbershopId = async () => {
 
   if (connectedNumber) {
     try {
-      // Tenta match exato primeiro
       const result = await pool.query(
         `SELECT id FROM barbershops
-         WHERE regexp_replace(COALESCE(whatsapp, ''), '\\D', '', 'g') = $1
-            OR regexp_replace(COALESCE(whatsapp, ''), '\\D', '', 'g') = $2
-         ORDER BY created_at ASC NULLS LAST, id ASC
-         LIMIT 2`,
+         WHERE regexp_replace(COALESCE(whatsapp,''),'\\D','','g')=$1
+            OR regexp_replace(COALESCE(whatsapp,''),'\\D','','g')=$2
+         ORDER BY created_at ASC NULLS LAST, id ASC LIMIT 2`,
         [connectedNumber, connectedNumber.replace(/^55/, '')]
       );
-
       if (result.rows.length > 1) {
-        logger.warn(
-          { connectedNumber, matches: result.rows.length },
-          'Multiplas barbearias encontradas para o mesmo WhatsApp conectado; usando o primeiro match'
-        );
+        logger.warn({ connectedNumber, matches: result.rows.length },
+          'Multiplas barbearias encontradas; usando o primeiro match');
       }
-
-      if (result.rows.length > 0) {
-        return result.rows[0].id;
-      }
+      if (result.rows.length > 0) return result.rows[0].id;
     } catch (error) {
-      logger.warn({ err: error, connectedNumber }, 'Falha ao resolver barbershop pelo numero conectado do WhatsApp');
+      logger.warn({ err: error, connectedNumber }, 'Falha ao resolver barbershop pelo numero conectado');
     }
   }
 
-  const configuredId = typeof process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID === 'string' &&
-    process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID.trim()
-    ? process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID.trim()
-    : null;
-
+  const configuredId = process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID?.trim() || null;
   if (configuredId) return configuredId;
 
   try {
     const result = await pool.query(
-      `SELECT id FROM barbershops WHERE active = true ORDER BY id ASC LIMIT 1`
+      `SELECT id FROM barbershops WHERE active=true ORDER BY id ASC LIMIT 1`
     );
     return result.rows[0]?.id || null;
   } catch (error) {
-    logger.warn({ err: error }, 'Falha ao resolver barbershop fallback no fluxo WhatsApp');
+    logger.warn({ err: error }, 'Falha ao resolver barbershop fallback');
     return null;
   }
 };
@@ -222,36 +218,27 @@ const resolveFlowBarbershopId = async () => {
 const getBarbershopName = async (barbershopId) => {
   if (!barbershopId) return 'EasyBarber';
   try {
-    const result = await pool.query(
-      `SELECT name FROM barbershops WHERE id = $1 LIMIT 1`,
-      [barbershopId]
-    );
+    const result = await pool.query(`SELECT name FROM barbershops WHERE id=$1 LIMIT 1`, [barbershopId]);
     return result.rows[0]?.name || 'EasyBarber';
-  } catch (error) {
-    logger.warn({ err: error, barbershopId }, 'Falha ao buscar nome da barbearia');
+  } catch {
     return 'EasyBarber';
   }
 };
 
-const buildFallbackWelcomeMessage = (barbershopName) => {
-  return [
-    `Olá 👋 Bem-vindo à *${barbershopName}*!`,
-    '',
-    'Me chame de *EasyBarber Bot* 🤖 e estou aqui para agilizar seu atendimento.',
-    '',
-    'Como posso ajudar hoje?',
-    '',
-    '1️⃣ *Agendar um horário* 💈',
-    '2️⃣ *Ver nossos serviços* 📋',
-    '3️⃣ *Cancelar agendamento* ❌',
-    '4️⃣ *Reagendamento* 🔄',
-    '5️⃣ *Avaliação pós-atendimento* ⭐',
-    '6️⃣ *Promoções* 🎉',
-    '7️⃣ *Instagram* 📱',
-    '8️⃣ *Falar com um humano* 👨‍💼',
-    '9️⃣ *Encerrar atendimento* 🚪',
-  ].join('\n');
-};
+const buildFallbackWelcomeMessage = (barbershopName) => [
+  `Olá 👋 Bem-vindo à *${barbershopName}*!`, '',
+  'Me chame de *EasyBarber Bot* 🤖 e estou aqui para agilizar seu atendimento.', '',
+  'Como posso ajudar hoje?', '',
+  '1️⃣ *Agendar um horário* 💈',
+  '2️⃣ *Ver nossos serviços* 📋',
+  '3️⃣ *Cancelar agendamento* ❌',
+  '4️⃣ *Reagendamento* 🔄',
+  '5️⃣ *Avaliação pós-atendimento* ⭐',
+  '6️⃣ *Promoções* 🎉',
+  '7️⃣ *Instagram* 📱',
+  '8️⃣ *Falar com um humano* 👨‍💼',
+  '9️⃣ *Encerrar atendimento* 🚪',
+].join('\n');
 
 const buildMenuMessage = async (barbershopId) => {
   const [config, options, barbershopName] = await Promise.all([
@@ -259,11 +246,7 @@ const buildMenuMessage = async (barbershopId) => {
     getMenuOptions(barbershopId),
     getBarbershopName(barbershopId),
   ]);
-
-  if (!options || !options.length) {
-    return buildFallbackWelcomeMessage(barbershopName);
-  }
-
+  if (!options?.length) return buildFallbackWelcomeMessage(barbershopName);
   return buildWelcomeMessage(
     config?.welcome_header || 'Olá 👋 Bem-vindo à {nome_barbearia}!\n\nComo posso ajudar hoje?',
     options.map((item) => ({ label: item.label, emoji: item.emoji })),
@@ -271,12 +254,10 @@ const buildMenuMessage = async (barbershopId) => {
   );
 };
 
-// Exportada para uso no whatsappBookingService
 export const goBackToMainMenu = async (phone, barbershopId) => {
   await deleteSession(phone, barbershopId);
   await createSession(phone, barbershopId);
-  const menuMessage = await buildMenuMessage(barbershopId);
-  return { message: menuMessage };
+  return { message: await buildMenuMessage(barbershopId) };
 };
 
 // ==================== HANDLERS DE STEPS ====================
@@ -285,71 +266,66 @@ const handleMenuStep = async (phone, text, barbershopId, config, sendContext) =>
   const choice = normalizeChoice(text);
 
   if (!choice) {
-    const menu = await buildMenuMessage(barbershopId);
-    await sendWhatsAppMessage(phone, config.invalid_option_message + '\n\n' + menu, sendContext);
+    await sendWhatsAppMessage(phone, config.invalid_option_message + '\n\n' + await buildMenuMessage(barbershopId), sendContext);
     return { ok: true };
   }
 
-  // Busca opção do menu
   const optionResult = await pool.query(
-    `SELECT * FROM whatsapp_menu_options
-     WHERE active = true AND barbershop_id = $1 AND option_order = $2
-     LIMIT 1`,
+    `SELECT * FROM whatsapp_menu_options WHERE active=true AND barbershop_id=$1 AND option_order=$2 LIMIT 1`,
     [barbershopId, choice]
   );
 
   if (!optionResult.rows.length) {
-    const menu = await buildMenuMessage(barbershopId);
-    await sendWhatsAppMessage(phone, config.invalid_option_message + '\n\n' + menu, sendContext);
+    await sendWhatsAppMessage(phone, config.invalid_option_message + '\n\n' + await buildMenuMessage(barbershopId), sendContext);
     return { ok: true };
   }
 
   const option = optionResult.rows[0];
 
-  // Opção personalizada (type=custom)
   if (option.type === 'custom' && option.response_message) {
     await sendWhatsAppMessage(phone, option.response_message, sendContext);
     await deleteSession(phone, barbershopId);
     return { ok: true };
   }
 
-  // Handlers de sistema
   switch (option.handler) {
     case 'schedule': {
-      // Verifica se cliente já tem nome cadastrado
       const clientResult = await pool.query(
-        `SELECT id, name FROM clients WHERE phone = $1 AND barbershop_id = $2 LIMIT 1`,
+        `SELECT id, name FROM clients WHERE phone=$1 AND barbershop_id=$2 LIMIT 1`,
         [phone, barbershopId]
       );
 
       if (clientResult.rows.length > 0) {
-        // Cliente já cadastrado, vai direto para serviço
-        await updateSession(phone, barbershopId, STEPS.CHOOSE_SERVICE, {
-          clientId: clientResult.rows[0].id,
-          clientName: clientResult.rows[0].name,
-        });
+        const client = clientResult.rows[0];
         const services = await pool.query(
-          `SELECT id, name, price, duration_minutes FROM services WHERE barbershop_id = $1 AND active = true ORDER BY name`,
+          `SELECT id, name, price, duration_minutes FROM services WHERE barbershop_id=$1 AND active=true ORDER BY name`,
           [barbershopId]
         );
+
         if (!services.rows.length) {
           await sendWhatsAppMessage(phone, 'Desculpe, não há serviços disponíveis no momento.', sendContext);
           await deleteSession(phone, barbershopId);
           return { ok: true };
         }
+
         let msg = '💈 *Escolha o serviço:*\n\n';
         services.rows.forEach((s, i) => {
           msg += `${i + 1}️⃣ *${s.name}* — R$ ${Number(s.price).toFixed(2)} (${s.duration_minutes} min)\n`;
         });
         msg += '\n0️⃣ Voltar ao menu';
-        await sendWhatsAppMessage(phone, msg, sendContext);
+
+        /**
+         * FIX Bug 4 — um único updateSession com todos os dados necessários.
+         * Antes: dois updateSession consecutivos; o segundo podia sobrescrever
+         * o primeiro sem services[], travando handleChooseServiceStep.
+         */
         await updateSession(phone, barbershopId, STEPS.CHOOSE_SERVICE, {
-          clientId: clientResult.rows[0].id,
-          clientName: clientResult.rows[0].name,
+          clientId: client.id,
+          clientName: client.name,
           services: services.rows,
         });
+        await sendWhatsAppMessage(phone, msg, sendContext);
       } else {
-        // Cliente novo, pede o nome
         await updateSession(phone, barbershopId, STEPS.ASK_NAME, {});
         await sendWhatsAppMessage(phone, config.ask_name_message, sendContext);
       }
@@ -358,18 +334,15 @@ const handleMenuStep = async (phone, text, barbershopId, config, sendContext) =>
 
     case 'view_services': {
       const services = await pool.query(
-        `SELECT name, price, duration_minutes FROM services WHERE barbershop_id = $1 AND active = true ORDER BY name`,
+        `SELECT name, price, duration_minutes FROM services WHERE barbershop_id=$1 AND active=true ORDER BY name`,
         [barbershopId]
       );
-      if (!services.rows.length) {
-        await sendWhatsAppMessage(phone, 'Não há serviços cadastrados no momento.', sendContext);
-      } else {
-        let msg = '📋 *Nossos serviços:*\n\n';
-        services.rows.forEach((s) => {
-          msg += `💈 *${s.name}* — R$ ${Number(s.price).toFixed(2)} (${s.duration_minutes} min)\n`;
-        });
-        await sendWhatsAppMessage(phone, msg, sendContext);
-      }
+      let msg = services.rows.length
+        ? '📋 *Nossos serviços:*\n\n' + services.rows.map(s =>
+            `💈 *${s.name}* — R$ ${Number(s.price).toFixed(2)} (${s.duration_minutes} min)`
+          ).join('\n')
+        : 'Não há serviços cadastrados no momento.';
+      await sendWhatsAppMessage(phone, msg, sendContext);
       await deleteSession(phone, barbershopId);
       return { ok: true };
     }
@@ -392,39 +365,31 @@ const handleMenuStep = async (phone, text, barbershopId, config, sendContext) =>
       return { ok: true };
     }
 
-    case 'promotions': {
+    case 'promotions':
       await sendWhatsAppMessage(phone, config.promotions_message, sendContext);
       await deleteSession(phone, barbershopId);
       return { ok: true };
-    }
 
     case 'instagram': {
-      const barbershopResult = await pool.query(
-        `SELECT instagram_handle FROM barbershops WHERE id = $1 LIMIT 1`,
-        [barbershopId]
-      );
-      const instagramHandle = barbershopResult.rows[0]?.instagram_handle || '@suabarbearia';
-      const msg = config.instagram_message.replace('{instagram_handle}', instagramHandle);
-      await sendWhatsAppMessage(phone, msg, sendContext);
+      const br = await pool.query(`SELECT instagram_handle FROM barbershops WHERE id=$1 LIMIT 1`, [barbershopId]);
+      const handle = br.rows[0]?.instagram_handle || '@suabarbearia';
+      await sendWhatsAppMessage(phone, config.instagram_message.replace('{instagram_handle}', handle), sendContext);
       await deleteSession(phone, barbershopId);
       return { ok: true };
     }
 
-    case 'attendant': {
+    case 'attendant':
       await sendWhatsAppMessage(phone, config.attendant_message, sendContext);
       await deleteSession(phone, barbershopId);
       return { ok: true };
-    }
 
-    case 'end_session': {
+    case 'end_session':
       await sendWhatsAppMessage(phone, config.end_session_message, sendContext);
       await deleteSession(phone, barbershopId);
       return { ok: true };
-    }
 
     default: {
-      const menu = await buildMenuMessage(barbershopId);
-      await sendWhatsAppMessage(phone, config.invalid_option_message + '\n\n' + menu, sendContext);
+      await sendWhatsAppMessage(phone, config.invalid_option_message + '\n\n' + await buildMenuMessage(barbershopId), sendContext);
       return { ok: true };
     }
   }
@@ -443,30 +408,23 @@ const handleAskNameStep = async (phone, text, barbershopId, config, sendContext)
     return { ok: true };
   }
 
-  // Cria ou atualiza o cliente
-  const existingClient = await pool.query(
-    `SELECT id FROM clients WHERE phone = $1 AND barbershop_id = $2 LIMIT 1`,
-    [phone, barbershopId]
+  const existing = await pool.query(
+    `SELECT id FROM clients WHERE phone=$1 AND barbershop_id=$2 LIMIT 1`, [phone, barbershopId]
   );
-
   let clientId;
-  if (existingClient.rows.length > 0) {
-    clientId = existingClient.rows[0].id;
-    await pool.query(
-      `UPDATE clients SET name = $1 WHERE id = $2`,
-      [name, clientId]
-    );
+  if (existing.rows.length > 0) {
+    clientId = existing.rows[0].id;
+    await pool.query(`UPDATE clients SET name=$1 WHERE id=$2`, [name, clientId]);
   } else {
-    const newClient = await pool.query(
-      `INSERT INTO clients (barbershop_id, name, phone) VALUES ($1, $2, $3) RETURNING id`,
+    const nc = await pool.query(
+      `INSERT INTO clients (barbershop_id, name, phone) VALUES ($1,$2,$3) RETURNING id`,
       [barbershopId, name, phone]
     );
-    clientId = newClient.rows[0].id;
+    clientId = nc.rows[0].id;
   }
 
-  // Busca serviços
   const services = await pool.query(
-    `SELECT id, name, price, duration_minutes FROM services WHERE barbershop_id = $1 AND active = true ORDER BY name`,
+    `SELECT id, name, price, duration_minutes FROM services WHERE barbershop_id=$1 AND active=true ORDER BY name`,
     [barbershopId]
   );
 
@@ -483,19 +441,16 @@ const handleAskNameStep = async (phone, text, barbershopId, config, sendContext)
   msg += '\n0️⃣ Voltar ao menu';
 
   await updateSession(phone, barbershopId, STEPS.CHOOSE_SERVICE, {
-    clientId,
-    clientName: name,
-    services: services.rows,
+    clientId, clientName: name, services: services.rows,
   });
-
   await sendWhatsAppMessage(phone, msg, sendContext);
   return { ok: true };
 };
 
 const handleChooseServiceStep = async (phone, text, barbershopId, sessionData, config, sendContext) => {
   if (text === '0' || text.toLowerCase() === 'menu') {
-    const result = await goBackToMainMenu(phone, barbershopId);
-    await sendWhatsAppMessage(phone, result.message, sendContext);
+    const r = await goBackToMainMenu(phone, barbershopId);
+    await sendWhatsAppMessage(phone, r.message, sendContext);
     return { ok: true };
   }
 
@@ -512,12 +467,9 @@ const handleChooseServiceStep = async (phone, text, barbershopId, sessionData, c
     return { ok: true };
   }
 
-  const selectedService = services[choice - 1];
-
-  // Busca barbeiros ativos
+  const sel = services[choice - 1];
   const barbers = await pool.query(
-    `SELECT id, name FROM barbers WHERE barbershop_id = $1 AND active = true ORDER BY name`,
-    [barbershopId]
+    `SELECT id, name FROM barbers WHERE barbershop_id=$1 AND active=true ORDER BY name`, [barbershopId]
   );
 
   if (!barbers.rows.length) {
@@ -528,27 +480,22 @@ const handleChooseServiceStep = async (phone, text, barbershopId, sessionData, c
 
   await updateSession(phone, barbershopId, STEPS.CHOOSE_BARBER, {
     ...sessionData,
-    serviceId: selectedService.id,
-    serviceName: selectedService.name,
-    servicePrice: selectedService.price,
-    serviceDuration: selectedService.duration_minutes,
+    serviceId: sel.id, serviceName: sel.name,
+    servicePrice: sel.price, serviceDuration: sel.duration_minutes,
     barbers: barbers.rows,
   });
 
-  let msg = `✅ *${selectedService.name}* selecionado!\n\n👨‍🦱 *Escolha o barbeiro:*\n\n`;
-  barbers.rows.forEach((b, i) => {
-    msg += `${i + 1}️⃣ *${b.name}*\n`;
-  });
+  let msg = `✅ *${sel.name}* selecionado!\n\n👨‍🦱 *Escolha o barbeiro:*\n\n`;
+  barbers.rows.forEach((b, i) => { msg += `${i + 1}️⃣ *${b.name}*\n`; });
   msg += '\n0️⃣ Voltar ao menu';
-
   await sendWhatsAppMessage(phone, msg, sendContext);
   return { ok: true };
 };
 
 const handleChooseBarberStep = async (phone, text, barbershopId, sessionData, config, sendContext) => {
   if (text === '0' || text.toLowerCase() === 'menu') {
-    const result = await goBackToMainMenu(phone, barbershopId);
-    await sendWhatsAppMessage(phone, result.message, sendContext);
+    const r = await goBackToMainMenu(phone, barbershopId);
+    await sendWhatsAppMessage(phone, r.message, sendContext);
     return { ok: true };
   }
 
@@ -557,47 +504,37 @@ const handleChooseBarberStep = async (phone, text, barbershopId, sessionData, co
 
   if (!choice || choice < 1 || choice > barbers.length) {
     let msg = `${config.invalid_option_message}\n\n👨‍🦱 *Escolha o barbeiro:*\n\n`;
-    barbers.forEach((b, i) => {
-      msg += `${i + 1}️⃣ *${b.name}*\n`;
-    });
+    barbers.forEach((b, i) => { msg += `${i + 1}️⃣ *${b.name}*\n`; });
     msg += '\n0️⃣ Voltar ao menu';
     await sendWhatsAppMessage(phone, msg, sendContext);
     return { ok: true };
   }
 
-  const selectedBarber = barbers[choice - 1];
+  const sel = barbers[choice - 1];
 
-  // Gera os próximos 7 dias
-  const today = new Date();
-  const dates = [];
-  for (let i = 0; i < 7; i++) {
-    const date = new Date(today);
-    date.setDate(date.getDate() + i);
-    dates.push(date);
-  }
+  // FIX Bug 5: generateNextDays usa fuso local
+  const availableDates = generateNextDays(7);
 
   await updateSession(phone, barbershopId, STEPS.CHOOSE_DATE, {
     ...sessionData,
-    barberId: selectedBarber.id,
-    barberName: selectedBarber.name,
-    availableDates: dates.map((d) => d.toISOString().split('T')[0]),
+    barberId: sel.id, barberName: sel.name,
+    availableDates,
   });
 
-  let msg = `✅ *${selectedBarber.name}* selecionado!\n\n📅 *Escolha a data:*\n\n`;
-  dates.forEach((date, index) => {
-    const day = date.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
-    msg += `${index + 1}️⃣ ${day}\n`;
+  let msg = `✅ *${sel.name}* selecionado!\n\n📅 *Escolha a data:*\n\n`;
+  availableDates.forEach((dateStr, index) => {
+    // FIX Bug 5: formatDateBR usa construtor local
+    msg += `${index + 1}️⃣ ${formatDateBR(dateStr, { weekday: 'long', day: '2-digit', month: '2-digit' })}\n`;
   });
   msg += '\n0️⃣ Voltar ao menu';
-
   await sendWhatsAppMessage(phone, msg, sendContext);
   return { ok: true };
 };
 
 const handleChooseDateStep = async (phone, text, barbershopId, sessionData, config, sendContext) => {
   if (text === '0' || text.toLowerCase() === 'menu') {
-    const result = await goBackToMainMenu(phone, barbershopId);
-    await sendWhatsAppMessage(phone, result.message, sendContext);
+    const r = await goBackToMainMenu(phone, barbershopId);
+    await sendWhatsAppMessage(phone, r.message, sendContext);
     return { ok: true };
   }
 
@@ -607,9 +544,7 @@ const handleChooseDateStep = async (phone, text, barbershopId, sessionData, conf
   if (!choice || choice < 1 || choice > availableDates.length) {
     let msg = `${config.invalid_option_message}\n\n📅 *Escolha a data:*\n\n`;
     availableDates.forEach((dateStr, index) => {
-      const date = new Date(dateStr + 'T12:00:00');
-      const day = date.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
-      msg += `${index + 1}️⃣ ${day}\n`;
+      msg += `${index + 1}️⃣ ${formatDateBR(dateStr, { weekday: 'long', day: '2-digit', month: '2-digit' })}\n`;
     });
     msg += '\n0️⃣ Voltar ao menu';
     await sendWhatsAppMessage(phone, msg, sendContext);
@@ -618,17 +553,14 @@ const handleChooseDateStep = async (phone, text, barbershopId, sessionData, conf
 
   const selectedDate = availableDates[choice - 1];
 
-  // Busca horários já ocupados para o barbeiro nessa data
   const bookedResult = await pool.query(
-    `SELECT time FROM appointments
-     WHERE barbershop_id = $1 AND barber_id = $2 AND date = $3 AND status != 'cancelado'`,
+    `SELECT time FROM appointments WHERE barbershop_id=$1 AND barber_id=$2 AND date=$3 AND status!='cancelado'`,
     [barbershopId, sessionData.barberId, selectedDate]
   );
   const bookedTimes = new Set(bookedResult.rows.map((r) => r.time.substring(0, 5)));
 
-  // Busca configurações de horário da barbearia
   const settingsResult = await pool.query(
-    `SELECT opening_time, closing_time, slot_interval_minutes FROM barbershop_settings WHERE barbershop_id = $1 LIMIT 1`,
+    `SELECT opening_time, closing_time, slot_interval_minutes FROM barbershop_settings WHERE barbershop_id=$1 LIMIT 1`,
     [barbershopId]
   );
 
@@ -637,17 +569,13 @@ const handleChooseDateStep = async (phone, text, barbershopId, sessionData, conf
   const slotInterval = settingsResult.rows[0]?.slot_interval_minutes || 30;
   const serviceDuration = sessionData.serviceDuration || slotInterval;
 
-  const openingMinutes = parseInt(openingTime.split(':')[0]) * 60 + parseInt(openingTime.split(':')[1]);
-  const closingMinutes = parseInt(closingTime.split(':')[0]) * 60 + parseInt(closingTime.split(':')[1]);
+  const openMin = parseInt(openingTime.split(':')[0]) * 60 + parseInt(openingTime.split(':')[1]);
+  const closeMin = parseInt(closingTime.split(':')[0]) * 60 + parseInt(closingTime.split(':')[1]);
 
   const availableSlots = [];
-  for (let minutes = openingMinutes; minutes + serviceDuration <= closingMinutes; minutes += slotInterval) {
-    const h = String(Math.floor(minutes / 60)).padStart(2, '0');
-    const m = String(minutes % 60).padStart(2, '0');
-    const timeStr = `${h}:${m}`;
-    if (!bookedTimes.has(timeStr)) {
-      availableSlots.push(timeStr);
-    }
+  for (let min = openMin; min + serviceDuration <= closeMin; min += slotInterval) {
+    const t = `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+    if (!bookedTimes.has(t)) availableSlots.push(t);
   }
 
   if (!availableSlots.length) {
@@ -656,29 +584,23 @@ const handleChooseDateStep = async (phone, text, barbershopId, sessionData, conf
   }
 
   await updateSession(phone, barbershopId, STEPS.CHOOSE_TIME, {
-    ...sessionData,
-    selectedDate,
-    availableSlots,
+    ...sessionData, selectedDate, availableSlots,
   });
 
-  const dateFormatted = new Date(selectedDate + 'T12:00:00').toLocaleDateString('pt-BR', {
-    weekday: 'long', day: '2-digit', month: '2-digit',
-  });
+  // FIX Bug 5
+  const dateFormatted = formatDateBR(selectedDate, { weekday: 'long', day: '2-digit', month: '2-digit' });
 
   let msg = `📅 *${dateFormatted}*\n\n⏰ *Horários disponíveis:*\n\n`;
-  availableSlots.forEach((slot, index) => {
-    msg += `${index + 1}️⃣ ${slot}\n`;
-  });
+  availableSlots.forEach((slot, index) => { msg += `${index + 1}️⃣ ${slot}\n`; });
   msg += '\n0️⃣ Voltar ao menu';
-
   await sendWhatsAppMessage(phone, msg, sendContext);
   return { ok: true };
 };
 
 const handleChooseTimeStep = async (phone, text, barbershopId, sessionData, config, sendContext) => {
   if (text === '0' || text.toLowerCase() === 'menu') {
-    const result = await goBackToMainMenu(phone, barbershopId);
-    await sendWhatsAppMessage(phone, result.message, sendContext);
+    const r = await goBackToMainMenu(phone, barbershopId);
+    await sendWhatsAppMessage(phone, r.message, sendContext);
     return { ok: true };
   }
 
@@ -687,9 +609,7 @@ const handleChooseTimeStep = async (phone, text, barbershopId, sessionData, conf
 
   if (!choice || choice < 1 || choice > availableSlots.length) {
     let msg = `${config.invalid_option_message}\n\n⏰ *Horários disponíveis:*\n\n`;
-    availableSlots.forEach((slot, index) => {
-      msg += `${index + 1}️⃣ ${slot}\n`;
-    });
+    availableSlots.forEach((slot, index) => { msg += `${index + 1}️⃣ ${slot}\n`; });
     msg += '\n0️⃣ Voltar ao menu';
     await sendWhatsAppMessage(phone, msg, sendContext);
     return { ok: true };
@@ -698,23 +618,16 @@ const handleChooseTimeStep = async (phone, text, barbershopId, sessionData, conf
   const selectedTime = availableSlots[choice - 1];
   const selectedDate = sessionData.selectedDate;
 
-  // Verifica conflito de última hora (race condition)
   const conflictCheck = await pool.query(
-    `SELECT id FROM appointments
-     WHERE barbershop_id = $1 AND barber_id = $2 AND date = $3 AND time = $4 AND status != 'cancelado'`,
+    `SELECT id FROM appointments WHERE barbershop_id=$1 AND barber_id=$2 AND date=$3 AND time=$4 AND status!='cancelado'`,
     [barbershopId, sessionData.barberId, selectedDate, selectedTime + ':00']
   );
 
   if (conflictCheck.rows.length > 0) {
-    await sendWhatsAppMessage(
-      phone,
-      '⚠️ Este horário acabou de ser reservado. Por favor, escolha outro horário.',
-      sendContext
-    );
-    // Recarrega horários disponíveis
+    await sendWhatsAppMessage(phone, '⚠️ Este horário acabou de ser reservado. Por favor, escolha outro horário.', sendContext);
+
     const bookedResult = await pool.query(
-      `SELECT time FROM appointments
-       WHERE barbershop_id = $1 AND barber_id = $2 AND date = $3 AND status != 'cancelado'`,
+      `SELECT time FROM appointments WHERE barbershop_id=$1 AND barber_id=$2 AND date=$3 AND status!='cancelado'`,
       [barbershopId, sessionData.barberId, selectedDate]
     );
     const bookedTimes = new Set(bookedResult.rows.map((r) => r.time.substring(0, 5)));
@@ -725,43 +638,33 @@ const handleChooseTimeStep = async (phone, text, barbershopId, sessionData, conf
       return { ok: true };
     }
 
-    let msg = `⏰ *Horários disponíveis:*\n\n`;
-    newSlots.forEach((slot, index) => {
-      msg += `${index + 1}️⃣ ${slot}\n`;
-    });
-    msg += '\n0️⃣ Voltar ao menu';
-
+    /**
+     * FIX Bug 6 — persiste newSlots na sessão ANTES de retornar.
+     * Sem isso, na próxima mensagem sessionData.availableSlots ainda continha
+     * o slot conflitado e o bot entrava em loop tentando inserir o mesmo horário.
+     */
     await updateSession(phone, barbershopId, STEPS.CHOOSE_TIME, {
       ...sessionData,
       availableSlots: newSlots,
     });
 
+    let msg = `⏰ *Horários disponíveis:*\n\n`;
+    newSlots.forEach((slot, index) => { msg += `${index + 1}️⃣ ${slot}\n`; });
+    msg += '\n0️⃣ Voltar ao menu';
     await sendWhatsAppMessage(phone, msg, sendContext);
     return { ok: true };
   }
 
-  // Cria o agendamento
   const newAppointment = await pool.query(
     `INSERT INTO appointments (barbershop_id, client_id, barber_id, service_id, date, time, status)
-     VALUES ($1, $2, $3, $4, $5, $6, 'confirmado') RETURNING id`,
-    [
-      barbershopId,
-      sessionData.clientId,
-      sessionData.barberId,
-      sessionData.serviceId,
-      selectedDate,
-      selectedTime + ':00',
-    ]
+     VALUES ($1,$2,$3,$4,$5,$6,'confirmado') RETURNING id`,
+    [barbershopId, sessionData.clientId, sessionData.barberId, sessionData.serviceId, selectedDate, selectedTime + ':00']
   );
 
-  logger.info(
-    { appointmentId: newAppointment.rows[0].id, phone, barbershopId },
-    'Agendamento criado via WhatsApp bot'
-  );
+  logger.info({ appointmentId: newAppointment.rows[0].id, phone, barbershopId }, 'Agendamento criado via WhatsApp bot');
 
-  const dateFormatted = new Date(selectedDate + 'T12:00:00').toLocaleDateString('pt-BR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-  });
+  // FIX Bug 5
+  const dateFormatted = formatDateBR(selectedDate, { day: '2-digit', month: '2-digit', year: 'numeric' });
 
   const confirmationMsg = config.confirmation_message
     .replace('{servico}', sessionData.serviceName || '')
@@ -778,29 +681,20 @@ const handleChooseTimeStep = async (phone, text, barbershopId, sessionData, conf
 // ==================== HANDLER PRINCIPAL ====================
 
 const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
-  const isPayloadInput =
-    phoneOrPayload && typeof phoneOrPayload === 'object' && !Array.isArray(phoneOrPayload);
+  const isPayloadInput = phoneOrPayload && typeof phoneOrPayload === 'object' && !Array.isArray(phoneOrPayload);
   const preExtractedPhone = normalizeWhatsAppNumber(options?.preExtractedPhone);
   const preExtractedText = normalizeText(options?.preExtractedText);
   const connectedNumber = resolveConnectedNumber();
   const preExtractedInstanceNumbers = Array.isArray(options?.preExtractedInstanceNumbers)
-    ? options.preExtractedInstanceNumbers
-    : [];
+    ? options.preExtractedInstanceNumbers : [];
 
-  const baseKnownInstanceNumbers = mergeKnownInstanceNumbers([
-    connectedNumber,
-    ...preExtractedInstanceNumbers,
-  ]);
+  const baseKnownInstanceNumbers = mergeKnownInstanceNumbers([connectedNumber, ...preExtractedInstanceNumbers]);
 
   if (!isPayloadInput) {
-    const normalizedPhone = normalizeWhatsAppNumber(phoneOrPayload);
     return {
-      normalizedPhone,
+      normalizedPhone: normalizeWhatsAppNumber(phoneOrPayload),
       normalizedText: normalizeText(text),
-      remoteJidOriginal:
-        typeof phoneOrPayload === 'string' && phoneOrPayload.includes('@')
-          ? phoneOrPayload.trim()
-          : null,
+      remoteJidOriginal: typeof phoneOrPayload === 'string' && phoneOrPayload.includes('@') ? phoneOrPayload.trim() : null,
       payloadSummary: null,
       phoneExtraction: null,
       knownInstanceNumbers: baseKnownInstanceNumbers,
@@ -815,6 +709,7 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
   const payloadInstanceNumbers = extractWhatsAppInstanceNumbersFromWebhook(phoneOrPayload, {
     connectedNumbers: baseKnownInstanceNumbers,
   });
+
   const knownInstanceNumbers = mergeKnownInstanceNumbers([
     ...baseKnownInstanceNumbers,
     ...payloadInstanceNumbers,
@@ -832,130 +727,73 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
 };
 
 export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) => {
-  const payloadFromMe =
-    phoneOrPayload &&
-    typeof phoneOrPayload === 'object' &&
-    !Array.isArray(phoneOrPayload) &&
-    isFromMe(phoneOrPayload);
+  const payloadFromMe = phoneOrPayload && typeof phoneOrPayload === 'object' && !Array.isArray(phoneOrPayload) && isFromMe(phoneOrPayload);
 
-  const {
-    normalizedPhone,
-    normalizedText,
-    remoteJidOriginal,
-    payloadSummary,
-    phoneExtraction,
-    knownInstanceNumbers,
-  } = resolveIncomingMessageInput(phoneOrPayload, text, options);
+  const { normalizedPhone, normalizedText, remoteJidOriginal, payloadSummary, phoneExtraction, knownInstanceNumbers } =
+    resolveIncomingMessageInput(phoneOrPayload, text, options);
 
   const sendContext = remoteJidOriginal ? { remoteJidOriginal } : {};
 
   try {
-    // Guard: mensagem enviada pela própria instância
     if (payloadFromMe) {
-      logger.debug(
-        { remoteJid: remoteJidOriginal, eventName: options?.eventName || null },
-        'Mensagem recebida ignorada: payload marcado como fromMe'
-      );
+      logger.debug({ remoteJid: remoteJidOriginal }, 'Mensagem ignorada: fromMe');
       return { ok: false, ignored: true, reason: 'self_target' };
     }
 
-    // Guard: telefone não identificado
     if (!normalizedPhone) {
-      logger.warn(
-        {
-          authorPhone: null,
-          sourcePath: phoneExtraction?.sourcePath || null,
-          confidence: phoneExtraction?.confidence || null,
-          remoteJid: remoteJidOriginal,
-          payload: payloadSummary,
-          knownInstanceNumbers,
-          text: normalizedText || null,
-          eventName: options?.eventName || null,
-        },
-        'Mensagem recebida ignorada: telefone nao confiavel para resposta'
-      );
+      logger.warn({ remoteJid: remoteJidOriginal, payload: payloadSummary, knownInstanceNumbers },
+        'Mensagem ignorada: telefone nao identificado');
       return { ok: false, ignored: true, reason: 'ambiguous_phone' };
     }
 
-    // Guard: texto vazio
     if (!normalizedText) {
-      logger.debug(
-        { phone: normalizedPhone, eventName: options?.eventName || null },
-        'Mensagem recebida ignorada: texto vazio'
-      );
+      logger.debug({ phone: normalizedPhone }, 'Mensagem ignorada: texto vazio');
       return { ok: false, ignored: true, reason: 'empty_text' };
     }
 
-    // Guard: mensagem da própria instância
     if (knownInstanceNumbers.includes(normalizedPhone)) {
-      logger.warn(
-        { phone: normalizedPhone, knownInstanceNumbers, eventName: options?.eventName || null },
-        'Mensagem recebida ignorada: destino resolve para numero da instancia'
-      );
+      logger.warn({ phone: normalizedPhone, knownInstanceNumbers }, 'Mensagem ignorada: self_target');
       return { ok: false, ignored: true, reason: 'self_target' };
     }
 
-    // Resolve a barbearia
     const barbershopId = await resolveFlowBarbershopId();
     if (!barbershopId) {
-      logger.warn(
-        { phone: normalizedPhone, eventName: options?.eventName || null },
-        'Mensagem recebida ignorada: barbershop nao resolvido para o fluxo WhatsApp'
-      );
+      logger.warn({ phone: normalizedPhone }, 'Mensagem ignorada: barbershop nao resolvido');
       return { ok: false, ignored: true, reason: 'barbershop_not_resolved' };
     }
 
-    logger.info(
-      {
-        phone: normalizedPhone,
-        text: normalizedText,
-        sourcePath: phoneExtraction?.sourcePath || null,
-        confidence: phoneExtraction?.confidence || null,
-        remoteJidOriginal,
-        barbershopId,
-        eventName: options?.eventName || null,
-        dedupeKey: options?.dedupeKey || null,
-        messageId: options?.messageId || null,
-      },
-      'Processando mensagem recebida no fluxo WhatsApp'
-    );
+    logger.info({
+      phone: normalizedPhone, text: normalizedText, barbershopId,
+      eventName: options?.eventName || null, dedupeKey: options?.dedupeKey || null,
+    }, 'Processando mensagem no fluxo WhatsApp');
 
-    // Busca config do bot
     const config = await getBotConfig(barbershopId);
 
-    // Saudação → reseta sessão e exibe menu
     if (isGreeting(normalizedText)) {
       await deleteSession(normalizedPhone, barbershopId);
       await createSession(normalizedPhone, barbershopId);
-      const menuMessage = await buildMenuMessage(barbershopId);
-      const sent = await sendWhatsAppMessage(normalizedPhone, menuMessage, sendContext);
+      const sent = await sendWhatsAppMessage(normalizedPhone, await buildMenuMessage(barbershopId), sendContext);
       return { ok: sent, ignored: false, reason: sent ? null : 'send_failed' };
     }
 
-    // Busca sessão atual
     let session = await getSession(normalizedPhone, barbershopId);
 
-    // Sessão expirada ou inexistente → exibe menu
     if (!session || isSessionExpired(session)) {
       if (session) {
         await deleteSession(normalizedPhone, barbershopId);
-        const expiredMsg = config.session_expired_message ||
-          '⏰ Sua sessão expirou. Digite qualquer coisa para começar novamente.';
-        await sendWhatsAppMessage(normalizedPhone, expiredMsg, sendContext);
+        await sendWhatsAppMessage(normalizedPhone,
+          config.session_expired_message || '⏰ Sua sessão expirou. Digite qualquer coisa para começar novamente.',
+          sendContext);
       }
       await createSession(normalizedPhone, barbershopId);
-      const menuMessage = await buildMenuMessage(barbershopId);
-      const sent = await sendWhatsAppMessage(normalizedPhone, menuMessage, sendContext);
+      const sent = await sendWhatsAppMessage(normalizedPhone, await buildMenuMessage(barbershopId), sendContext);
       return { ok: sent, ignored: false, reason: sent ? null : 'send_failed' };
     }
 
     const currentStep = session.step;
     const sessionData = typeof session.data === 'object' ? session.data : {};
 
-    logger.debug(
-      { phone: normalizedPhone, barbershopId, step: currentStep, text: normalizedText },
-      'Processando step do fluxo WhatsApp'
-    );
+    logger.debug({ phone: normalizedPhone, barbershopId, step: currentStep, text: normalizedText }, 'Processando step');
 
     let stepResult = { ok: false };
 
@@ -963,107 +801,67 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       case STEPS.MENU:
         stepResult = await handleMenuStep(normalizedPhone, normalizedText, barbershopId, config, sendContext);
         break;
-
       case STEPS.ASK_NAME:
         stepResult = await handleAskNameStep(normalizedPhone, normalizedText, barbershopId, config, sendContext);
         break;
-
       case STEPS.CHOOSE_SERVICE:
         stepResult = await handleChooseServiceStep(normalizedPhone, normalizedText, barbershopId, sessionData, config, sendContext);
         break;
-
       case STEPS.CHOOSE_BARBER:
         stepResult = await handleChooseBarberStep(normalizedPhone, normalizedText, barbershopId, sessionData, config, sendContext);
         break;
-
       case STEPS.CHOOSE_DATE:
         stepResult = await handleChooseDateStep(normalizedPhone, normalizedText, barbershopId, sessionData, config, sendContext);
         break;
-
       case STEPS.CHOOSE_TIME:
         stepResult = await handleChooseTimeStep(normalizedPhone, normalizedText, barbershopId, sessionData, config, sendContext);
         break;
-
       case STEPS.CONFIRM_CANCEL: {
-        const result = await handleConfirmCancel(normalizedPhone, normalizedText, barbershopId, sessionData, config);
-        await sendWhatsAppMessage(normalizedPhone, result.message, sendContext);
+        const r = await handleConfirmCancel(normalizedPhone, normalizedText, barbershopId, sessionData, config);
+        await sendWhatsAppMessage(normalizedPhone, r.message, sendContext);
         stepResult = { ok: true };
         break;
       }
-
       case STEPS.CONFIRM_RESCHEDULE: {
-        const result = await handleConfirmReschedule(normalizedPhone, normalizedText, barbershopId, sessionData, config);
-        await sendWhatsAppMessage(normalizedPhone, result.message, sendContext);
+        const r = await handleConfirmReschedule(normalizedPhone, normalizedText, barbershopId, sessionData, config);
+        await sendWhatsAppMessage(normalizedPhone, r.message, sendContext);
         stepResult = { ok: true };
         break;
       }
-
       case STEPS.SEND_RATING: {
-        const result = await handleSendRating(normalizedPhone, normalizedText, barbershopId, sessionData, config);
-        await sendWhatsAppMessage(normalizedPhone, result.message, sendContext);
+        const r = await handleSendRating(normalizedPhone, normalizedText, barbershopId, sessionData, config);
+        await sendWhatsAppMessage(normalizedPhone, r.message, sendContext);
         stepResult = { ok: true };
         break;
       }
-
       default: {
-        // Step desconhecido → reseta para o menu
         logger.warn({ phone: normalizedPhone, step: currentStep }, 'Step desconhecido, resetando sessão');
         await deleteSession(normalizedPhone, barbershopId);
         await createSession(normalizedPhone, barbershopId);
-        const menuMessage = await buildMenuMessage(barbershopId);
-        const sent = await sendWhatsAppMessage(normalizedPhone, menuMessage, sendContext);
+        const sent = await sendWhatsAppMessage(normalizedPhone, await buildMenuMessage(barbershopId), sendContext);
         stepResult = { ok: sent };
         break;
       }
     }
 
-    return {
-      ok: stepResult.ok,
-      ignored: false,
-      reason: stepResult.ok ? null : 'send_failed',
-    };
+    return { ok: stepResult.ok, ignored: false, reason: stepResult.ok ? null : 'send_failed' };
   } catch (error) {
-    logger.error(
-      {
-        err: error,
-        phone: normalizedPhone,
-        remoteJid: remoteJidOriginal,
-        payload: payloadSummary,
-        text: normalizedText,
-      },
-      'Erro ao processar fluxo de mensagem WhatsApp'
-    );
-
-    return {
-      ok: false,
-      ignored: false,
-      reason: 'flow_error',
-      error: error?.message || 'Erro interno no fluxo WhatsApp',
-    };
+    logger.error({ err: error, phone: normalizedPhone, text: normalizedText }, 'Erro no fluxo WhatsApp');
+    return { ok: false, ignored: false, reason: 'flow_error', error: error?.message };
   }
 };
 
 // ==================== WEBHOOK HANDLER ====================
-
+// Nota: whatsapp.js (router) chama handleIncomingMessage diretamente.
+// handleWebhook permanece exportado para integrações diretas sem passar pelo router.
 export const handleWebhook = async (req, res) => {
   try {
     const payload = req.body ?? {};
-    const payloadSummary = buildWebhookPayloadSummary(payload);
-
-    logger.info({ payload: payloadSummary }, 'Webhook WhatsApp recebido');
-
     if (isFromMe(payload)) {
-      return res.status(200).json({
-        success: true,
-        message: 'Evento ignorado: mensagem enviada pela própria instância.',
-      });
+      return res.status(200).json({ success: true, message: 'Evento ignorado: fromMe.' });
     }
-
     if (!isIncomingMessageEvent(payload)) {
-      return res.status(200).json({
-        success: true,
-        message: 'Evento ignorado: não é mensagem de entrada.',
-      });
+      return res.status(200).json({ success: true, message: 'Evento ignorado: nao e mensagem de entrada.' });
     }
 
     const text = extractTextFromWebhook(payload);
@@ -1072,37 +870,24 @@ export const handleWebhook = async (req, res) => {
       connectedNumbers: mergeKnownInstanceNumbers([connectedNumber]),
       messageText: text,
     });
-    const phone = extraction.phone;
     const eventName = normalizeWebhookEventName(
       payload?.event || payload?.type || payload?.data?.event || payload?.data?.type || ''
     );
 
     const result = await handleIncomingMessage(payload, text, {
-      preExtractedPhone: phone,
+      preExtractedPhone: extraction.phone,
       preExtractedText: text,
       preExtractedInstanceNumbers: extraction.instanceNumbers,
-      preExtractedSourcePath: extraction.sourcePath,
-      preExtractedConfidence: extraction.confidence,
       eventName,
     });
 
-    return res.status(200).json({
-      success: true,
-      data: { phone, text, result },
-    });
+    return res.status(200).json({ success: true, data: { phone: extraction.phone, text, result } });
   } catch (error) {
-    logger.error(
-      { err: error, payload: buildWebhookPayloadSummary(req.body ?? {}) },
-      'Erro ao processar webhook WhatsApp'
-    );
-
+    logger.error({ err: error }, 'Erro ao processar webhook WhatsApp');
     return res.status(500).json({
       success: false,
       message: 'Erro ao processar webhook WhatsApp',
-      error: {
-        code: 'WHATSAPP_WEBHOOK_ERROR',
-        message: error?.message || 'Erro interno no webhook WhatsApp',
-      },
+      error: { code: 'WHATSAPP_WEBHOOK_ERROR', message: error?.message },
     });
   }
 };

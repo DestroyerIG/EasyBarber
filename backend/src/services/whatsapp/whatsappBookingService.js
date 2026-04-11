@@ -1,5 +1,9 @@
 /**
- * Handlers de cancelamento, reagendamento e avaliação pós-atendimento.
+ * whatsappBookingService.js — CORRIGIDO
+ *
+ * FIX Bug 5 (reagendamento): handleConfirmReschedule usava new Date(today)
+ * e setDate() sem fuso local, gerando datas com offset UTC incorreto.
+ * Corrigido via generateNextDays() que usa localToDateStr().
  */
 
 import pool from '../../config/database.js';
@@ -9,15 +13,38 @@ import { updateSession } from './whatsappSessionService.js';
 import { formatMessage } from './whatsappMessageService.js';
 import { goBackToMainMenu } from './whatsappFlowService.js';
 
+// ==================== UTILITÁRIO DE DATA (FIX Bug 5) ====================
+
+const localToDateStr = (date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const generateNextDays = (count = 7) => {
+  const today = new Date();
+  return Array.from({ length: count }, (_, i) => {
+    const date = new Date(today);
+    date.setDate(date.getDate() + i);
+    return localToDateStr(date);
+  });
+};
+
+const formatDateBR = (dateStr, options = {}) => {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString('pt-BR', options);
+};
+
 // ==================== CANCELAMENTO ====================
 
 export const handleCancelAppointment = async (phone, barbershopId, config) => {
   try {
     const appointments = await pool.query(
-      `SELECT id, date, time, status FROM appointments 
-       WHERE barbershop_id = $1 AND client_id = (
-         SELECT id FROM clients WHERE phone = $2 AND barbershop_id = $1
-       ) AND status = 'confirmado' AND date >= CURRENT_DATE
+      `SELECT id, date, time, status FROM appointments
+       WHERE barbershop_id=$1 AND client_id=(
+         SELECT id FROM clients WHERE phone=$2 AND barbershop_id=$1
+       ) AND status='confirmado' AND date>=CURRENT_DATE
        ORDER BY date DESC LIMIT 5`,
       [barbershopId, phone]
     );
@@ -55,15 +82,9 @@ export const handleConfirmCancel = async (phone, choice, barbershopId, data, con
   const appointmentId = data.appointments[appointmentIndex].id;
 
   try {
-    await pool.query(
-      'UPDATE appointments SET status = $1 WHERE id = $2',
-      ['cancelado', appointmentId]
-    );
-
+    await pool.query(`UPDATE appointments SET status=$1 WHERE id=$2`, ['cancelado', appointmentId]);
     const mainMenu = await goBackToMainMenu(phone, barbershopId);
-    return {
-      message: formatMessage(config.cancel_success_message) + '\n\n' + mainMenu.message,
-    };
+    return { message: formatMessage(config.cancel_success_message) + '\n\n' + mainMenu.message };
   } catch (error) {
     logger.error({ err: error }, 'Erro ao cancelar agendamento');
     return { message: 'Desculpe, ocorreu um erro ao cancelar o agendamento. Tente novamente.' };
@@ -75,10 +96,10 @@ export const handleConfirmCancel = async (phone, choice, barbershopId, data, con
 export const handleRescheduleAppointment = async (phone, barbershopId, config) => {
   try {
     const appointments = await pool.query(
-      `SELECT id, date, time, service_id, barber_id FROM appointments 
-       WHERE barbershop_id = $1 AND client_id = (
-         SELECT id FROM clients WHERE phone = $2 AND barbershop_id = $1
-       ) AND status = 'confirmado' AND date >= CURRENT_DATE
+      `SELECT id, date, time, service_id, barber_id FROM appointments
+       WHERE barbershop_id=$1 AND client_id=(
+         SELECT id FROM clients WHERE phone=$2 AND barbershop_id=$1
+       ) AND status='confirmado' AND date>=CURRENT_DATE
        ORDER BY date DESC LIMIT 5`,
       [barbershopId, phone]
     );
@@ -122,19 +143,23 @@ export const handleConfirmReschedule = async (phone, choice, barbershopId, data,
 
   await updateSession(phone, barbershopId, STEPS.CHOOSE_DATE, newData);
 
-  const today = new Date();
-  const dates = [];
-
-  for (let i = 0; i < 7; i++) {
-    const date = new Date(today);
-    date.setDate(date.getDate() + i);
-    dates.push(date);
-  }
+  /**
+   * FIX Bug 5 — reagendamento: o código original usava new Date(today) com
+   * date.setDate() e depois toLocaleDateString(), que misturava UTC com local.
+   * generateNextDays() garante strings YYYY-MM-DD no fuso local.
+   */
+  const dates = generateNextDays(7);
 
   let message = '📅 Escolha a nova data para reagendar:\n\n';
-  dates.forEach((date, index) => {
-    const day = date.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+  dates.forEach((dateStr, index) => {
+    const day = formatDateBR(dateStr, { weekday: 'short', day: '2-digit', month: '2-digit' });
     message += `${index + 1}️⃣ ${day}\n`;
+  });
+
+  // Persiste availableDates para que handleChooseDateStep encontre as datas corretas
+  await updateSession(phone, barbershopId, STEPS.CHOOSE_DATE, {
+    ...newData,
+    availableDates: dates,
   });
 
   return { message };
@@ -145,10 +170,10 @@ export const handleConfirmReschedule = async (phone, choice, barbershopId, data,
 export const handlePostAttendanceEvaluation = async (phone, barbershopId, config) => {
   try {
     const lastAppointment = await pool.query(
-      `SELECT id, date, time FROM appointments 
-       WHERE barbershop_id = $1 AND client_id = (
-         SELECT id FROM clients WHERE phone = $2 AND barbershop_id = $1
-       ) AND status = 'confirmado' AND date < CURRENT_DATE
+      `SELECT id, date, time FROM appointments
+       WHERE barbershop_id=$1 AND client_id=(
+         SELECT id FROM clients WHERE phone=$2 AND barbershop_id=$1
+       ) AND status='confirmado' AND date<CURRENT_DATE
        ORDER BY date DESC LIMIT 1`,
       [barbershopId, phone]
     );
@@ -180,13 +205,12 @@ export const handleSendRating = async (phone, choice, barbershopId, data, config
   try {
     await pool.query(
       `INSERT INTO whatsapp_ratings (barbershop_id, appointment_id, rating, created_at)
-       VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-       ON CONFLICT (appointment_id) DO UPDATE SET rating = $3`,
+       VALUES ($1,$2,$3,CURRENT_TIMESTAMP)
+       ON CONFLICT (appointment_id) DO UPDATE SET rating=$3`,
       [barbershopId, data.appointmentId, rating]
     );
 
     const mainMenu = await goBackToMainMenu(phone, barbershopId);
-
     return {
       message: formatMessage(config.rating_confirmation_message, { ratingText: RATING_TEXTS[rating] }) + '\n\n' + mainMenu.message,
     };
