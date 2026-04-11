@@ -550,6 +550,12 @@ const parseWebhookPhoneCandidate = (value, { allowNumericOnly = false } = {}) =>
   }
 
   const isJid = candidate.includes('@');
+  const normalized = candidate.toLowerCase();
+
+  if (normalized.endsWith('@lid')) {
+    return { phone: null, reason: 'lid_not_safe_for_author' };
+  }
+
   if (isJid && !hasDirectWhatsAppJidSuffix(candidate)) {
     return { phone: null, reason: 'unsupported_jid_suffix' };
   }
@@ -887,15 +893,39 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       conversationKind,
     });
 
+    let adjustedScore = scoredCandidate.score;
+    let adjustedConfidence = scoredCandidate.confidence;
+    let rejectedReason = null;
+
+    const isSenderFallbackPath = INCOMING_AUTHOR_SENDER_FALLBACK_SOURCE_PATHS.has(candidate.sourcePath);
+    const isLidConversation = conversationKind === 'lid';
+    const isSenderLikeCandidate =
+      scoredCandidate.authorRole === 'sender_jid' ||
+      scoredCandidate.authorRole === 'sender_numeric';
+
+    if (isLidConversation && isSenderLikeCandidate) {
+      adjustedScore = 0;
+      adjustedConfidence = 'none';
+      rejectedReason = 'lid_sender_untrusted';
+      appendRejection(rejections, candidate.sourcePath, rejectedReason);
+    }
+
+    if (!rejectedReason && isSenderFallbackPath && instanceNumbersSet.has(parsed.phone)) {
+      adjustedScore = 0;
+      adjustedConfidence = 'none';
+      rejectedReason = 'sender_matches_connected_instance';
+      appendRejection(rejections, candidate.sourcePath, rejectedReason);
+    }
+
     matchedCandidates.push({
       sourcePath: candidate.sourcePath,
       candidateType: candidate.candidateType,
       rawValue: typeof value === 'string' ? value.trim() : value,
       phone: parsed.phone,
-      score: scoredCandidate.score,
-      confidence: scoredCandidate.confidence,
+      score: adjustedScore,
+      confidence: adjustedConfidence,
       authorRole: scoredCandidate.authorRole,
-      rejectedReason: null,
+      rejectedReason,
       index,
     });
   }
@@ -955,6 +985,29 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
     };
   }
 
+  if (
+    conversationKind === 'lid' &&
+    bestCandidate &&
+    INCOMING_AUTHOR_SENDER_FALLBACK_SOURCE_PATHS.has(bestCandidate.sourcePath)
+  ) {
+    appendRejection(rejections, bestCandidate.sourcePath, 'lid_sender_untrusted');
+
+    return {
+      authorPhone: null,
+      sourcePath: null,
+      candidateType: null,
+      confidence: 'none',
+      remoteJidOriginal,
+      sender,
+      participant,
+      pushName,
+      fromMe,
+      instanceNumbers,
+      rejections,
+      candidates: serializeCandidates(),
+    };
+  }
+
   if (bestCandidate.score < INCOMING_AUTHOR_MIN_SCORE) {
     const hasBetterCandidateThanSender = senderFallbackCandidate
       ? rankedCandidates.some(
@@ -967,7 +1020,9 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       !fromMe &&
       Boolean(incomingText) &&
       senderFallbackCandidate &&
-      !hasBetterCandidateThanSender;
+      !hasBetterCandidateThanSender &&
+      conversationKind !== 'lid' &&
+      !instanceNumbersSet.has(senderFallbackCandidate.phone);
 
     if (shouldPromoteSenderFallback) {
       return {
