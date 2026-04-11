@@ -111,6 +111,84 @@ const extractErrorMessage = (payload) => {
   return null;
 };
 
+const safeStringify = (value) => {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+export const getProviderErrorMessage = (error = null) => {
+  if (!error) return '';
+
+  const chunks = [];
+
+  if (typeof error?.message === 'string' && error.message.trim()) {
+    chunks.push(error.message.trim());
+  }
+
+  const detailMessage = extractErrorMessage(error?.details);
+  if (detailMessage) {
+    chunks.push(detailMessage);
+  } else if (error?.details) {
+    const serializedDetails = safeStringify(error.details).trim();
+    if (serializedDetails) {
+      chunks.push(serializedDetails);
+    }
+  }
+
+  if (!chunks.length) {
+    return '';
+  }
+
+  return Array.from(new Set(chunks)).join(' | ');
+};
+
+export const isSessionStateError = (error = null) => {
+  if (!error) return false;
+  if (error?.sessionStateError === true) return true;
+  if (error?.code === 'EVOLUTION_SESSION_STATE_ERROR') return true;
+
+  const status = Number(error?.status || 0);
+  const providerError = getProviderErrorMessage(error).toLowerCase();
+
+  if (!providerError && !status) {
+    return false;
+  }
+
+  const hasNotAcceptable = providerError.includes('not-acceptable');
+  const hasPreKeyError =
+    providerError.includes('prekeyerror') || providerError.includes('invalid prekey id');
+  const hasStreamError =
+    providerError.includes('stream:error') || providerError.includes('stream error');
+  const hasInitQueriesBadRequest =
+    (providerError.includes('bad-request') || providerError.includes('bad request')) &&
+    providerError.includes('init quer');
+  const hasUnexpectedLogout =
+    providerError.includes('logout') || providerError.includes('loggedout');
+
+  if (status === 400 && hasNotAcceptable) {
+    return true;
+  }
+
+  return (
+    hasPreKeyError ||
+    hasStreamError ||
+    hasInitQueriesBadRequest ||
+    hasUnexpectedLogout ||
+    hasNotAcceptable
+  );
+};
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isRetriableStatus = (status) => [408, 429, 500, 502, 503, 504].includes(status);
@@ -569,12 +647,31 @@ export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null })
     'Enviando mensagem de texto para Evolution API'
   );
 
-  const requestResult = await requestTryingPayloads(
-    compatibleCandidates,
-    'sendTextMessage',
-    [400, 409, 415, 422],
-    { includeMeta: true }
-  );
+  let requestResult = null;
+
+  try {
+    requestResult = await requestTryingPayloads(
+      compatibleCandidates,
+      'sendTextMessage',
+      [400, 409, 415, 422],
+      { includeMeta: true }
+    );
+  } catch (error) {
+    const sessionStateError = isSessionStateError(error);
+    const providerError = getProviderErrorMessage(error);
+
+    if (error && typeof error === 'object') {
+      error.sessionStateError = sessionStateError;
+      error.providerError = providerError;
+      error.instanceName = instanceName;
+
+      if (sessionStateError && error instanceof EvolutionApiError) {
+        error.code = 'EVOLUTION_SESSION_STATE_ERROR';
+      }
+    }
+
+    throw error;
+  }
 
   return {
     payload: requestResult?.payload ?? null,

@@ -8,6 +8,8 @@ import {
   sendTextMessage,
   getEvolutionConfig,
   EvolutionApiError,
+  isSessionStateError,
+  getProviderErrorMessage,
 } from './evolutionApiService.js';
 import logger from '../utils/logger.js';
 import {
@@ -35,6 +37,8 @@ const waState = {
   provider: 'evolution',
   lastSyncAt: null,
 };
+
+let sessionRecoveryPromise = null;
 
 const isEvolutionProvider = () =>
   (process.env.WHATSAPP_PROVIDER || 'evolution').toLowerCase() === 'evolution';
@@ -389,6 +393,141 @@ export const disconnectWhatsApp = async () => {
   }
 };
 
+const markSessionStateAsBroken = (error, context = {}) => {
+  updateState({
+    status: STATUS.DISCONNECTED,
+    qrCode: null,
+    connectedNumber: null,
+    connectedName: null,
+    error:
+      context?.providerError ||
+      error?.message ||
+      'Sessao Evolution inconsistente. Necessario reconectar a instancia.',
+  });
+};
+
+const runSessionRecoveryFlow = async (context = {}) => {
+  const { instanceName } = getEvolutionConfig();
+
+  if (sessionRecoveryPromise) {
+    logger.info(
+      {
+        instanceName,
+        endpoint: context?.endpoint || null,
+        phone: context?.phone || null,
+      },
+      'Recuperacao de sessao Evolution ja em andamento'
+    );
+    return sessionRecoveryPromise;
+  }
+
+  sessionRecoveryPromise = (async () => {
+    const recoverySteps = [];
+
+    try {
+      try {
+        await logoutInstance();
+        recoverySteps.push('logout_instance');
+      } catch (logoutError) {
+        recoverySteps.push('logout_instance_failed');
+        logger.warn(
+          {
+            err: logoutError,
+            instanceName,
+          },
+          'Falha ao deslogar instancia durante recuperacao de sessao'
+        );
+      }
+
+      await createInstance();
+      recoverySteps.push('create_instance');
+
+      await connectInstance();
+      recoverySteps.push('connect_instance');
+
+      try {
+        const qrPayload = await getQrCode();
+        const qrCode = extractQrCode(qrPayload);
+
+        if (qrCode) {
+          updateState({
+            status: STATUS.PAIRING,
+            qrCode,
+            connectedNumber: null,
+            connectedName: null,
+            error: null,
+          });
+          recoverySteps.push('qr_code_ready');
+        } else {
+          recoverySteps.push('qr_code_unavailable');
+        }
+      } catch (qrError) {
+        recoverySteps.push('qr_code_fetch_failed');
+        logger.warn(
+          {
+            err: qrError,
+            instanceName,
+          },
+          'Falha ao obter QR code durante recuperacao de sessao'
+        );
+      }
+
+      await syncStateFromEvolution({ includeQr: true });
+      recoverySteps.push('sync_state');
+
+      logger.info(
+        {
+          instanceName,
+          endpoint: context?.endpoint || null,
+          phone: context?.phone || null,
+          providerError: context?.providerError || null,
+          sessionStateError: true,
+          recoverySteps,
+        },
+        'Recuperacao de sessao Evolution concluida'
+      );
+
+      return {
+        ok: true,
+        recoverySteps,
+      };
+    } catch (recoveryError) {
+      updateState({
+        status: STATUS.ERROR,
+        qrCode: null,
+        connectedNumber: null,
+        connectedName: null,
+        error: recoveryError?.message || 'Falha na recuperacao da sessao Evolution',
+      });
+
+      logger.error(
+        {
+          err: recoveryError,
+          instanceName,
+          endpoint: context?.endpoint || null,
+          phone: context?.phone || null,
+          providerError: context?.providerError || null,
+          sessionStateError: true,
+          recoverySteps,
+        },
+        'Falha na recuperacao da sessao Evolution'
+      );
+
+      return {
+        ok: false,
+        recoverySteps,
+        error: recoveryError?.message || 'Falha na recuperacao da sessao Evolution',
+      };
+    }
+  })().finally(() => {
+    sessionRecoveryPromise = null;
+  });
+
+  return sessionRecoveryPromise;
+};
+
+export const recoverWhatsAppSession = async (context = {}) => runSessionRecoveryFlow(context);
+
 export const sendWhatsAppText = async (phone, message, context = {}) => {
   const rawPhone = String(phone ?? '').trim();
   const normalizedPhone = normalizePhoneForSend(rawPhone);
@@ -397,7 +536,8 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
     typeof context?.remoteJidOriginal === 'string' && context.remoteJidOriginal.trim()
       ? context.remoteJidOriginal.trim()
       : null;
-  const endpoint = `/message/sendText/${getEvolutionConfig().instanceName}`;
+  const { instanceName } = getEvolutionConfig();
+  const endpoint = `/message/sendText/${instanceName}`;
   const resolvedDestination = resolveReplyDestination({
     phone: rawPhone,
   });
@@ -487,6 +627,9 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
 
     return true;
   } catch (error) {
+    const providerError = getProviderErrorMessage(error) || error?.message || null;
+    const sessionStateError = isSessionStateError(error);
+
     logger.error(
       {
         err: error,
@@ -496,12 +639,39 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
         destinationSource: 'phone',
         discardedRemoteJid,
         endpoint,
+        instanceName,
+        providerError,
+        sessionStateError,
         status: error?.status || null,
         evolutionErrorPayload: error?.details || null,
         messageLength: normalizedMessage.length,
       },
       'Falha ao enviar mensagem via Evolution API'
     );
+
+    if (sessionStateError) {
+      logger.error(
+        {
+          endpoint,
+          phone: normalizedPhone || rawPhone || null,
+          instanceName,
+          providerError,
+          sessionStateError: true,
+        },
+        'Erro de sessao inconsistente detectado no provider Evolution'
+      );
+
+      markSessionStateAsBroken(error, { providerError });
+
+      await recoverWhatsAppSession({
+        endpoint,
+        phone: normalizedPhone || rawPhone || null,
+        instanceName,
+        providerError,
+      });
+
+      return false;
+    }
 
     if (error instanceof EvolutionApiError) {
       // Só derruba o estado global em erro de infra/config

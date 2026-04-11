@@ -8,6 +8,8 @@ const mockConnectInstance = jest.fn();
 const mockGetQrCode = jest.fn();
 const mockLogoutInstance = jest.fn();
 const mockGetEvolutionConfig = jest.fn();
+const mockIsSessionStateError = jest.fn();
+const mockGetProviderErrorMessage = jest.fn();
 
 class MockEvolutionApiError extends Error {
   constructor(message, { status = null, details = null, code = 'EVOLUTION_API_ERROR' } = {}) {
@@ -29,6 +31,8 @@ jest.unstable_mockModule('../services/evolutionApiService.js', () => ({
   sendTextMessage: mockSendTextMessage,
   getEvolutionConfig: mockGetEvolutionConfig,
   EvolutionApiError: MockEvolutionApiError,
+  isSessionStateError: mockIsSessionStateError,
+  getProviderErrorMessage: mockGetProviderErrorMessage,
 }));
 
 jest.unstable_mockModule('../utils/logger.js', () => ({
@@ -64,6 +68,8 @@ describe('whatsappClient destination resolution', () => {
         payloadShape: 'number+textMessage',
       },
     });
+    mockIsSessionStateError.mockReturnValue(false);
+    mockGetProviderErrorMessage.mockReturnValue('');
   });
 
   it('sends using canonical phone even when remoteJidOriginal is @lid', async () => {
@@ -115,5 +121,27 @@ describe('whatsappClient destination resolution', () => {
         text: 'Oi',
       })
     );
+  });
+
+  it('runs session recovery flow when provider returns session state error', async () => {
+    const providerError = new MockEvolutionApiError('Error: not-acceptable', {
+      status: 400,
+      details: { message: ['Error: not-acceptable'] },
+      code: 'EVOLUTION_API_ERROR',
+    });
+
+    mockSendTextMessage.mockRejectedValue(providerError);
+    mockIsSessionStateError.mockReturnValue(true);
+    mockGetProviderErrorMessage.mockReturnValue('Error: not-acceptable');
+
+    const sent = await sendWhatsAppText('558396311811', 'Oi', {
+      remoteJidOriginal: '236197968359561@lid',
+    });
+
+    expect(sent).toBe(false);
+    expect(mockLogoutInstance).toHaveBeenCalled();
+    expect(mockCreateInstance).toHaveBeenCalled();
+    expect(mockConnectInstance).toHaveBeenCalled();
+    expect(mockGetQrCode).toHaveBeenCalled();
   });
 });
