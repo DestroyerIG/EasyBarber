@@ -3,8 +3,6 @@ const MAX_WHATSAPP_DIGITS = 15;
 const DIRECT_WHATSAPP_JID_SUFFIXES = ['@s.whatsapp.net', '@c.us'];
 const BLOCKED_WHATSAPP_JID_SUFFIXES = ['@g.us', '@lid', '@broadcast', '@newsletter'];
 const HARD_BLOCKED_CONVERSATION_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
-const LID_WHATSAPP_JID_SUFFIX = '@lid';
-const LID_UNTRUSTED_CANDIDATE_TYPES = new Set(['sender_jid']);
 const MAX_EXTRACTION_REJECTIONS = 20;
 
 const WEBHOOK_REMOTE_JID_CANDIDATES = [
@@ -38,46 +36,10 @@ const WEBHOOK_INSTANCE_NUMBER_CANDIDATES = [
 
 const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
   {
-    sourcePath: 'key.remoteJid',
-    candidateType: 'direct_jid',
-    allowNumericOnly: false,
-    getValue: (payload) => payload?.key?.remoteJid,
-  },
-  {
-    sourcePath: 'message.key.remoteJid',
-    candidateType: 'direct_jid',
-    allowNumericOnly: false,
-    getValue: (payload) => payload?.message?.key?.remoteJid,
-  },
-  {
-    sourcePath: 'data.key.remoteJid',
-    candidateType: 'direct_jid',
-    allowNumericOnly: false,
-    getValue: (payload) => payload?.data?.key?.remoteJid,
-  },
-  {
-    sourcePath: 'data.messages[0].key.remoteJid',
-    candidateType: 'direct_jid',
-    allowNumericOnly: false,
-    getValue: (payload) => payload?.data?.messages?.[0]?.key?.remoteJid,
-  },
-  {
-    sourcePath: 'messages[0].key.remoteJid',
-    candidateType: 'direct_jid',
-    allowNumericOnly: false,
-    getValue: (payload) => payload?.messages?.[0]?.key?.remoteJid,
-  },
-  {
     sourcePath: 'sender',
     candidateType: 'sender_jid',
     allowNumericOnly: false,
     getValue: (payload) => payload?.sender,
-  },
-  {
-    sourcePath: 'from',
-    candidateType: 'sender_jid',
-    allowNumericOnly: false,
-    getValue: (payload) => payload?.from,
   },
   {
     sourcePath: 'data.sender',
@@ -86,10 +48,112 @@ const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
     getValue: (payload) => payload?.data?.sender,
   },
   {
+    sourcePath: 'message.sender',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.message?.sender,
+  },
+  {
+    sourcePath: 'data.messages[0].sender',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.messages?.[0]?.sender,
+  },
+  {
+    sourcePath: 'messages[0].sender',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.messages?.[0]?.sender,
+  },
+  {
+    sourcePath: 'from',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.from,
+  },
+  {
     sourcePath: 'data.from',
     candidateType: 'sender_jid',
     allowNumericOnly: false,
     getValue: (payload) => payload?.data?.from,
+  },
+  {
+    sourcePath: 'message.from',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.message?.from,
+  },
+  {
+    sourcePath: 'data.messages[0].from',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.messages?.[0]?.from,
+  },
+  {
+    sourcePath: 'messages[0].from',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.messages?.[0]?.from,
+  },
+  {
+    sourcePath: 'senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.senderPn,
+  },
+  {
+    sourcePath: 'data.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.senderPn,
+  },
+  {
+    sourcePath: 'message.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.message?.senderPn,
+  },
+  {
+    sourcePath: 'data.messages[0].senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.messages?.[0]?.senderPn,
+  },
+  {
+    sourcePath: 'messages[0].senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.messages?.[0]?.senderPn,
+  },
+  {
+    sourcePath: 'key.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.key?.participantPn,
+  },
+  {
+    sourcePath: 'data.key.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.key?.participantPn,
+  },
+  {
+    sourcePath: 'message.key.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.message?.key?.participantPn,
+  },
+  {
+    sourcePath: 'data.messages[0].key.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.messages?.[0]?.key?.participantPn,
+  },
+  {
+    sourcePath: 'messages[0].key.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.messages?.[0]?.key?.participantPn,
   },
   {
     sourcePath: 'key.participant',
@@ -98,16 +162,16 @@ const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
     getValue: (payload) => payload?.key?.participant,
   },
   {
-    sourcePath: 'message.key.participant',
-    candidateType: 'participant_jid',
-    allowNumericOnly: false,
-    getValue: (payload) => payload?.message?.key?.participant,
-  },
-  {
     sourcePath: 'data.key.participant',
     candidateType: 'participant_jid',
     allowNumericOnly: false,
     getValue: (payload) => payload?.data?.key?.participant,
+  },
+  {
+    sourcePath: 'message.key.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.message?.key?.participant,
   },
   {
     sourcePath: 'participant',
@@ -122,6 +186,12 @@ const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
     getValue: (payload) => payload?.data?.participant,
   },
   {
+    sourcePath: 'message.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.message?.participant,
+  },
+  {
     sourcePath: 'data.messages[0].key.participant',
     candidateType: 'participant_jid',
     allowNumericOnly: false,
@@ -134,85 +204,36 @@ const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
     getValue: (payload) => payload?.messages?.[0]?.key?.participant,
   },
   {
-    sourcePath: 'senderPn',
-    candidateType: 'numeric_fallback',
-    allowNumericOnly: true,
-    getValue: (payload) => payload?.senderPn,
+    sourcePath: 'key.remoteJid',
+    candidateType: 'direct_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.key?.remoteJid,
   },
   {
-    sourcePath: 'message.senderPn',
-    candidateType: 'numeric_fallback',
-    allowNumericOnly: true,
-    getValue: (payload) => payload?.message?.senderPn,
+    sourcePath: 'data.key.remoteJid',
+    candidateType: 'direct_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.key?.remoteJid,
   },
   {
-    sourcePath: 'data.senderPn',
-    candidateType: 'numeric_fallback',
-    allowNumericOnly: true,
-    getValue: (payload) => payload?.data?.senderPn,
+    sourcePath: 'message.key.remoteJid',
+    candidateType: 'direct_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.message?.key?.remoteJid,
   },
   {
-    sourcePath: 'key.participantPn',
-    candidateType: 'numeric_fallback',
-    allowNumericOnly: true,
-    getValue: (payload) => payload?.key?.participantPn,
+    sourcePath: 'data.messages[0].key.remoteJid',
+    candidateType: 'direct_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.messages?.[0]?.key?.remoteJid,
   },
   {
-    sourcePath: 'message.key.participantPn',
-    candidateType: 'numeric_fallback',
-    allowNumericOnly: true,
-    getValue: (payload) => payload?.message?.key?.participantPn,
-  },
-  {
-    sourcePath: 'data.key.participantPn',
-    candidateType: 'numeric_fallback',
-    allowNumericOnly: true,
-    getValue: (payload) => payload?.data?.key?.participantPn,
-  },
-  {
-    sourcePath: 'data.messages[0].senderPn',
-    candidateType: 'numeric_fallback',
-    allowNumericOnly: true,
-    getValue: (payload) => payload?.data?.messages?.[0]?.senderPn,
-  },
-  {
-    sourcePath: 'messages[0].senderPn',
-    candidateType: 'numeric_fallback',
-    allowNumericOnly: true,
-    getValue: (payload) => payload?.messages?.[0]?.senderPn,
+    sourcePath: 'messages[0].key.remoteJid',
+    candidateType: 'direct_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.messages?.[0]?.key?.remoteJid,
   },
 ];
-
-const LID_WEBHOOK_PHONE_EXTRACTION_PRIORITY = {
-  'key.remoteJid': 10,
-  'message.key.remoteJid': 11,
-  'data.key.remoteJid': 12,
-  'data.messages[0].key.remoteJid': 13,
-  'messages[0].key.remoteJid': 14,
-
-  'key.participant': 20,
-  'message.key.participant': 21,
-  'data.key.participant': 22,
-  participant: 23,
-  'data.participant': 24,
-
-  senderPn: 30,
-  'message.senderPn': 31,
-  'data.senderPn': 32,
-  'key.participantPn': 33,
-  'message.key.participantPn': 34,
-  'data.key.participantPn': 35,
-
-  'data.messages[0].key.participant': 40,
-  'messages[0].key.participant': 41,
-  'data.messages[0].senderPn': 42,
-  'messages[0].senderPn': 43,
-
-  sender: 50,
-  from: 51,
-  'data.sender': 52,
-  'data.from': 53,
-};
 
 const extractWebhookRemoteJidCandidate = (payload = {}) => {
   for (const candidate of WEBHOOK_REMOTE_JID_CANDIDATES) {
@@ -225,7 +246,7 @@ const extractWebhookRemoteJidCandidate = (payload = {}) => {
   return null;
 };
 
-export const normalizeWhatsAppNumber = (value) => {
+export const normalizePhone = (value) => {
   if (value === null || value === undefined) return null;
 
   const raw = String(value).trim();
@@ -250,6 +271,8 @@ export const normalizeWhatsAppNumber = (value) => {
 
   return digits;
 };
+
+export const normalizeWhatsAppNumber = (value) => normalizePhone(value);
 
 export const extractWhatsAppRemoteJidFromWebhook = (payload = {}) => {
   const remoteJid = extractWebhookRemoteJidCandidate(payload);
@@ -279,11 +302,6 @@ const hasHardBlockedConversationJidSuffix = (value) => {
   if (normalized === 'status@broadcast') return true;
 
   return HARD_BLOCKED_CONVERSATION_JID_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
-};
-
-const hasLidWebhookJidSuffix = (value) => {
-  if (typeof value !== 'string') return false;
-  return value.trim().toLowerCase().endsWith(LID_WHATSAPP_JID_SUFFIX);
 };
 
 const hasDirectWhatsAppJidSuffix = (value) => {
@@ -324,7 +342,12 @@ const parseWebhookPhoneCandidate = (value, { allowNumericOnly = false } = {}) =>
 };
 
 const appendRejection = (rejections, sourcePath, reason) => {
-  if (!reason || rejections.length >= MAX_EXTRACTION_REJECTIONS) {
+  if (
+    !reason ||
+    reason === 'non_string' ||
+    reason === 'empty' ||
+    rejections.length >= MAX_EXTRACTION_REJECTIONS
+  ) {
     return;
   }
 
@@ -377,26 +400,7 @@ export const extractWhatsAppInstanceNumbersFromWebhook = (payload = {}, options 
 };
 
 const resolveWebhookPhoneExtractionCandidates = (payload = {}) => {
-  const remoteJid = extractWebhookRemoteJidCandidate(payload);
-
-  if (!hasLidWebhookJidSuffix(remoteJid)) {
-    return WEBHOOK_PHONE_EXTRACTION_CANDIDATES;
-  }
-
-  // @lid exige fallback controlado: aceita apenas candidatos confiaveis e ignora sender/from.
-  const trustedLidCandidates = WEBHOOK_PHONE_EXTRACTION_CANDIDATES.filter(
-    (candidate) => !LID_UNTRUSTED_CANDIDATE_TYPES.has(candidate.candidateType)
-  );
-
-  return trustedLidCandidates
-    .map((candidate, index) => ({
-      candidate,
-      index,
-      priority:
-        LID_WEBHOOK_PHONE_EXTRACTION_PRIORITY[candidate.sourcePath] ?? Number.MAX_SAFE_INTEGER,
-    }))
-    .sort((left, right) => left.priority - right.priority || left.index - right.index)
-    .map(({ candidate }) => candidate);
+  return WEBHOOK_PHONE_EXTRACTION_CANDIDATES;
 };
 
 const normalizeWebhookPhoneCandidate = (value, { allowNumericOnly = false } = {}) => {
@@ -458,6 +462,9 @@ export const extractWhatsAppPhoneFromWebhookDetailed = (payload = {}, options = 
 };
 
 export const extractWhatsAppPhoneFromWebhook = (payload = {}, options = {}) =>
+  extractWhatsAppPhoneFromWebhookDetailed(payload, options).phone;
+
+export const extractPhoneFromPayload = (payload = {}, options = {}) =>
   extractWhatsAppPhoneFromWebhookDetailed(payload, options).phone;
 
 /**

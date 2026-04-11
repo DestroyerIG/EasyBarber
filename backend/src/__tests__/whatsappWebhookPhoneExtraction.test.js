@@ -1,8 +1,10 @@
 import { describe, it, expect } from '@jest/globals';
 import {
+  extractPhoneFromPayload,
   extractWhatsAppPhoneFromWebhook,
   extractWhatsAppPhoneFromWebhookDetailed,
   extractWhatsAppInstanceNumbersFromWebhook,
+  normalizePhone,
 } from '../utils/whatsapp.js';
 
 describe('whatsapp webhook phone extraction', () => {
@@ -20,9 +22,10 @@ describe('whatsapp webhook phone extraction', () => {
     expect(extraction.candidateType).toBe('direct_jid');
     expect(extraction.rejections).toEqual([]);
     expect(extractWhatsAppPhoneFromWebhook(payload)).toBe('5511999999999');
+    expect(extractPhoneFromPayload(payload)).toBe('5511999999999');
   });
 
-  it('prefers key.participant over senderPn when remoteJid is @lid', () => {
+  it('prefers senderPn over participant when remoteJid is @lid', () => {
     const payload = {
       key: {
         remoteJid: '236197968359561@lid',
@@ -33,14 +36,9 @@ describe('whatsapp webhook phone extraction', () => {
 
     const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
 
-    expect(extraction.phone).toBe('5511991111111');
-    expect(extraction.sourcePath).toBe('key.participant');
-    expect(extraction.candidateType).toBe('participant_jid');
-    expect(extraction.rejections).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ sourcePath: 'key.remoteJid', reason: 'blocked_jid_suffix' }),
-      ])
-    );
+    expect(extraction.phone).toBe('5511888888888');
+    expect(extraction.sourcePath).toBe('senderPn');
+    expect(extraction.candidateType).toBe('numeric_fallback');
   });
 
   it('falls back to senderPn before nested participant candidates for @lid payloads', () => {
@@ -92,7 +90,7 @@ describe('whatsapp webhook phone extraction', () => {
     expect(extraction.candidateType).toBe('participant_jid');
   });
 
-  it('does not use sender/from fallback when remoteJid is @lid and trusted fields are missing', () => {
+  it('uses sender fallback when remoteJid is @lid', () => {
     const payload = {
       key: {
         remoteJid: '236197968359561@lid',
@@ -103,17 +101,31 @@ describe('whatsapp webhook phone extraction', () => {
 
     const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
 
-    expect(extraction.phone).toBeNull();
-    expect(extraction.rejections).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ sourcePath: 'key.remoteJid', reason: 'blocked_jid_suffix' }),
-      ])
-    );
-    expect(
-      extraction.rejections.some(
-        (rejection) => rejection.sourcePath === 'sender' || rejection.sourcePath === 'from'
-      )
-    ).toBe(false);
+    expect(extraction.phone).toBe('5511888888888');
+    expect(extraction.sourcePath).toBe('sender');
+    expect(extraction.candidateType).toBe('sender_jid');
+  });
+
+  it('extracts sender from messages.upsert payload when remoteJid is @lid', () => {
+    const payload = {
+      event: 'messages.upsert',
+      sender: '558396311811@s.whatsapp.net',
+      data: {
+        key: {
+          remoteJid: '236197968359561@lid',
+          fromMe: false,
+        },
+        message: {
+          conversation: 'Olá',
+        },
+      },
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
+
+    expect(extraction.phone).toBe('558396311811');
+    expect(extraction.sourcePath).toBe('sender');
+    expect(extraction.candidateType).toBe('sender_jid');
   });
 
   it('rejects any candidate that resolves to instance number', () => {
@@ -195,5 +207,11 @@ describe('whatsapp webhook phone extraction', () => {
     expect(numbers).toEqual(
       expect.arrayContaining(['5511333333333', '5511444444444', '5511555555555'])
     );
+  });
+
+  it('normalizes phone by removing suffixes and non-numeric chars', () => {
+    expect(normalizePhone(' +55 (83) 96311-811@s.whatsapp.net ')).toBe('558396311811');
+    expect(normalizePhone('558396311811@c.us')).toBe('558396311811');
+    expect(normalizePhone('236197968359561@lid')).toBeNull();
   });
 });
