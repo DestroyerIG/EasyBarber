@@ -16,6 +16,13 @@ const INCOMING_AUTHOR_SENDER_FALLBACK_SOURCE_PATHS = new Set([
   'messages[0].sender',
 ]);
 
+/**
+ * Cache em memória para mapear @lid -> telefone real quando observado.
+ * Ex.: "268796367515747@lid" -> "5583991347023"
+ */
+const LID_TO_PHONE_CACHE = new Map();
+const LID_CACHE_MAX_ENTRIES = 5000;
+
 const WEBHOOK_REMOTE_JID_CANDIDATES = [
   { sourcePath: 'key.remoteJid', getValue: (payload) => payload?.key?.remoteJid },
   { sourcePath: 'message.key.remoteJid', getValue: (payload) => payload?.message?.key?.remoteJid },
@@ -313,6 +320,41 @@ const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
   },
 ];
 
+const pruneLidCache = () => {
+  if (LID_TO_PHONE_CACHE.size <= LID_CACHE_MAX_ENTRIES) {
+    return;
+  }
+
+  const overflow = LID_TO_PHONE_CACHE.size - LID_CACHE_MAX_ENTRIES;
+  let removed = 0;
+
+  for (const key of LID_TO_PHONE_CACHE.keys()) {
+    LID_TO_PHONE_CACHE.delete(key);
+    removed += 1;
+    if (removed >= overflow) {
+      break;
+    }
+  }
+};
+
+const cacheLidToPhone = (lidJid, phone) => {
+  if (
+    typeof lidJid !== 'string' ||
+    !lidJid.trim().toLowerCase().endsWith('@lid') ||
+    !isValidWhatsAppNumber(phone)
+  ) {
+    return;
+  }
+
+  LID_TO_PHONE_CACHE.set(lidJid.trim(), normalizeWhatsAppNumber(phone));
+  pruneLidCache();
+};
+
+const getPhoneFromLidCache = (lidJid) => {
+  if (typeof lidJid !== 'string') return null;
+  return LID_TO_PHONE_CACHE.get(lidJid.trim()) || null;
+};
+
 const extractWebhookRemoteJidCandidate = (payload = {}) => {
   for (const candidate of WEBHOOK_REMOTE_JID_CANDIDATES) {
     const value = candidate.getValue(payload);
@@ -552,6 +594,7 @@ const parseWebhookPhoneCandidate = (value, { allowNumericOnly = false } = {}) =>
   const isJid = candidate.includes('@');
   const normalized = candidate.toLowerCase();
 
+  // @lid não é telefone confiável do autor
   if (normalized.endsWith('@lid')) {
     return { phone: null, reason: 'lid_not_safe_for_author' };
   }
@@ -762,8 +805,24 @@ export const extractWhatsAppInstanceNumbersFromWebhook = (payload = {}, options 
   return Array.from(numbers);
 };
 
-const resolveWebhookPhoneExtractionCandidates = (payload = {}) => {
+const resolveWebhookPhoneExtractionCandidates = (_payload = {}) => {
   return WEBHOOK_PHONE_EXTRACTION_CANDIDATES;
+};
+
+const maybeCacheLidFromSafeCandidate = ({
+  remoteJidOriginal,
+  conversationKind,
+  candidate,
+}) => {
+  if (conversationKind !== 'lid') return;
+  if (!remoteJidOriginal || !remoteJidOriginal.toLowerCase().endsWith('@lid')) return;
+  if (!candidate?.phone) return;
+  if (!candidate?.authorRole) return;
+
+  const safeRoles = new Set(['participant_jid', 'participant_numeric']);
+  if (!safeRoles.has(candidate.authorRole)) return;
+
+  cacheLidToPhone(remoteJidOriginal, candidate.phone);
 };
 
 export const resolveIncomingAuthor = (payload = {}, options = {}) => {
@@ -843,6 +902,38 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
     };
   }
 
+  // Se já existe mapeamento seguro para esse @lid, usa primeiro.
+  if (conversationKind === 'lid' && remoteJidOriginal) {
+    const cachedPhone = getPhoneFromLidCache(remoteJidOriginal);
+    if (cachedPhone && !instanceNumbersSet.has(cachedPhone)) {
+      return {
+        authorPhone: cachedPhone,
+        sourcePath: 'lid_cache',
+        candidateType: 'lid_cached_phone',
+        confidence: 'high',
+        remoteJidOriginal,
+        sender,
+        participant,
+        pushName,
+        fromMe,
+        instanceNumbers,
+        rejections,
+        candidates: [
+          {
+            sourcePath: 'lid_cache',
+            candidateType: 'lid_cached_phone',
+            rawValue: remoteJidOriginal,
+            phone: cachedPhone,
+            score: 999,
+            confidence: 'high',
+            authorRole: 'cached_lid_phone',
+            rejectedReason: null,
+          },
+        ],
+      };
+    }
+  }
+
   const matchedCandidates = [];
 
   for (const [index, candidate] of candidates.entries()) {
@@ -903,6 +994,9 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       scoredCandidate.authorRole === 'sender_jid' ||
       scoredCandidate.authorRole === 'sender_numeric';
 
+    // Regra crítica:
+    // em @lid nunca confiar em sender como autor,
+    // porque no seu payload ele pode vir com o número da instância.
     if (isLidConversation && isSenderLikeCandidate) {
       adjustedScore = 0;
       adjustedConfidence = 'none';
@@ -1025,6 +1119,12 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       !instanceNumbersSet.has(senderFallbackCandidate.phone);
 
     if (shouldPromoteSenderFallback) {
+      maybeCacheLidFromSafeCandidate({
+        remoteJidOriginal,
+        conversationKind,
+        candidate: senderFallbackCandidate,
+      });
+
       return {
         authorPhone: senderFallbackCandidate.phone,
         sourcePath: senderFallbackCandidate.sourcePath,
@@ -1061,6 +1161,12 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       candidates: serializeCandidates(),
     };
   }
+
+  maybeCacheLidFromSafeCandidate({
+    remoteJidOriginal,
+    conversationKind,
+    candidate: bestCandidate,
+  });
 
   return {
     authorPhone: bestCandidate.phone,
@@ -1106,8 +1212,8 @@ export const extractPhoneFromPayload = (payload = {}, options = {}) =>
 /**
  * Extrai telefone para resposta a partir da resolução explícita do autor.
  */
-export const extractSenderPhoneFromWebhook = (payload = {}) => {
-  return extractWhatsAppPhoneFromWebhook(payload);
+export const extractSenderPhoneFromWebhook = (payload = {}, options = {}) => {
+  return extractWhatsAppPhoneFromWebhook(payload, options);
 };
 
 export const isValidWhatsAppNumber = (value) => normalizeWhatsAppNumber(value) !== null;
