@@ -1,113 +1,128 @@
-import { AppError } from '../utils/errors.js';
 import {
-  assertStripePriceCatalogConfigured,
-  getStripePriceCatalog,
+  getStripePriceIds,
+  getStripeOneTimePriceIds,
+  assertStripeRecurringPriceCatalogConfigured,
+  assertStripeOneTimePriceCatalogConfigured,
 } from '../config/stripe.js';
+import { AppError } from '../utils/errors.js';
 
-export const PLAN_IDS = Object.freeze(['basico', 'profissional', 'premium']);
-export const PAYMENT_METHOD_IDS = Object.freeze(['card', 'pix', 'boleto']);
+const VALID_PLANS = new Set(['basico', 'profissional', 'premium']);
+const VALID_PAYMENT_METHODS = new Set(['card', 'pix', 'boleto']);
 
-const CHECKOUT_MODE_BY_PAYMENT_METHOD = Object.freeze({
-  card: 'subscription',
-  pix: 'payment',
-  boleto: 'payment',
-});
+const normalizePlan = (plan) => {
+  if (typeof plan !== 'string') return null;
+  const normalized = plan.trim().toLowerCase();
+  return VALID_PLANS.has(normalized) ? normalized : null;
+};
 
-const FLOW_TYPE_BY_PAYMENT_METHOD = Object.freeze({
-  card: 'recurring',
-  pix: 'one_time',
-  boleto: 'one_time',
-});
+const normalizePaymentMethod = (paymentMethod) => {
+  if (typeof paymentMethod !== 'string') return null;
+  const normalized = paymentMethod.trim().toLowerCase();
+  return VALID_PAYMENT_METHODS.has(normalized) ? normalized : null;
+};
 
-const normalizePaymentMethod = (value) => {
-  if (typeof value !== 'string') {
+const getRecurringPriceIdByPlan = (plan) => {
+  assertStripeRecurringPriceCatalogConfigured();
+
+  const recurring = getStripePriceIds();
+  const priceId = recurring[plan] || null;
+
+  if (!priceId) {
+    throw new AppError(
+      `Price ID recorrente não configurado para o plano: ${plan}`,
+      503,
+      'BILLING_NOT_CONFIGURED'
+    );
+  }
+
+  return priceId;
+};
+
+const getOneTimePriceIdByPlan = (plan) => {
+  assertStripeOneTimePriceCatalogConfigured();
+
+  const oneTime = getStripeOneTimePriceIds();
+  const priceId = oneTime[plan] || null;
+
+  if (!priceId) {
+    throw new AppError(
+      `Price ID avulso não configurado para o plano: ${plan}`,
+      503,
+      'BILLING_NOT_CONFIGURED'
+    );
+  }
+
+  return priceId;
+};
+
+const resolvePlanByPriceIdFromCatalog = (priceId, catalog) => {
+  if (!priceId || !catalog) {
     return null;
   }
 
-  const normalized = value.toLowerCase();
-  if (PAYMENT_METHOD_IDS.includes(normalized)) {
-    return normalized;
+  for (const [plan, mappedPriceId] of Object.entries(catalog.recurring || {})) {
+    if (mappedPriceId === priceId) {
+      return { plan, flowType: 'recurring' };
+    }
+  }
+
+  for (const [plan, mappedPriceId] of Object.entries(catalog.oneTime || {})) {
+    if (mappedPriceId === priceId) {
+      return { plan, flowType: 'one_time' };
+    }
   }
 
   return null;
 };
 
-const ensurePlan = (plan) => {
-  if (!PLAN_IDS.includes(plan)) {
-    throw new AppError('Plano inválido para checkout', 400, 'INVALID_PLAN');
-  }
-};
-
-const ensurePaymentMethod = (paymentMethod) => {
-  const normalized = normalizePaymentMethod(paymentMethod);
-
-  if (!normalized) {
-    throw new AppError('Método de pagamento inválido para checkout', 400, 'INVALID_PAYMENT_METHOD');
-  }
-
-  return normalized;
-};
-
-const findPlanInPriceMap = (priceId, map, flowType) => {
-  const found = Object.entries(map).find(([, id]) => id === priceId);
-
-  if (!found) {
-    return null;
-  }
-
-  return {
-    plan: found[0],
-    flowType,
-  };
-};
-
 export const stripePricingService = {
+  normalizePlan,
+  normalizePaymentMethod,
+
   resolveCheckoutPricing({ plan, paymentMethod }) {
-    ensurePlan(plan);
+    const normalizedPlan = normalizePlan(plan);
+    const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
 
-    const normalizedPaymentMethod = ensurePaymentMethod(paymentMethod);
-    const mode = CHECKOUT_MODE_BY_PAYMENT_METHOD[normalizedPaymentMethod];
-    const flowType = FLOW_TYPE_BY_PAYMENT_METHOD[normalizedPaymentMethod];
-
-    assertStripePriceCatalogConfigured();
-    const priceCatalog = getStripePriceCatalog();
-    const priceMap = mode === 'subscription' ? priceCatalog.recurring : priceCatalog.oneTime;
-    const priceId = priceMap[plan];
-
-    if (!priceId) {
-      throw new AppError(
-        `Price ID não configurado para o plano ${plan} no fluxo ${flowType}`,
-        503,
-        'BILLING_NOT_CONFIGURED'
-      );
+    if (!normalizedPlan) {
+      throw new AppError('Plano inválido para checkout Stripe', 400, 'INVALID_PLAN');
     }
 
-    return {
-      plan,
-      paymentMethod: normalizedPaymentMethod,
-      mode,
-      flowType,
-      priceId,
-      priceCatalog,
-    };
+    if (!normalizedPaymentMethod) {
+      throw new AppError('Método de pagamento inválido para checkout Stripe', 400, 'INVALID_PAYMENT_METHOD');
+    }
+
+    // Fluxo atual do seu projeto:
+    // card = assinatura recorrente
+    // pix = Asaas
+    // boleto = caso ainda use Stripe avulso
+    if (normalizedPaymentMethod === 'card') {
+      return {
+        plan: normalizedPlan,
+        paymentMethod: 'card',
+        mode: 'subscription',
+        flowType: 'recurring',
+        priceId: getRecurringPriceIdByPlan(normalizedPlan),
+      };
+    }
+
+    if (normalizedPaymentMethod === 'boleto') {
+      return {
+        plan: normalizedPlan,
+        paymentMethod: 'boleto',
+        mode: 'payment',
+        flowType: 'one_time',
+        priceId: getOneTimePriceIdByPlan(normalizedPlan),
+      };
+    }
+
+    throw new AppError(
+      'Método de pagamento não suportado no Stripe para este fluxo',
+      400,
+      'INVALID_PAYMENT_METHOD'
+    );
   },
 
-  resolvePlanByPriceId(priceId, priceCatalog = null) {
-    if (!priceId) {
-      return null;
-    }
-
-    const catalog = priceCatalog || getStripePriceCatalog();
-    const recurringMatch = findPlanInPriceMap(priceId, catalog.recurring, 'recurring');
-
-    if (recurringMatch) {
-      return recurringMatch;
-    }
-
-    return findPlanInPriceMap(priceId, catalog.oneTime, 'one_time');
-  },
-
-  normalizePaymentMethod(value) {
-    return normalizePaymentMethod(value);
+  resolvePlanByPriceId(priceId, priceCatalog) {
+    return resolvePlanByPriceIdFromCatalog(priceId, priceCatalog);
   },
 };

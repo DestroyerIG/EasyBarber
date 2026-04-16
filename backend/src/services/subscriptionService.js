@@ -80,7 +80,6 @@ const hasPriorStripeSubscription = async (stripe, customerId, barbershop) => {
     return true;
   }
 
-  // Sem customer persistido ainda, a barbearia ainda não teve assinatura no Stripe.
   if (!barbershop.stripe_customer_id) {
     return false;
   }
@@ -228,7 +227,34 @@ const updatePaidOneTimeCheckout = async ({
 
 export const subscriptionService = {
   async createCheckoutSession(barbershopId, plan, paymentMethod) {
-    const pricing = stripePricingService.resolveCheckoutPricing({ plan, paymentMethod });
+    let pricing;
+
+    try {
+      pricing = stripePricingService.resolveCheckoutPricing({ plan, paymentMethod });
+    } catch (error) {
+      logger.error(
+        {
+          barbershopId,
+          plan,
+          paymentMethod,
+          stripeSecretConfigured: Boolean(process.env.STRIPE_SECRET_KEY),
+          stripeRecurringPrices: {
+            basico: process.env.STRIPE_PRICE_ID_BASICO || null,
+            profissional: process.env.STRIPE_PRICE_ID_PROFISSIONAL || null,
+            premium: process.env.STRIPE_PRICE_ID_PREMIUM || null,
+          },
+          stripeOneTimePrices: {
+            basico: process.env.STRIPE_PRICE_ID_BASICO_ONE_TIME || null,
+            profissional: process.env.STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME || null,
+            premium: process.env.STRIPE_PRICE_ID_PREMIUM_ONE_TIME || null,
+          },
+        },
+        'Falha ao resolver pricing do checkout Stripe'
+      );
+
+      throw error;
+    }
+
     const stripe = getStripeClient();
 
     const barbershop = await subscriptionRepository.getBarbershopBillingContext(barbershopId);
@@ -284,6 +310,7 @@ export const subscriptionService = {
           flowType: pricing.flowType,
           priceId: pricing.priceId,
           stripeError,
+          frontendBaseUrl: getFrontendBaseUrl(),
         },
         'Falha ao criar sessão de checkout Stripe'
       );

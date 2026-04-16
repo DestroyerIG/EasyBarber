@@ -22,7 +22,7 @@ const resolvePriceIdsByMap = (envMap) => {
   }, {});
 };
 
-const resolveMissingPriceEnvVars = (envMap) => {
+const resolveMissingPriceEnvVarsByMap = (envMap) => {
   return Object.values(envMap).filter((envKey) => !process.env[envKey]);
 };
 
@@ -36,7 +36,9 @@ export const getStripeClient = () => {
   }
 
   if (!stripeClient) {
-    stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY);
+    stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: '2025-02-24.acacia',
+    });
   }
 
   return stripeClient;
@@ -51,19 +53,35 @@ export const getStripePriceCatalog = () => ({
   oneTime: getStripeOneTimePriceIds(),
 });
 
-export const getMissingStripePriceEnvVars = () => {
-  return [
-    ...resolveMissingPriceEnvVars(RECURRING_PRICE_ENV_MAP),
-    ...resolveMissingPriceEnvVars(ONE_TIME_PRICE_ENV_MAP),
-  ];
+export const getMissingStripeRecurringPriceEnvVars = () => {
+  return resolveMissingPriceEnvVarsByMap(RECURRING_PRICE_ENV_MAP);
 };
 
-export const assertStripePriceCatalogConfigured = () => {
-  const missingEnvVars = getMissingStripePriceEnvVars();
+export const getMissingStripeOneTimePriceEnvVars = () => {
+  return resolveMissingPriceEnvVarsByMap(ONE_TIME_PRICE_ENV_MAP);
+};
+
+export const assertStripeRecurringPriceCatalogConfigured = () => {
+  const missingEnvVars = getMissingStripeRecurringPriceEnvVars();
 
   if (missingEnvVars.length > 0) {
     const error = new AppError(
-      'Price IDs Stripe não configurados para todos os planos e fluxos',
+      'Price IDs Stripe recorrentes não configurados para todos os planos',
+      503,
+      'BILLING_NOT_CONFIGURED'
+    );
+
+    error.details = missingEnvVars;
+    throw error;
+  }
+};
+
+export const assertStripeOneTimePriceCatalogConfigured = () => {
+  const missingEnvVars = getMissingStripeOneTimePriceEnvVars();
+
+  if (missingEnvVars.length > 0) {
+    const error = new AppError(
+      'Price IDs Stripe avulsos não configurados para todos os planos',
       503,
       'BILLING_NOT_CONFIGURED'
     );
