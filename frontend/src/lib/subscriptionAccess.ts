@@ -55,7 +55,20 @@ const FEATURE_REQUIREMENTS: Record<FeatureKey, PlanId> = {
 const STATUS_ALLOWLIST: Record<SubscriptionStatus, Set<FeatureKey> | null> = {
   active: null,
   trialing: null,
+  pending: new Set([
+    'dashboard',
+    'billing',
+    'subscription_status',
+  ]),
   past_due: new Set([
+    'dashboard',
+    'appointments',
+    'clients',
+    'services',
+    'billing',
+    'subscription_status',
+  ]),
+  unpaid: new Set([
     'dashboard',
     'appointments',
     'clients',
@@ -75,12 +88,14 @@ const STATUS_ALLOWLIST: Record<SubscriptionStatus, Set<FeatureKey> | null> = {
   ]),
 };
 
-const BILLING_ACTION_STATUSES = new Set<SubscriptionStatus>(['past_due', 'incomplete', 'canceled']);
+const BILLING_ACTION_STATUSES = new Set<SubscriptionStatus>(['pending', 'past_due', 'unpaid', 'incomplete', 'canceled']);
 
 const STATUS_MESSAGES: Record<SubscriptionStatus, string> = {
   active: 'Acesso liberado.',
   trialing: 'Acesso liberado durante o período de teste.',
+  pending: 'Pagamento pendente. Assim que a cobrança for confirmada, a funcionalidade será liberada.',
   past_due: 'Sua assinatura está com pagamento pendente. Regularize para retomar esta funcionalidade.',
+  unpaid: 'Sua assinatura está inadimplente. Regularize o pagamento para retomar esta funcionalidade.',
   incomplete: 'Finalize sua assinatura para liberar esta funcionalidade.',
   canceled: 'Sua assinatura foi cancelada. Reative um plano para usar esta funcionalidade.',
 };
@@ -95,7 +110,14 @@ const normalizePlan = (value: string | null | undefined): PlanId => {
 
 const normalizeStatus = (value: string | null | undefined): SubscriptionStatus => {
   const normalized = (value || '').toLowerCase();
-  if (normalized === 'trialing' || normalized === 'past_due' || normalized === 'incomplete' || normalized === 'canceled') {
+  if (
+    normalized === 'trialing' ||
+    normalized === 'pending' ||
+    normalized === 'past_due' ||
+    normalized === 'unpaid' ||
+    normalized === 'incomplete' ||
+    normalized === 'canceled'
+  ) {
     return normalized;
   }
   return 'active';

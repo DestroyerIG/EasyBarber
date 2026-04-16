@@ -93,7 +93,8 @@ try {
         "backend/src/config/migration_v8.sql",
         "backend/src/config/migration_v9.sql",
         "backend/src/config/migration_v10.sql",
-        "backend/src/config/migration_v11.sql"
+        "backend/src/config/migration_v11.sql",
+        "backend/src/config/migration_v12.sql"
     )
 
     foreach ($sqlFile in $sqlFiles) {
@@ -153,6 +154,19 @@ SMTP_PORT=587
 SMTP_USER=
 SMTP_PASS=
 SMTP_FROM="EasyBarber <no-reply@easybarber.local>"
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_PRICE_ID_BASICO=
+STRIPE_PRICE_ID_PROFISSIONAL=
+STRIPE_PRICE_ID_PREMIUM=
+STRIPE_PRICE_ID_BASICO_ONE_TIME=
+STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME=
+STRIPE_PRICE_ID_PREMIUM_ONE_TIME=
+ASAAS_API_KEY=
+ASAAS_BASE_URL=https://api.asaas.com/v3
+ASAAS_WEBHOOK_TOKEN=
+ASAAS_BILLING_DESCRIPTION=EasyBarber - Plano {plan} ({barbershop})
+ASAAS_TIMEOUT_MS=12000
 "@ | Out-File -FilePath $envFile -Encoding UTF8
 
     Write-Host ".env backend criado com sucesso!" -ForegroundColor Green

@@ -33,7 +33,20 @@ const createFeatureSet = (features) => {
 export const STATUS_FEATURE_ALLOWLIST = Object.freeze({
   active: null,
   trialing: null,
+  pending: createFeatureSet([
+    'dashboard',
+    'billing',
+    'subscription_status',
+  ]),
   past_due: createFeatureSet([
+    'dashboard',
+    'appointments',
+    'clients',
+    'services',
+    'billing',
+    'subscription_status',
+  ]),
+  unpaid: createFeatureSet([
     'dashboard',
     'appointments',
     'clients',

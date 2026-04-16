@@ -17,6 +17,11 @@ export { createBarberSchema, updateBarberSchema } from './barberSchemas.js';
 export { updateBarbershopSettingsSchema } from './barbershopSettingsSchemas.js';
 export { createCheckoutSessionSchema } from './subscriptionSchemas.js';
 export {
+	createBillingCheckoutSessionSchema,
+	billingActionBodySchema,
+	billingPixPaymentParamsSchema,
+} from './billingSchemas.js';
+export {
 	adminMetricsQuerySchema,
 	adminTenantListQuerySchema,
 	adminSubscriptionListQuerySchema,

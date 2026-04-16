@@ -24,7 +24,7 @@ export const adminTenantListQuerySchema = paginationQuerySchema.extend({
   search: z.string().trim().max(120).optional(),
   status: z.enum(['active', 'suspended']).optional(),
   plan: z.enum(['basico', 'profissional', 'premium']).optional(),
-  subscriptionStatus: z.enum(['active', 'trialing', 'past_due', 'canceled', 'incomplete']).optional(),
+  subscriptionStatus: z.enum(['active', 'trialing', 'pending', 'past_due', 'unpaid', 'canceled', 'incomplete']).optional(),
   activity: z.enum(['active', 'inactive']).optional(),
   from: z.string().trim().optional(),
   to: z.string().trim().optional(),
@@ -34,7 +34,7 @@ export const adminTenantListQuerySchema = paginationQuerySchema.extend({
 
 export const adminSubscriptionListQuerySchema = paginationQuerySchema.extend({
   search: z.string().trim().max(120).optional(),
-  status: z.enum(['active', 'trialing', 'past_due', 'canceled', 'incomplete']).optional(),
+  status: z.enum(['active', 'trialing', 'pending', 'past_due', 'unpaid', 'canceled', 'incomplete']).optional(),
   plan: z.enum(['basico', 'profissional', 'premium']).optional(),
   overdueOnly: z.coerce.boolean().optional(),
   sortBy: z.enum(['updated_at', 'subscription_current_period_end', 'name']).default('updated_at'),

@@ -15,16 +15,28 @@ CREATE TABLE IF NOT EXISTS barbershops (
     stripe_subscription_id VARCHAR(255) UNIQUE,
     stripe_price_id VARCHAR(255),
     stripe_payment_mode VARCHAR(20),
+    provider VARCHAR(20),
+    provider_customer_id VARCHAR(255),
+    provider_subscription_id VARCHAR(255),
+    provider_payment_id VARCHAR(255),
     payment_method VARCHAR(20),
     CONSTRAINT check_barbershops_stripe_payment_mode
         CHECK (stripe_payment_mode IN ('subscription', 'payment')),
+    CONSTRAINT check_barbershops_provider
+        CHECK (provider IN ('stripe', 'asaas')),
     CONSTRAINT check_barbershops_payment_method
         CHECK (payment_method IN ('card', 'pix', 'boleto')),
     subscription_status VARCHAR(50) NOT NULL DEFAULT 'active'
-        CHECK (subscription_status IN ('active', 'trialing', 'past_due', 'canceled', 'incomplete')),
+        CHECK (subscription_status IN ('active', 'trialing', 'pending', 'past_due', 'unpaid', 'canceled', 'incomplete')),
     subscription_current_period_start TIMESTAMP,
     subscription_current_period_end TIMESTAMP,
     subscription_cancel_at_period_end BOOLEAN NOT NULL DEFAULT false,
+    current_period_start TIMESTAMP,
+    current_period_end TIMESTAMP,
+    next_due_date TIMESTAMP,
+    last_payment_date TIMESTAMP,
+    canceled_at TIMESTAMP,
+    metadata JSONB DEFAULT '{}'::jsonb,
     subscription_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     instagram_handle VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -150,6 +162,41 @@ CREATE TABLE IF NOT EXISTS subscription_events (
     barbershop_id UUID REFERENCES barbershops(id) ON DELETE SET NULL,
     payload JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Tabela de idempotência para eventos de webhook de billing (multi-provider)
+CREATE TABLE IF NOT EXISTS billing_webhook_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider VARCHAR(20) NOT NULL CHECK (provider IN ('stripe', 'asaas')),
+    event_id VARCHAR(255) NOT NULL,
+    event_type VARCHAR(255) NOT NULL,
+    barbershop_id UUID REFERENCES barbershops(id) ON DELETE SET NULL,
+    payload JSONB,
+    processed_at TIMESTAMP,
+    status VARCHAR(20) NOT NULL DEFAULT 'processed' CHECK (status IN ('processed', 'ignored', 'failed')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (provider, event_id)
+);
+
+-- Tabela de snapshots de pagamentos/cobranças
+CREATE TABLE IF NOT EXISTS billing_payments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    barbershop_id UUID NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
+    provider VARCHAR(20) NOT NULL CHECK (provider IN ('stripe', 'asaas')),
+    provider_payment_id VARCHAR(255) NOT NULL,
+    provider_subscription_id VARCHAR(255),
+    payment_method VARCHAR(20) CHECK (payment_method IN ('card', 'pix', 'boleto')),
+    external_status VARCHAR(60),
+    internal_status VARCHAR(50) CHECK (internal_status IN ('active', 'trialing', 'pending', 'past_due', 'unpaid', 'canceled', 'incomplete')),
+    amount NUMERIC(10,2),
+    due_date TIMESTAMP,
+    paid_at TIMESTAMP,
+    pix_copy_paste TEXT,
+    qr_code TEXT,
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (provider, provider_payment_id)
 );
 
 -- Tabela de auditoria de ações administrativas
@@ -288,6 +335,14 @@ CREATE INDEX IF NOT EXISTS idx_users_email_verification_token_hash ON users(emai
 CREATE INDEX IF NOT EXISTS idx_barbershops_subscription_status ON barbershops(subscription_status);
 CREATE INDEX IF NOT EXISTS idx_barbershops_stripe_customer ON barbershops(stripe_customer_id);
 CREATE INDEX IF NOT EXISTS idx_subscription_events_created_at ON subscription_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_barbershops_provider ON barbershops(provider);
+CREATE INDEX IF NOT EXISTS idx_barbershops_provider_customer ON barbershops(provider_customer_id);
+CREATE INDEX IF NOT EXISTS idx_barbershops_provider_subscription ON barbershops(provider_subscription_id);
+CREATE INDEX IF NOT EXISTS idx_barbershops_provider_payment ON barbershops(provider_payment_id);
+CREATE INDEX IF NOT EXISTS idx_billing_webhook_events_provider_event ON billing_webhook_events(provider, event_id);
+CREATE INDEX IF NOT EXISTS idx_billing_webhook_events_created_at ON billing_webhook_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_billing_payments_barbershop ON billing_payments(barbershop_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_billing_payments_subscription ON billing_payments(provider_subscription_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_user ON audit_logs(actor_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_target_user ON audit_logs(target_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action_type ON audit_logs(action_type, created_at DESC);
@@ -316,7 +371,7 @@ DO $$
 DECLARE
     t TEXT;
 BEGIN
-    FOR t IN SELECT unnest(ARRAY['barbershops','users','barbers','services','clients','appointments','expenses','whatsapp_sessions','whatsapp_bot_config','barbershop_settings'])
+    FOR t IN SELECT unnest(ARRAY['barbershops','users','barbers','services','clients','appointments','expenses','whatsapp_sessions','whatsapp_bot_config','barbershop_settings','billing_payments'])
     LOOP
         EXECUTE format('
             DROP TRIGGER IF EXISTS trigger_updated_at ON %I;

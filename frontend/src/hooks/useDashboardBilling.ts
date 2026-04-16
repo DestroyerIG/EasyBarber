@@ -14,6 +14,7 @@ import { getApiErrorMessage } from '@/utils/handleApiError';
  */
 export function useDashboardBilling() {
   const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
+  const [billingProvider, setBillingProvider] = useState<'stripe' | 'asaas' | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
   const router = useRouter();
   const { user } = useAuth();
@@ -24,6 +25,7 @@ export function useDashboardBilling() {
     try {
       const response = await billingApi.getStatus();
       setSubscriptionStatus(response.subscriptionStatus);
+      setBillingProvider(response.provider);
     } catch {
       // billing pode não estar configurado em ambiente local
     }
@@ -36,6 +38,12 @@ export function useDashboardBilling() {
   const goToPlans = () => router.push('/planos');
 
   const openBillingPortal = async () => {
+    if (billingProvider === 'asaas') {
+      showToast('Para pagamentos Pix, gere uma nova cobrança na tela de planos.', 'info');
+      router.push('/planos');
+      return;
+    }
+
     setPortalLoading(true);
     try {
       const response = await billingApi.createPortalSession();
@@ -48,5 +56,13 @@ export function useDashboardBilling() {
     }
   };
 
-  return { access, goToPlans, openBillingPortal, portalLoading, subscriptionStatus };
+  return {
+    access,
+    goToPlans,
+    openBillingPortal,
+    portalLoading,
+    subscriptionStatus,
+    billingProvider,
+    refreshBillingStatus: loadSubscriptionStatus,
+  };
 }

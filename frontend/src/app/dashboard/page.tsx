@@ -13,9 +13,11 @@ import { billingApi, type CheckoutPaymentMethod } from '@/lib/billing';
 import { isPlanId } from '@/lib/plans';
 import type { DashboardData } from '@/types';
 
+const PIX_STORAGE_KEY = 'easybarber:pixCheckout';
+
 const resolveCheckoutPaymentMethod = (value: string | null): CheckoutPaymentMethod => {
-  if (value === 'pix' || value === 'boleto') {
-    return value;
+  if (value === 'pix') {
+    return 'pix';
   }
 
   return 'card';
@@ -47,11 +49,22 @@ export default function DashboardPage() {
   ) => {
     try {
       const session = await billingApi.createCheckoutSession(plan, paymentMethod);
-      window.location.assign(session.checkoutUrl);
+
+      if (session.provider === 'stripe') {
+        window.location.assign(session.checkoutUrl);
+        return;
+      }
+
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.setItem(PIX_STORAGE_KEY, JSON.stringify(session));
+      }
+
+      showToast('Cobrança Pix criada. Finalize o pagamento na aba de planos.', 'info');
+      router.push('/planos');
     } catch {
       showToast('Não foi possível iniciar o checkout agora.', 'error');
     }
-  }, [showToast]);
+  }, [router, showToast]);
 
   useEffect(() => {
     if (authLoading) return;

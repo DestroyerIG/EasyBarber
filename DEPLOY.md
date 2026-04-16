@@ -67,10 +67,21 @@ STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME=price_xxx
 STRIPE_PRICE_ID_PREMIUM_ONE_TIME=price_xxx
 ```
 
-Mapeamento de fluxo no checkout Stripe:
+### Backend (billing/Asaas Pix)
 
-- card -> mode subscription + price recorrente.
-- pix/boleto -> mode payment + price one-time.
+```env
+ASAAS_API_KEY=<api-key>
+ASAAS_BASE_URL=https://api.asaas.com/v3
+ASAAS_WEBHOOK_TOKEN=<token-webhook>
+ASAAS_BILLING_DESCRIPTION=EasyBarber - Plano {plan} ({barbershop})
+ASAAS_TIMEOUT_MS=12000
+```
+
+Mapeamento de fluxo no checkout híbrido:
+
+- card -> Stripe recorrente.
+- pix -> Asaas com QR Code.
+- boleto -> fluxo legado opcional Stripe one-time.
 
 ### Backend (opcionais)
 
@@ -107,6 +118,7 @@ NEXT_PUBLIC_WHATSAPP_CONTACT_URL=https://wa.me/5500000000000?text=Ola
 - Backup inicial executado.
 - Variáveis de ambiente revisadas.
 - Endpoint /api/v1/subscriptions/webhook planejado no Stripe.
+- Endpoint /api/v1/billing/webhooks/asaas configurado no Asaas.
 - FRONTEND_URL apontando para domínio real do frontend.
 - Testes de backend e lint do frontend executados.
 
@@ -143,6 +155,7 @@ npm start
 8. migration_v9.sql
 9. migration_v10.sql
 10. migration_v11.sql
+11. migration_v12.sql
 
 ## 6.2 Comandos (host com psql)
 
@@ -157,6 +170,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v10.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v11.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v12.sql
 ```
 
 ## 6.3 Upgrade legado
@@ -183,9 +197,9 @@ docker compose up -d --build
 
 ### 7.2 Aplicar migrations adicionais
 
-O bootstrap automático do db aplica database.sql + migration_v3..v11 no primeiro bootstrap do volume.
+O bootstrap automático do db aplica database.sql + migration_v3..v12 no primeiro bootstrap do volume.
 
-Se o volume já existia antes dessa configuração, execute migration_v3..v11 manualmente.
+Se o volume já existia antes dessa configuração, execute migration_v3..v12 manualmente.
 
 Com psql local:
 
@@ -199,6 +213,7 @@ psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP
 psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
 psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v10.sql
 psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v11.sql
+psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v12.sql
 ```
 
 ## 8. Deploy em PaaS (Backend/Frontend separados)
@@ -259,6 +274,23 @@ No painel Stripe:
 
 Salvar signing secret em STRIPE_WEBHOOK_SECRET.
 
+## 10.1 Configuração de Webhook Asaas
+
+No painel Asaas:
+
+- Endpoint: https://sua-api.com/api/v1/billing/webhooks/asaas
+- Token de autenticação do webhook: usar o mesmo valor de ASAAS_WEBHOOK_TOKEN
+- Eventos recomendados:
+  - PAYMENT_CREATED
+  - PAYMENT_RECEIVED
+  - PAYMENT_CONFIRMED
+  - PAYMENT_OVERDUE
+  - PAYMENT_DELETED
+  - PAYMENT_REFUNDED
+  - PAYMENT_CHARGEBACK_REQUESTED
+
+Observação: o backend registra idempotência por provider + event_id em billing_webhook_events.
+
 ## 11. Verificação Pós-Deploy
 
 - Health check backend:
@@ -271,7 +303,8 @@ curl https://sua-api.com/health
   - Registro -> verificação de e-mail -> login.
   - Criação de agendamento.
   - Criação de despesa.
-  - Consulta de /api/v1/subscriptions/status.
+  - Consulta de /api/v1/billing/status.
+  - Fluxo Pix: checkout /api/v1/billing/checkout/session + leitura de /api/v1/billing/pix/:paymentId.
   - WhatsApp: GET /api/v1/whatsapp/status retornando status coerente.
   - WhatsApp: POST /api/v1/whatsapp/connect e GET /api/v1/whatsapp/qrcode com resposta sem crash.
 
@@ -283,12 +316,13 @@ curl https://sua-api.com/health
 ## 12. Riscos Comuns
 
 - Banco sem migration_v3 (quebra módulo WhatsApp).
-- Banco sem migration_v9/v10/v11 (quebra fluxo de verificação, sincronização Supabase e billing híbrido).
+- Banco sem migration_v9/v10/v11/v12 (quebra fluxo de verificação, sincronização Supabase e billing híbrido).
 - FRONTEND_URL incorreta (erro CORS).
 - SUPABASE_URL/SUPABASE_ANON_KEY ausentes com AUTH_PROVIDER_MODE=dual|supabase (falha de cadastro/verificação).
 - SMTP_* ausentes ou inválidas quando AUTH_PROVIDER_MODE=legacy (fallback legado indisponível).
 - DB_CONNECT_TIMEOUT ausente ou configurado incorretamente no backend.
 - Webhook Stripe sem assinatura válida.
+- Webhook Asaas sem token válido (ASAAS_WEBHOOK_TOKEN divergente do painel Asaas).
 - EVOLUTION_API_URL ou EVOLUTION_API_KEY inválidas.
 - Evolution API offline sem monitoramento ativo.
 - Deploy sem backup anterior.
@@ -317,5 +351,5 @@ As seguintes correções já estão aplicadas no repositório:
 - backend/.env.example com DB_CONNECT_TIMEOUT.
 - docker-compose.yml com FRONTEND_URL no backend.
 - docker-compose.yml com NEXT_PUBLIC_API_URL em /api/v1 no frontend.
-- setup.ps1 aplicando database.sql + migration_v3..v11.
+- setup.ps1 aplicando database.sql + migration_v3..v12.
 - fix-env.ps1 sem variáveis legadas WHATSAPP_API_*.

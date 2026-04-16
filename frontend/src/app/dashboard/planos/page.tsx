@@ -8,7 +8,12 @@ import { useDashboardBilling } from '@/hooks/useDashboardBilling';
 
 export default function PlanosPage() {
   const { user } = useAuth();
-  const { subscriptionStatus, openBillingPortal, portalLoading } = useDashboardBilling();
+  const {
+    subscriptionStatus,
+    openBillingPortal,
+    portalLoading,
+    billingProvider,
+  } = useDashboardBilling();
 
   const currentPlanLabel = user?.plan && isPlanId(user.plan)
     ? PLAN_MAP[user.plan].name
@@ -36,7 +41,11 @@ export default function PlanosPage() {
           className="btn-secondary flex items-center gap-2 px-4 py-2"
         >
           <ShieldCheck size={16} />
-          {portalLoading ? 'Abrindo...' : 'Gerenciar assinatura'}
+          {portalLoading
+            ? 'Abrindo...'
+            : billingProvider === 'asaas'
+            ? 'Gerar nova cobrança Pix'
+            : 'Gerenciar assinatura'}
         </button>
       </div>
 

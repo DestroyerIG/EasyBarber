@@ -84,7 +84,7 @@ export interface User {
     barbershopName: string;
     plan: string;
     emailVerified?: boolean;
-    subscriptionStatus?: 'active' | 'trialing' | 'past_due' | 'canceled' | 'incomplete';
+    subscriptionStatus?: 'active' | 'trialing' | 'pending' | 'past_due' | 'unpaid' | 'canceled' | 'incomplete';
     subscriptionCurrentPeriodEnd?: string | null;
 }
 

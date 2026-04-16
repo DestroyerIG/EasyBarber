@@ -1,0 +1,328 @@
+import { AppError } from '../../utils/errors.js';
+import { asaasClient } from './client.js';
+import { asaasMapper } from './mapper.js';
+
+const PLAN_VALUES = Object.freeze({
+  basico: 49.9,
+  profissional: 99.9,
+  premium: 199.9,
+});
+
+const normalizeDigits = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const digits = value.replace(/\D+/g, '');
+  return digits.length >= 10 && digits.length <= 15 ? digits : null;
+};
+
+const resolvePlanValue = (plan) => {
+  const normalizedPlan = typeof plan === 'string' ? plan.trim().toLowerCase() : '';
+
+  if (!(normalizedPlan in PLAN_VALUES)) {
+    throw new AppError('Plano inválido para cobrança Pix', 400, 'INVALID_PLAN');
+  }
+
+  return PLAN_VALUES[normalizedPlan];
+};
+
+const addDays = (referenceDate, days) => {
+  const date = new Date(referenceDate);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date;
+};
+
+const toAsaasDate = (value) => {
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new AppError('Data inválida para cobrança no Asaas', 400, 'INVALID_BILLING_DATE');
+  }
+
+  return date.toISOString().slice(0, 10);
+};
+
+const resolveBillingDescription = ({ plan, barbershopName }) => {
+  const template =
+    process.env.ASAAS_BILLING_DESCRIPTION ||
+    'EasyBarber - Plano {plan} ({barbershop})';
+
+  return template
+    .replaceAll('{plan}', plan)
+    .replaceAll('{barbershop}', barbershopName || 'Barbearia')
+    .slice(0, 500);
+};
+
+const buildExternalReference = ({ barbershopId, plan }) => {
+  return `barbershop:${barbershopId}:plan:${plan}`;
+};
+
+const parseAsaasDate = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed;
+  }
+
+  const dateOnlyRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (dateOnlyRegex.test(value)) {
+    const parsedDateOnly = new Date(`${value}T00:00:00.000Z`);
+    return Number.isNaN(parsedDateOnly.getTime()) ? null : parsedDateOnly;
+  }
+
+  return null;
+};
+
+const addMonths = (value, months = 1) => {
+  const date = value instanceof Date ? new Date(value) : parseAsaasDate(value);
+  if (!date) {
+    return null;
+  }
+
+  date.setUTCMonth(date.getUTCMonth() + months);
+  return date;
+};
+
+const findCustomerByExternalReference = async (externalReference) => {
+  const response = await asaasClient.get('/customers', {
+    query: {
+      externalReference,
+      limit: 1,
+      offset: 0,
+    },
+  });
+
+  const customer = response?.data?.[0] || null;
+  return customer;
+};
+
+const findMostRecentPaymentBySubscription = async (subscriptionId) => {
+  const response = await asaasClient.get('/payments', {
+    query: {
+      subscription: subscriptionId,
+      limit: 1,
+      offset: 0,
+      sort: 'desc',
+      order: 'desc',
+    },
+  });
+
+  return response?.data?.[0] || null;
+};
+
+const resolvePixQrCode = async (paymentId) => {
+  try {
+    return await asaasClient.get(`/payments/${paymentId}/pixQrCode`);
+  } catch {
+    return null;
+  }
+};
+
+export const asaasService = {
+  resolvePlanValue,
+
+  async createOrGetCustomer({ barbershop, idempotencyKey = null }) {
+    if (!barbershop?.id) {
+      throw new AppError('Barbearia inválida para criação de cliente Asaas', 400, 'INVALID_BARBERSHOP');
+    }
+
+    if (barbershop.provider_customer_id && barbershop.provider === 'asaas') {
+      return {
+        id: barbershop.provider_customer_id,
+        externalReference: barbershop.id,
+      };
+    }
+
+    const externalReference = barbershop.id;
+
+    const existing = await findCustomerByExternalReference(externalReference);
+    if (existing?.id) {
+      return existing;
+    }
+
+    const payload = {
+      name: barbershop.owner_name || barbershop.name,
+      email: barbershop.email || undefined,
+      mobilePhone: normalizeDigits(barbershop.whatsapp) || undefined,
+      externalReference,
+      notificationDisabled: false,
+    };
+
+    return asaasClient.post('/customers', payload, {
+      idempotencyKey,
+    });
+  },
+
+  async createPixCharge({
+    customerId,
+    barbershopId,
+    plan,
+    amount,
+    dueDate,
+    description,
+    externalReference,
+    idempotencyKey = null,
+  }) {
+    const resolvedAmount = typeof amount === 'number' ? amount : resolvePlanValue(plan);
+    const resolvedDueDate = toAsaasDate(dueDate || addDays(new Date(), 3));
+
+    const payload = {
+      customer: customerId,
+      billingType: 'PIX',
+      value: resolvedAmount,
+      dueDate: resolvedDueDate,
+      description,
+      externalReference:
+        externalReference ||
+        buildExternalReference({ barbershopId, plan }),
+    };
+
+    return asaasClient.post('/payments', payload, {
+      idempotencyKey,
+    });
+  },
+
+  async createPixSubscription({
+    barbershop,
+    plan,
+    nextDueDate,
+    amount,
+    idempotencyKey = null,
+  }) {
+    const customer = await this.createOrGetCustomer({
+      barbershop,
+      idempotencyKey,
+    });
+
+    const resolvedAmount = typeof amount === 'number' ? amount : resolvePlanValue(plan);
+    const resolvedDueDate = toAsaasDate(nextDueDate || addDays(new Date(), 3));
+    const description = resolveBillingDescription({
+      plan,
+      barbershopName: barbershop.name,
+    });
+
+    const subscriptionPayload = {
+      customer: customer.id,
+      billingType: 'PIX',
+      cycle: 'MONTHLY',
+      value: resolvedAmount,
+      nextDueDate: resolvedDueDate,
+      description,
+      externalReference: buildExternalReference({
+        barbershopId: barbershop.id,
+        plan,
+      }),
+    };
+
+    const subscription = await asaasClient.post('/subscriptions', subscriptionPayload, {
+      idempotencyKey,
+    });
+
+    let payment = await findMostRecentPaymentBySubscription(subscription.id);
+
+    if (!payment) {
+      payment = await this.createPixCharge({
+        customerId: customer.id,
+        barbershopId: barbershop.id,
+        plan,
+        amount: resolvedAmount,
+        dueDate: resolvedDueDate,
+        description,
+        externalReference: buildExternalReference({
+          barbershopId: barbershop.id,
+          plan,
+        }),
+        idempotencyKey: `${idempotencyKey || 'pix'}:fallback-payment`,
+      });
+    }
+
+    const pixQrCode = payment?.id ? await resolvePixQrCode(payment.id) : null;
+    const pixData = asaasMapper.mapAsaasPaymentToPixData(payment, pixQrCode);
+
+    return {
+      customer,
+      subscription,
+      payment,
+      pixQrCode,
+      pixData,
+    };
+  },
+
+  async getPayment(paymentId) {
+    if (!paymentId) {
+      throw new AppError('paymentId é obrigatório', 400, 'INVALID_PAYMENT');
+    }
+
+    return asaasClient.get(`/payments/${paymentId}`);
+  },
+
+  async getPaymentWithPixData(paymentId) {
+    const payment = await this.getPayment(paymentId);
+    const pixQrCode = await resolvePixQrCode(paymentId);
+    const pixData = asaasMapper.mapAsaasPaymentToPixData(payment, pixQrCode);
+
+    return {
+      payment,
+      pixQrCode,
+      pixData,
+    };
+  },
+
+  async cancelSubscription(subscriptionId) {
+    if (!subscriptionId) {
+      throw new AppError('subscriptionId é obrigatório', 400, 'INVALID_SUBSCRIPTION');
+    }
+
+    await asaasClient.delete(`/subscriptions/${subscriptionId}`);
+
+    return {
+      canceled: true,
+      subscriptionId,
+    };
+  },
+
+  async reactivateSubscription(subscriptionId) {
+    if (!subscriptionId) {
+      throw new AppError('subscriptionId é obrigatório', 400, 'INVALID_SUBSCRIPTION');
+    }
+
+    try {
+      const restored = await asaasClient.post(`/subscriptions/${subscriptionId}/restore`, {}, {
+        idempotencyKey: `restore:${subscriptionId}`,
+      });
+
+      return {
+        restored: true,
+        subscription: restored,
+      };
+    } catch (error) {
+      throw new AppError(
+        'Não foi possível reativar a assinatura Pix no Asaas automaticamente',
+        409,
+        'ASAAS_REACTIVATE_UNAVAILABLE'
+      );
+    }
+  },
+
+  resolveBillingPeriodFromPayment(payment) {
+    const paidAt = parseAsaasDate(
+      payment?.confirmedDate || payment?.clientPaymentDate || payment?.paymentDate
+    );
+
+    if (!paidAt) {
+      return {
+        periodStart: null,
+        periodEnd: null,
+      };
+    }
+
+    return {
+      periodStart: paidAt,
+      periodEnd: addMonths(paidAt, 1),
+    };
+  },
+};

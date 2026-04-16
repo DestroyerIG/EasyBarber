@@ -69,7 +69,7 @@ export const startReminderCron = () => {
     }
   });
 
-  // Expira acessos one-time (pix/boleto) quando o período contratado termina.
+  // Marca acessos one-time como inadimplentes quando o período contratado termina.
   cron.schedule('15 * * * *', async () => {
     try {
       const { expiredCount, barbershopIds } = await subscriptionRepository.expireOneTimeSubscriptions();
@@ -80,7 +80,7 @@ export const startReminderCron = () => {
             expiredCount,
             barbershopIds,
           },
-          'Assinaturas one-time expiradas automaticamente'
+          'Assinaturas one-time marcadas como inadimplentes automaticamente'
         );
       }
     } catch (error) {

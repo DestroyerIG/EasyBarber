@@ -8,10 +8,12 @@ import {
   STATUS_FEATURE_ALLOWLIST,
 } from '../config/planPermissions.js';
 
-const BILLING_ACTION_STATUSES = new Set(['past_due', 'incomplete', 'canceled']);
+const BILLING_ACTION_STATUSES = new Set(['pending', 'past_due', 'unpaid', 'incomplete', 'canceled']);
 
 const STATUS_RESTRICTED_MESSAGES = Object.freeze({
+  pending: 'Pagamento pendente. Assim que a cobrança for confirmada, a funcionalidade será liberada.',
   past_due: 'Sua assinatura está com pagamento pendente. Regularize para retomar esta funcionalidade.',
+  unpaid: 'Sua assinatura está inadimplente. Regularize o pagamento para retomar esta funcionalidade.',
   incomplete: 'Finalize sua assinatura para liberar esta funcionalidade.',
   canceled: 'Sua assinatura foi cancelada. Reative um plano para usar esta funcionalidade.',
 });

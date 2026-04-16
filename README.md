@@ -141,6 +141,13 @@ STRIPE_PRICE_ID_BASICO_ONE_TIME=price_xxx
 STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME=price_xxx
 STRIPE_PRICE_ID_PREMIUM_ONE_TIME=price_xxx
 
+# Asaas (Pix)
+ASAAS_API_KEY=<api-key>
+ASAAS_BASE_URL=https://api.asaas.com/v3
+ASAAS_WEBHOOK_TOKEN=<token-webhook>
+ASAAS_BILLING_DESCRIPTION=EasyBarber - Plano {plan} ({barbershop})
+ASAAS_TIMEOUT_MS=12000
+
 # WhatsApp Provider (Evolution API v1 externa)
 WHATSAPP_PROVIDER=evolution
 EVOLUTION_API_URL=https://sua-evolution.onrender.com
@@ -151,14 +158,14 @@ EVOLUTION_API_TIMEOUT_MS=10000
 WHATSAPP_SESSION_TIMEOUT_MS=1800000
 ```
 
-Fluxo híbrido de billing Stripe:
+Fluxo híbrido de billing (produção):
 
-- card: checkout com mode subscription + price recorrente.
-- pix: checkout com mode payment + price one-time.
-- boleto: checkout com mode payment + price one-time.
+- card: Stripe recorrente (checkout + webhook Stripe).
+- pix: Asaas (checkout Pix com QR Code e confirmação por webhook Asaas).
+- boleto: legado opcional via Stripe one-time (mantido para compatibilidade).
 
 No fluxo recorrente (card), o trial de 7 dias é aplicado apenas na primeira assinatura da barbearia.
-No fluxo one-time (pix/boleto), o backend ativa acesso por período manual e controla expiração automática.
+No fluxo Pix (Asaas), a assinatura interna inicia como pending e passa para active após confirmação de pagamento.
 
 ### Frontend (frontend/.env.local)
 
@@ -205,6 +212,7 @@ A sequência recomendada para banco novo é:
 8. backend/src/config/migration_v9.sql
 9. backend/src/config/migration_v10.sql
 10. backend/src/config/migration_v11.sql
+11. backend/src/config/migration_v12.sql
 
 Observação: migration_v2.sql é voltada a upgrade legado e normalmente não é necessária em ambiente novo.
 
@@ -295,6 +303,45 @@ Acesso liberado:
 6. Frontend consulta /api/v1/auth/me para montar sessão e usa /api/v1/auth/refresh em expiração do access token.
 7. Rotas protegidas exigem auth, role e feature permission.
 
+## Pagamentos híbridos: Stripe + Asaas
+
+Arquitetura ativa no backend:
+
+- Stripe como provider principal para assinatura recorrente em cartão.
+- Asaas como provider de Pix com geração de QR Code e payload copia/cola.
+- Regras internas unificadas por status: trialing, pending, active, past_due, unpaid, canceled, incomplete.
+- Persistência de dados externos por provider na barbershop + tabela de snapshots em billing_payments.
+- Idempotência de webhook via billing_webhook_events.
+
+Endpoints principais em /api/v1/billing:
+
+- POST /checkout/session
+- GET /status
+- POST /cancel
+- POST /reactivate
+- GET /pix/:paymentId
+- POST /webhooks/asaas
+
+Fluxo de webhook:
+
+1. Stripe: endpoint legado em /api/v1/subscriptions/webhook (mantido).
+2. Asaas: endpoint novo em /api/v1/billing/webhooks/asaas.
+3. O processamento Asaas usa lock transacional + tabela de eventos para evitar reprocessamento.
+
+Testes locais de billing:
+
+```bash
+cd backend
+npm test -- billingStatusMapper.test.js billingService.test.js billingWebhookIdempotency.test.js
+```
+
+Troubleshooting rápido de billing:
+
+- Erro BILLING_NOT_CONFIGURED: revisar variáveis STRIPE_* e ASAAS_* no backend/.env.
+- Pix sem QR Code: consultar GET /api/v1/billing/pix/:paymentId para regenerar estado/payload.
+- Webhook Asaas rejeitado: validar ASAAS_WEBHOOK_TOKEN e cabeçalho enviado pelo Asaas.
+- Status preso em pending: validar recebimento do webhook e registro em billing_webhook_events.
+
 ## Módulos Principais
 
 - Tenant app:
@@ -328,6 +375,7 @@ Arquivos SQL em backend/src/config:
 - migration_v9.sql (verificação de e-mail de conta)
 - migration_v10.sql (vínculo de identidade Supabase + pendências de cadastro)
 - migration_v11.sql (billing híbrido Stripe: modo e método de pagamento)
+- migration_v12.sql (billing híbrido Stripe + Asaas: provider abstrato, eventos idempotentes e snapshots de pagamentos)
 
 A documentação completa de migrations manuais, validação, rollback e troubleshooting está em POSTGRESQL_SETUP.md.
 
@@ -336,6 +384,7 @@ A documentação completa de migrations manuais, validação, rollback e trouble
 - Erro de conexão PostgreSQL: revisar DATABASE_URL e serviço do banco.
 - Erro function gen_random_uuid() does not exist: habilitar extensão pgcrypto.
 - Erro de migration v3: conferir execução no banco correto e com UTF-8.
+- Erro de billing híbrido: confirmar aplicação da migration_v12.sql e variáveis ASAAS_* / STRIPE_*.
 - Erro de CORS: garantir FRONTEND_URL no backend.
 - Erro de porta ocupada: ajustar processo ou variável PORT.
 
@@ -411,7 +460,7 @@ As inconsistências operacionais críticas foram corrigidas no estado atual do p
 - backend/.env.example usa DB_CONNECT_TIMEOUT.
 - backend/.env.example inclui AUTH_PROVIDER_MODE, SUPABASE_* (incluindo SERVICE_ROLE para scripts administrativos) e SMTP_* (fallback legado).
 - docker-compose.yml usa FRONTEND_URL no backend e NEXT_PUBLIC_API_URL com /api/v1 no frontend.
-- setup.ps1 aplica database.sql + migration_v3..v11.
+- setup.ps1 aplica database.sql + migration_v3..v12.
 - fix-env.ps1 remove variáveis legadas WHATSAPP_API_* e mantém defaults compatíveis com o backend atual.
 
 Observação:

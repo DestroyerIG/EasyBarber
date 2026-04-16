@@ -5,7 +5,7 @@ import { subscriptionRepository } from '../repositories/subscriptionRepository.j
 import { stripePricingService } from './stripePricingService.js';
 import { stripeCheckoutService } from './stripeCheckoutService.js';
 
-const VALID_STATUSES = new Set(['active', 'trialing', 'past_due', 'canceled', 'incomplete']);
+const VALID_STATUSES = new Set(['active', 'trialing', 'pending', 'past_due', 'unpaid', 'canceled', 'incomplete']);
 const CHECKOUT_COMPLETION_EVENTS = new Set([
   'checkout.session.completed',
   'checkout.session.async_payment_succeeded',
@@ -35,7 +35,11 @@ const normalizeStatus = (status) => {
     return status;
   }
 
-  if (status === 'unpaid' || status === 'paused') {
+  if (status === 'unpaid') {
+    return 'unpaid';
+  }
+
+  if (status === 'paused') {
     return 'past_due';
   }
 

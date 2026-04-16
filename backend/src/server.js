@@ -16,6 +16,7 @@ import financeRoutes from './routes/finance.js';
 import barbershopRoutes from './routes/barbershop.js';
 import whatsappRoutes from './routes/whatsapp.js';
 import subscriptionRoutes from './routes/subscriptions.js';
+import billingRoutes from './routes/billing.js';
 import adminRoutes from './routes/admin.js';
 import { stripeWebhook } from './controllers/subscriptionController.js';
 import { startReminderCron } from './services/cronService.js';
@@ -38,12 +39,17 @@ const stripeRequiredEnvVars = [
   'STRIPE_PRICE_ID_BASICO',
   'STRIPE_PRICE_ID_PROFISSIONAL',
   'STRIPE_PRICE_ID_PREMIUM',
+];
+
+const stripeOptionalOneTimeEnvVars = [
   'STRIPE_PRICE_ID_BASICO_ONE_TIME',
   'STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME',
   'STRIPE_PRICE_ID_PREMIUM_ONE_TIME',
 ];
 
-const stripeBillingEnabled = stripeRequiredEnvVars.some((envVar) => Boolean(process.env[envVar]));
+const stripeBillingEnabled =
+  stripeRequiredEnvVars.some((envVar) => Boolean(process.env[envVar])) ||
+  stripeOptionalOneTimeEnvVars.some((envVar) => Boolean(process.env[envVar]));
 
 if (stripeBillingEnabled) {
   const missingStripeEnvVars = stripeRequiredEnvVars.filter((envVar) => !process.env[envVar]);
@@ -55,6 +61,21 @@ if (stripeBillingEnabled) {
     );
     process.exit(1);
   }
+
+  const oneTimeConfiguredCount = stripeOptionalOneTimeEnvVars.filter((envVar) => Boolean(process.env[envVar])).length;
+  if (oneTimeConfiguredCount > 0 && oneTimeConfiguredCount < stripeOptionalOneTimeEnvVars.length) {
+    logger.warn(
+      {
+        missingOneTimePriceEnvVars: stripeOptionalOneTimeEnvVars.filter((envVar) => !process.env[envVar]),
+      },
+      'Configuração Stripe one-time parcial: o fluxo legado pix/boleto em Stripe ficará indisponível'
+    );
+  }
+}
+
+if (process.env.ASAAS_BASE_URL && !process.env.ASAAS_API_KEY) {
+  logger.fatal('ASAAS_BASE_URL definido sem ASAAS_API_KEY');
+  process.exit(1);
 }
 
 const app = express();
@@ -162,7 +183,8 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
   skip: (req) =>
     req.method === 'OPTIONS' ||
-    req.originalUrl.startsWith(`${API_V1}/subscriptions/webhook`),
+    req.originalUrl.startsWith(`${API_V1}/subscriptions/webhook`) ||
+    req.originalUrl.startsWith(`${API_V1}/billing/webhooks/asaas`),
   message: {
     success: false,
     error: {
@@ -252,6 +274,7 @@ app.use(`${API_V1}/finance`, financeRoutes);
 app.use(`${API_V1}/barbershop`, barbershopRoutes);
 app.use(`${API_V1}/whatsapp`, whatsappRoutes);
 app.use(`${API_V1}/subscriptions`, subscriptionRoutes);
+app.use(`${API_V1}/billing`, billingRoutes);
 app.use(`${API_V1}/admin`, adminRoutes);
 
 // Backward-compat: redireciona /api/<recurso> para /api/v1/<recurso>

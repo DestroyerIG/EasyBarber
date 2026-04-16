@@ -1,14 +1,31 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
-import { billingApi, type CheckoutPaymentMethod } from '@/lib/billing';
+import {
+  billingApi,
+  type CheckoutPaymentMethod,
+  type PixCheckoutSessionResponse,
+} from '@/lib/billing';
 import { SAAS_PLANS, type PlanId } from '@/lib/plans';
 import { formatCurrency } from '@/lib/formatters';
 import { getApiErrorMessage } from '@/utils/handleApiError';
+
+const PIX_STORAGE_KEY = 'easybarber:pixCheckout';
+
+const STATUS_LABEL: Record<string, string> = {
+  pending: 'Aguardando pagamento',
+  active: 'Pagamento confirmado',
+  past_due: 'Cobrança vencida',
+  unpaid: 'Cobrança inadimplente',
+  canceled: 'Cobrança cancelada',
+  incomplete: 'Cobrança incompleta',
+  trialing: 'Período de teste',
+};
 
 const PAYMENT_METHOD_OPTIONS: Array<{
   id: CheckoutPaymentMethod;
@@ -23,12 +40,7 @@ const PAYMENT_METHOD_OPTIONS: Array<{
   {
     id: 'pix',
     label: 'Pix',
-    description: 'Pagamento avulso no checkout',
-  },
-  {
-    id: 'boleto',
-    label: 'Boleto',
-    description: 'Pagamento avulso no checkout',
+    description: 'Cobrança Pix no Asaas com QR Code',
   },
 ];
 
@@ -53,10 +65,94 @@ export function PricingPlansSection({
 }: PricingPlansSectionProps) {
   const [processingPlan, setProcessingPlan] = useState<PlanId | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('card');
+  const [pixCheckout, setPixCheckout] = useState<PixCheckoutSessionResponse | null>(null);
+  const [pixStatusLoading, setPixStatusLoading] = useState(false);
   const { user } = useAuth();
   const { showToast } = useToast();
   const router = useRouter();
   const isRecurringFlow = paymentMethod === 'card';
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const raw = window.sessionStorage.getItem(PIX_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as PixCheckoutSessionResponse;
+      if (parsed?.provider === 'asaas' && parsed?.paymentId) {
+        setPixCheckout(parsed);
+      }
+    } catch {
+      window.sessionStorage.removeItem(PIX_STORAGE_KEY);
+    }
+  }, []);
+
+  const persistPixCheckout = (value: PixCheckoutSessionResponse | null) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (!value) {
+      window.sessionStorage.removeItem(PIX_STORAGE_KEY);
+      return;
+    }
+
+    window.sessionStorage.setItem(PIX_STORAGE_KEY, JSON.stringify(value));
+  };
+
+  const copyPixPayload = async () => {
+    if (!pixCheckout?.pixCopyPaste) {
+      showToast('Payload Pix indisponível para cópia.', 'info');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(pixCheckout.pixCopyPaste);
+      showToast('Código Pix copiado para a área de transferência.', 'success');
+    } catch {
+      showToast('Não foi possível copiar o código Pix.', 'error');
+    }
+  };
+
+  const refreshPixStatus = async () => {
+    if (!pixCheckout?.paymentId) {
+      showToast('Cobrança Pix inválida para atualização.', 'error');
+      return;
+    }
+
+    setPixStatusLoading(true);
+
+    try {
+      const updated = await billingApi.getPixPaymentStatus(pixCheckout.paymentId);
+
+      const nextCheckout: PixCheckoutSessionResponse = {
+        ...pixCheckout,
+        status: updated.status,
+        qrCode: updated.qrCode || pixCheckout.qrCode,
+        pixCopyPaste: updated.pixCopyPaste || pixCheckout.pixCopyPaste,
+        expiresAt: updated.expiresAt || pixCheckout.expiresAt,
+      };
+
+      setPixCheckout(nextCheckout);
+      persistPixCheckout(nextCheckout);
+
+      if (updated.status === 'active') {
+        showToast('Pagamento confirmado. Assinatura ativada.', 'success');
+      } else {
+        showToast(`Status atualizado: ${STATUS_LABEL[updated.status] || updated.status}.`, 'info');
+      }
+    } catch (error: unknown) {
+      const message = getApiErrorMessage(error, 'Não foi possível atualizar o status do Pix.');
+      showToast(message, 'error');
+    } finally {
+      setPixStatusLoading(false);
+    }
+  };
 
   const isCurrentPlan = (planId: PlanId) => {
     return currentPlan === planId && (subscriptionStatus === 'active' || subscriptionStatus === 'trialing');
@@ -76,7 +172,15 @@ export function PricingPlansSection({
     setProcessingPlan(planId);
     try {
       const session = await billingApi.createCheckoutSession(planId, paymentMethod);
-      window.location.assign(session.checkoutUrl);
+
+      if (session.provider === 'stripe') {
+        window.location.assign(session.checkoutUrl);
+        return;
+      }
+
+      setPixCheckout(session);
+      persistPixCheckout(session);
+      showToast('Cobrança Pix criada. Finalize o pagamento para ativar o plano.', 'success');
     } catch (error: unknown) {
       const message = getApiErrorMessage(error, 'Não foi possível iniciar o checkout no momento.');
       showToast(message, 'error');
@@ -118,6 +222,72 @@ export function PricingPlansSection({
               })}
             </div>
           </div>
+        </div>
+      )}
+
+      {pixCheckout && (
+        <div className="mb-8 rounded-2xl border border-cyan-400/30 bg-cyan-500/5 p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200/80">
+                Pagamento Pix em andamento
+              </p>
+              <h4 className="mt-2 text-xl font-black text-white">
+                {STATUS_LABEL[pixCheckout.status] || pixCheckout.status}
+              </h4>
+              <p className="mt-2 text-sm text-cyan-100/90">
+                Escaneie o QR Code ou use o código copia e cola para concluir a cobrança.
+              </p>
+              {pixCheckout.expiresAt && (
+                <p className="mt-2 text-xs text-cyan-100/70">
+                  Expira em: {new Date(pixCheckout.expiresAt).toLocaleString('pt-BR')}
+                </p>
+              )}
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={copyPixPayload}
+                  className="rounded-lg border border-cyan-300/50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-100 transition hover:bg-cyan-300/10"
+                >
+                  Copiar código Pix
+                </button>
+                <button
+                  type="button"
+                  onClick={refreshPixStatus}
+                  disabled={pixStatusLoading}
+                  className="rounded-lg bg-cyan-300 px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-black transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {pixStatusLoading ? 'Atualizando...' : 'Já paguei / Atualizar status'}
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-cyan-300/30 bg-black/30 p-3">
+              {pixCheckout.qrCode ? (
+                <Image
+                  src={pixCheckout.qrCode}
+                  alt="QR Code Pix"
+                  width={176}
+                  height={176}
+                  unoptimized
+                  className="h-44 w-44 rounded-lg bg-white p-2"
+                />
+              ) : (
+                <div className="flex h-44 w-44 items-center justify-center rounded-lg border border-dashed border-cyan-300/40 text-xs text-cyan-100/80">
+                  QR Code indisponível para esta cobrança.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {pixCheckout.pixCopyPaste && (
+            <div className="mt-4 rounded-lg border border-cyan-300/20 bg-black/30 p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-200/80">
+                Copia e cola
+              </p>
+              <p className="break-all text-xs text-cyan-50/95">{pixCheckout.pixCopyPaste}</p>
+            </div>
+          )}
         </div>
       )}
 

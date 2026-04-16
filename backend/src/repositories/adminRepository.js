@@ -478,7 +478,7 @@ export const adminRepository = {
     }
 
     if (overdueOnly === true) {
-      whereClauses.push(`b.subscription_status IN ('past_due', 'incomplete')`);
+      whereClauses.push(`b.subscription_status IN ('past_due', 'unpaid', 'incomplete')`);
     }
 
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
