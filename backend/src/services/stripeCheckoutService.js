@@ -4,7 +4,6 @@ export const RECURRING_TRIAL_DAYS = 7;
 export const ONE_TIME_ACCESS_DAYS = 30;
 
 const ONE_TIME_PAYMENT_METHOD_TYPES = Object.freeze({
-  pix: ['pix'],
   boleto: ['boleto'],
 });
 
@@ -18,10 +17,10 @@ const resolvePaymentMethodTypes = ({ mode, paymentMethod }) => {
 
 const buildCheckoutMetadata = ({ barbershopId, plan, paymentMethod, flowType }) => {
   return {
-    barbershopId,
-    plan,
-    paymentMethod,
-    flowType,
+    barbershopId: String(barbershopId),
+    plan: String(plan),
+    paymentMethod: String(paymentMethod),
+    flowType: String(flowType),
   };
 };
 
@@ -37,6 +36,15 @@ export const stripeCheckoutService = {
     applyTrial = false,
   }) {
     const frontendBaseUrl = getFrontendBaseUrl();
+
+    if (!frontendBaseUrl) {
+      throw new Error('FRONTEND_URL não configurada');
+    }
+
+    if (!priceId) {
+      throw new Error(`Price ID inválido para o checkout Stripe (${plan}/${paymentMethod})`);
+    }
+
     const metadata = buildCheckoutMetadata({
       barbershopId,
       plan,
