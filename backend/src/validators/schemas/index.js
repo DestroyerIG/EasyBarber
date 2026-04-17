@@ -7,6 +7,7 @@ export {
 	registerSchema,
 	loginSchema,
 	verifyEmailSchema,
+	verifyEmailSessionSchema,
 	resendVerificationSchema,
 } from './authSchemas.js';
 export { createAppointmentSchema, updateAppointmentSchema, updateStatusSchema } from './appointmentSchemas.js';

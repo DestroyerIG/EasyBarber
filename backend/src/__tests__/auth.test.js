@@ -93,6 +93,7 @@ const mockSupabaseAuthService = {
   signUpForEmailVerification: jest.fn(),
   resendVerificationEmail: jest.fn(),
   verifyEmailToken: jest.fn(),
+  getVerifiedIdentityFromAccessToken: jest.fn(),
 };
 
 jest.unstable_mockModule('../services/supabaseAuthService.js', () => ({
@@ -121,6 +122,8 @@ const resetMocks = () => {
   mockSupabaseAuthService.signInWithPassword.mockResolvedValue({
     userId: 'supabase-user-uuid',
     email: 'joao@teste.com',
+    emailVerified: true,
+    emailVerifiedAt: new Date().toISOString(),
     sessionExpiresAt: null,
   });
   mockSupabaseAuthService.signUpForEmailVerification.mockResolvedValue({
@@ -132,6 +135,12 @@ const resetMocks = () => {
   mockSupabaseAuthService.verifyEmailToken.mockResolvedValue({
     email: 'joao@teste.com',
     userId: 'supabase-user-uuid',
+    verifiedAt: new Date().toISOString(),
+  });
+  mockSupabaseAuthService.getVerifiedIdentityFromAccessToken.mockResolvedValue({
+    userId: 'supabase-user-uuid',
+    email: 'joao@teste.com',
+    emailVerified: true,
     verifiedAt: new Date().toISOString(),
   });
 };
@@ -384,6 +393,94 @@ describe('Auth API — /api/v1/auth', () => {
       );
     });
 
+    it('deve sincronizar email_verified local no login quando o Supabase já confirmou o e-mail', async () => {
+      mockAuthRepository.findUserByEmailIncludingBlocked.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        password_hash: 'hash-local-compat',
+        email_verified: false,
+        barbershop_id: 'barbershop-uuid',
+        barbershop_name: 'Barbearia Teste',
+        plan: 'premium',
+        role: 'tenant_admin',
+        auth_provider: 'supabase',
+        supabase_user_id: 'supabase-user-uuid',
+        blocked: false,
+      });
+
+      mockSupabaseAuthService.signInWithPassword.mockResolvedValue({
+        userId: 'supabase-user-uuid',
+        email: 'joao@teste.com',
+        emailVerified: true,
+        emailVerifiedAt: new Date().toISOString(),
+        sessionExpiresAt: null,
+      });
+
+      mockAuthRepository.updateUserIdentitySync.mockResolvedValue({
+        id: 'user-uuid',
+        supabase_user_id: 'supabase-user-uuid',
+        auth_provider: 'supabase',
+      });
+      mockAuthRepository.markEmailAsVerifiedWithSupabaseIdentity.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        email_verified: true,
+        email_verified_at: new Date().toISOString(),
+      });
+      mockAuthRepository.revokeUserRefreshTokens.mockResolvedValue();
+      mockAuthRepository.saveRefreshToken.mockResolvedValue();
+      mockClientQuery.mockResolvedValue({ rows: [] });
+
+      const res = await request.post('/api/v1/auth/login').send({
+        email: 'joao@teste.com',
+        password: 'Senha123!',
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(mockAuthRepository.markEmailAsVerifiedWithSupabaseIdentity).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          userId: 'user-uuid',
+          supabaseUserId: 'supabase-user-uuid',
+          authProvider: 'supabase',
+        })
+      );
+    });
+
+    it('deve retornar 403 quando o provedor informar e-mail não confirmado', async () => {
+      mockAuthRepository.findUserByEmailIncludingBlocked.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        password_hash: 'hash-local-compat',
+        email_verified: false,
+        barbershop_id: 'barbershop-uuid',
+        barbershop_name: 'Barbearia Teste',
+        plan: 'premium',
+        role: 'tenant_admin',
+        auth_provider: 'supabase',
+        supabase_user_id: 'supabase-user-uuid',
+        blocked: false,
+      });
+
+      mockSupabaseAuthService.signInWithPassword.mockRejectedValue(
+        new AppError(
+          'Conta não verificada. Verifique seu e-mail antes de fazer login.',
+          403,
+          'EMAIL_NOT_VERIFIED'
+        )
+      );
+
+      const res = await request.post('/api/v1/auth/login').send({
+        email: 'joao@teste.com',
+        password: 'Senha123!',
+      });
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('EMAIL_NOT_VERIFIED');
+    });
+
     it('deve retornar 401 quando houver divergência de identidade supabase', async () => {
       mockAuthRepository.findUserByEmailIncludingBlocked.mockResolvedValue({
         id: 'user-uuid',
@@ -401,6 +498,8 @@ describe('Auth API — /api/v1/auth', () => {
       mockSupabaseAuthService.signInWithPassword.mockResolvedValue({
         userId: 'supabase-user-uuid',
         email: 'joao@teste.com',
+        emailVerified: true,
+        emailVerifiedAt: new Date().toISOString(),
         sessionExpiresAt: null,
       });
 
@@ -538,6 +637,48 @@ describe('Auth API — /api/v1/auth', () => {
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
       expect(res.body.error.code).toBe('INVALID_VERIFICATION_TOKEN');
+    });
+  });
+
+  describe('POST /api/v1/auth/verify-email-session', () => {
+    it('deve confirmar e sincronizar e-mail a partir de access token válido', async () => {
+      mockSupabaseAuthService.getVerifiedIdentityFromAccessToken.mockResolvedValue({
+        userId: 'supabase-user-uuid',
+        email: 'joao@teste.com',
+        emailVerified: true,
+        verifiedAt: new Date().toISOString(),
+      });
+
+      mockAuthRepository.findUserByEmailForSync.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+      });
+      mockAuthRepository.markPendingRegistrationCompletedByEmail.mockResolvedValue();
+      mockAuthRepository.markEmailAsVerifiedWithSupabaseIdentity.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        email_verified: true,
+        email_verified_at: new Date().toISOString(),
+      });
+      mockClientQuery.mockResolvedValue({ rows: [] });
+
+      const res = await request.post('/api/v1/auth/verify-email-session').send({
+        accessToken: 'access-token-valid-1234567890abcdef',
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(mockSupabaseAuthService.getVerifiedIdentityFromAccessToken).toHaveBeenCalledWith(
+        'access-token-valid-1234567890abcdef'
+      );
+    });
+
+    it('deve retornar 400 quando access token não for enviado', async () => {
+      const res = await request.post('/api/v1/auth/verify-email-session').send({});
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
     });
   });
 

@@ -32,6 +32,7 @@ const shouldSkipRefreshByUrl = (url: string) => {
     url.includes('/auth/login') ||
     url.includes('/auth/register') ||
     url.includes('/auth/verify-email') ||
+    url.includes('/auth/verify-email-session') ||
     url.includes('/auth/resend-verification') ||
     url.includes('/auth/refresh') ||
     url.includes('/auth/logout')

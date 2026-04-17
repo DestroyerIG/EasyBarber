@@ -536,9 +536,8 @@ const verifyEmailWithLegacyToken = async (token) => {
   }
 };
 
-const verifyEmailWithSupabaseToken = async ({ tokenHash, type }) => {
-  const verification = await supabaseAuthService.verifyEmailToken({ tokenHash, type });
-  const normalizedEmail = normalizeEmail(verification.email);
+const syncSupabaseVerifiedIdentity = async ({ email, userId, verifiedAt }) => {
+  const normalizedEmail = normalizeEmail(email);
   const client = await authRepository.getClient();
   let transactionCommitted = false;
 
@@ -579,7 +578,7 @@ const verifyEmailWithSupabaseToken = async ({ tokenHash, type }) => {
         passwordHash: pendingRegistration.password_hash,
         role: 'tenant_admin',
         emailVerified: false,
-        supabaseUserId: verification.userId || pendingRegistration.supabase_user_id || null,
+        supabaseUserId: userId || pendingRegistration.supabase_user_id || null,
         authProvider: 'supabase',
       });
 
@@ -595,8 +594,8 @@ const verifyEmailWithSupabaseToken = async ({ tokenHash, type }) => {
 
     const verifiedUser = await authRepository.markEmailAsVerifiedWithSupabaseIdentity(client, {
       userId: user.id,
-      supabaseUserId: verification.userId,
-      emailVerifiedAt: verification.verifiedAt,
+      supabaseUserId: userId,
+      emailVerifiedAt: verifiedAt,
       authProvider: 'supabase',
     });
 
@@ -608,14 +607,14 @@ const verifyEmailWithSupabaseToken = async ({ tokenHash, type }) => {
         mode: getAuthProviderMode(),
         userId: user.id,
         email: normalizedEmail,
-        supabaseUserId: verification.userId,
+        supabaseUserId: userId,
       },
       'E-mail confirmado via Supabase e sincronizado no banco interno'
     );
 
     return buildVerificationResponse({
       email: verifiedUser?.email || normalizedEmail,
-      emailVerifiedAt: verifiedUser?.email_verified_at || verification.verifiedAt || new Date().toISOString(),
+      emailVerifiedAt: verifiedUser?.email_verified_at || verifiedAt || new Date().toISOString(),
     });
   } catch (error) {
     if (!transactionCommitted) {
@@ -635,6 +634,34 @@ const verifyEmailWithSupabaseToken = async ({ tokenHash, type }) => {
   } finally {
     client.release();
   }
+};
+
+const verifyEmailWithSupabaseToken = async ({ tokenHash, type }) => {
+  const verification = await supabaseAuthService.verifyEmailToken({ tokenHash, type });
+
+  return syncSupabaseVerifiedIdentity({
+    email: verification.email,
+    userId: verification.userId,
+    verifiedAt: verification.verifiedAt,
+  });
+};
+
+const verifyEmailWithSupabaseSession = async ({ accessToken }) => {
+  const identity = await supabaseAuthService.getVerifiedIdentityFromAccessToken(accessToken);
+
+  if (!identity.emailVerified) {
+    throw new AppError(
+      'Conta não verificada. Verifique seu e-mail antes de fazer login.',
+      403,
+      'EMAIL_NOT_VERIFIED'
+    );
+  }
+
+  return syncSupabaseVerifiedIdentity({
+    email: identity.email,
+    userId: identity.userId,
+    verifiedAt: identity.verifiedAt,
+  });
 };
 
 export const authService = {
@@ -714,6 +741,7 @@ export const authService = {
         ? 'supabase'
         : 'legacy';
       const normalizedRole = normalizeRole(user.role);
+      let resolvedEmailVerified = Boolean(user.email_verified);
 
       if (user.blocked) {
         logger.warn(
@@ -743,6 +771,10 @@ export const authService = {
         try {
           supabaseIdentity = await supabaseAuthService.signInWithPassword(normalizedEmail, password);
         } catch (error) {
+          if (error instanceof AppError && error.code === 'EMAIL_NOT_VERIFIED') {
+            throw error;
+          }
+
           if (error instanceof UnauthorizedError) {
             logger.warn(
               {
@@ -790,6 +822,34 @@ export const authService = {
           },
           'Sincronização de identidade Supabase atualizada no login'
         );
+
+        if (!resolvedEmailVerified && supabaseIdentity.emailVerified) {
+          const syncedVerification = await authRepository.markEmailAsVerifiedWithSupabaseIdentity(client, {
+            userId: user.id,
+            supabaseUserId: supabaseIdentity.userId,
+            emailVerifiedAt: supabaseIdentity.emailVerifiedAt || new Date().toISOString(),
+            authProvider: 'supabase',
+          });
+
+          resolvedEmailVerified = Boolean(syncedVerification?.email_verified);
+        }
+
+        if (!resolvedEmailVerified && !supabaseIdentity.emailVerified) {
+          logger.warn(
+            {
+              email: normalizedEmail,
+              userId: user.id,
+              authProvider,
+              reason: 'email_not_verified_provider',
+            },
+            'Login negado: e-mail não verificado no provedor Supabase'
+          );
+          throw new AppError(
+            'Conta não verificada. Verifique seu e-mail antes de fazer login.',
+            403,
+            'EMAIL_NOT_VERIFIED'
+          );
+        }
       } else {
         logger.info(
           {
@@ -816,7 +876,7 @@ export const authService = {
         }
       }
 
-      if (!user.email_verified) {
+      if (!resolvedEmailVerified) {
         logger.warn(
           {
             email: normalizedEmail,
@@ -871,7 +931,7 @@ export const authService = {
           role: normalizedRole,
           barbershopName: user.barbershop_name,
           plan: user.plan,
-          emailVerified: user.email_verified,
+          emailVerified: resolvedEmailVerified,
           subscriptionStatus: user.subscription_status,
           subscriptionCurrentPeriodEnd: user.subscription_current_period_end,
         }),
@@ -959,7 +1019,14 @@ export const authService = {
           token: token?.token,
           tokenHash: token?.tokenHash || token?.token_hash,
           type: token?.type,
+          accessToken: token?.accessToken || token?.access_token,
         };
+
+    if (tokenPayload?.accessToken) {
+      return verifyEmailWithSupabaseSession({
+        accessToken: tokenPayload.accessToken,
+      });
+    }
 
     if (tokenPayload?.tokenHash) {
       return verifyEmailWithSupabaseToken({

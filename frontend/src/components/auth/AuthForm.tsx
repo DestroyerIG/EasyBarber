@@ -39,6 +39,7 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
   const [loading, setLoading] = useState(false);
   const [resendingVerification, setResendingVerification] = useState(false);
   const [desiredPlan, setDesiredPlan] = useState<PlanId>(() => resolveInitialPlan(selectedPlan));
+  const [showConfirmedNotice, setShowConfirmedNotice] = useState(false);
   const [verificationNotice, setVerificationNotice] = useState<string | null>(null);
   const [verificationEmail, setVerificationEmail] = useState('');
   const [verificationSent, setVerificationSent] = useState(false);
@@ -59,6 +60,16 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
   useEffect(() => {
     setDesiredPlan(resolveInitialPlan(selectedPlan));
   }, [selectedPlan]);
+
+  useEffect(() => {
+    if (!isLogin || typeof window === 'undefined') {
+      setShowConfirmedNotice(false);
+      return;
+    }
+
+    const searchParams = new URLSearchParams(window.location.search);
+    setShowConfirmedNotice(searchParams.get('confirmed') === '1');
+  }, [isLogin]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -219,6 +230,12 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
               {isLogin ? 'Entre para continuar.' : 'Leva menos de 2 minutos.'}
             </p>
           </div>
+
+          {isLogin && showConfirmedNotice && (
+            <div className="mb-5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-sm text-emerald-300">
+              E-mail confirmado com sucesso. Agora você já pode entrar.
+            </div>
+          )}
 
           <form
             onSubmit={handleSubmit}

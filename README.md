@@ -173,8 +173,19 @@ Base no arquivo frontend/.env.example:
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
 NEXT_PUBLIC_WHATSAPP_CONTACT_URL=https://wa.me/5500000000000?text=Ola
 ```
+
+Para confirmação de e-mail com Supabase Auth, garanta no dashboard do Supabase:
+
+- Site URL: domínio público do frontend (ex.: `https://seu-frontend.com`).
+- Redirect URLs permitidas:
+  - `http://localhost:3000/auth/confirm`
+  - `https://seu-frontend.com/auth/confirm`
+  - URL de preview usada no deploy (se aplicável).
 
 ## Instalação e Execução (Desenvolvimento)
 

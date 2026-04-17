@@ -53,3 +53,27 @@ export const verifyEmailSchema = z
 export const resendVerificationSchema = z.object({
   email: z.string().email('Email inválido').max(255),
 });
+
+const accessTokenSchema = z
+  .string()
+  .trim()
+  .min(20, 'Sessão de confirmação inválida')
+  .max(4096, 'Sessão de confirmação inválida');
+
+export const verifyEmailSessionSchema = z
+  .object({
+    accessToken: accessTokenSchema.optional(),
+    access_token: accessTokenSchema.optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.accessToken && !data.access_token) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Sessão de confirmação inválida',
+        path: ['accessToken'],
+      });
+    }
+  })
+  .transform((data) => ({
+    accessToken: data.accessToken || data.access_token,
+  }));

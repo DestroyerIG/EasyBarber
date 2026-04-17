@@ -4,10 +4,17 @@ import {
   registerSchema,
   loginSchema,
   verifyEmailSchema,
+  verifyEmailSessionSchema,
   resendVerificationSchema,
 } from '../validators/schemas/index.js';
 
-export { registerSchema, loginSchema, verifyEmailSchema, resendVerificationSchema };
+export {
+  registerSchema,
+  loginSchema,
+  verifyEmailSchema,
+  verifyEmailSessionSchema,
+  resendVerificationSchema,
+};
 
 const resolveRefreshToken = (req) => {
   if (req.cookies?.refresh_token) {
@@ -74,6 +81,17 @@ export const verifyEmail = async (req, res, next) => {
       token: req.query.token,
       tokenHash: req.query.tokenHash,
       type: req.query.type,
+    });
+    return sendSuccess(res, data);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyEmailSession = async (req, res, next) => {
+  try {
+    const data = await authService.verifyEmail({
+      accessToken: req.body.accessToken,
     });
     return sendSuccess(res, data);
   } catch (error) {

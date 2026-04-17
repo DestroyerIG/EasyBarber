@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   getSupabaseBrowserClient,
@@ -12,7 +12,6 @@ type Status = 'loading' | 'ready' | 'success' | 'error';
 
 export function ResetPasswordView() {
   const router = useRouter();
-  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const [status, setStatus] = useState<Status>('loading');
   const [message, setMessage] = useState('Validando link de redefinição...');
@@ -28,6 +27,8 @@ export function ResetPasswordView() {
         if (!isSupabaseBrowserClientConfigured()) {
           throw new Error('Configuração do Supabase ausente no frontend.');
         }
+
+        const supabase = getSupabaseBrowserClient();
 
         const hash = window.location.hash.startsWith('#')
           ? window.location.hash.slice(1)
@@ -73,7 +74,7 @@ export function ResetPasswordView() {
     return () => {
       active = false;
     };
-  }, [supabase]);
+  }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -94,6 +95,11 @@ export function ResetPasswordView() {
     setMessage('Atualizando sua senha...');
 
     try {
+      if (!isSupabaseBrowserClientConfigured()) {
+        throw new Error('Configuração do Supabase ausente no frontend.');
+      }
+
+      const supabase = getSupabaseBrowserClient();
       const { error } = await supabase.auth.updateUser({
         password,
       });
@@ -105,13 +111,17 @@ export function ResetPasswordView() {
       setStatus('success');
       setMessage('Senha redefinida com sucesso. Redirecionando para o login...');
 
-      window.setTimeout(() => {
+      setTimeout(() => {
         router.replace('/login?reset=1');
       }, 1800);
     } catch (error) {
       console.error('Erro ao redefinir senha:', error);
       setStatus('error');
-      setMessage('Não foi possível redefinir sua senha. Tente novamente.');
+      if (error instanceof Error && error.message.includes('Configuração do Supabase')) {
+        setMessage(error.message);
+      } else {
+        setMessage('Não foi possível redefinir sua senha. Tente novamente.');
+      }
     } finally {
       setSubmitting(false);
     }

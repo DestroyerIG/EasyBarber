@@ -78,49 +78,6 @@ const resolveOtpTypeCandidates = (type: EmailOtpType | null): EmailOtpType[] => 
   return candidates;
 };
 
-const readCallbackParams = (): CallbackParams => {
-  const searchParams = new URLSearchParams(window.location.search);
-  const hash = window.location.hash.startsWith('#')
-    ? window.location.hash.slice(1)
-    : window.location.hash;
-  const hashParams = new URLSearchParams(hash);
-
-  return {
-    code: firstValue(hashParams.get('code'), searchParams.get('code')),
-    tokenHash: firstValue(
-      hashParams.get('token_hash'),
-      hashParams.get('tokenHash'),
-      searchParams.get('token_hash'),
-      searchParams.get('tokenHash')
-    ),
-    type: toEmailOtpType(firstValue(hashParams.get('type'), searchParams.get('type'))),
-    accessToken: firstValue(
-      hashParams.get('access_token'),
-      hashParams.get('accessToken'),
-      searchParams.get('access_token'),
-      searchParams.get('accessToken')
-    ),
-    refreshToken: firstValue(
-      hashParams.get('refresh_token'),
-      hashParams.get('refreshToken'),
-      searchParams.get('refresh_token'),
-      searchParams.get('refreshToken')
-    ),
-    email: firstValue(hashParams.get('email'), searchParams.get('email')),
-    legacyToken: firstValue(searchParams.get('token')),
-  };
-};
-
-const scrubSensitiveUrlParams = (email: string | null) => {
-  const cleanUrl = new URL(window.location.origin + window.location.pathname);
-
-  if (email) {
-    cleanUrl.searchParams.set('email', email);
-  }
-
-  window.history.replaceState({}, document.title, cleanUrl.toString());
-};
-
 const getBackendMessage = (payload: unknown, fallback: string) => {
   if (payload && typeof payload === 'object') {
     const candidate = payload as { message?: unknown };
@@ -154,6 +111,49 @@ export function AuthConfirmView() {
             'Configuração Supabase ausente no frontend. Solicite suporte para configurar as variáveis públicas.'
           );
         }
+
+        const readCallbackParams = (): CallbackParams => {
+          const searchParams = new URLSearchParams(window.location.search);
+          const hash = window.location.hash.startsWith('#')
+            ? window.location.hash.slice(1)
+            : window.location.hash;
+          const hashParams = new URLSearchParams(hash);
+
+          return {
+            code: firstValue(hashParams.get('code'), searchParams.get('code')),
+            tokenHash: firstValue(
+              hashParams.get('token_hash'),
+              hashParams.get('tokenHash'),
+              searchParams.get('token_hash'),
+              searchParams.get('tokenHash')
+            ),
+            type: toEmailOtpType(firstValue(hashParams.get('type'), searchParams.get('type'))),
+            accessToken: firstValue(
+              hashParams.get('access_token'),
+              hashParams.get('accessToken'),
+              searchParams.get('access_token'),
+              searchParams.get('accessToken')
+            ),
+            refreshToken: firstValue(
+              hashParams.get('refresh_token'),
+              hashParams.get('refreshToken'),
+              searchParams.get('refresh_token'),
+              searchParams.get('refreshToken')
+            ),
+            email: firstValue(hashParams.get('email'), searchParams.get('email')),
+            legacyToken: firstValue(searchParams.get('token')),
+          };
+        };
+
+        const scrubSensitiveUrlParams = (currentEmail: string | null) => {
+          const cleanUrl = new URL(window.location.origin + window.location.pathname);
+
+          if (currentEmail) {
+            cleanUrl.searchParams.set('email', currentEmail);
+          }
+
+          window.history.replaceState({}, document.title, cleanUrl.toString());
+        };
 
         const callbackParams = readCallbackParams();
         scrubSensitiveUrlParams(callbackParams.email);

@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import Link from 'next/link';
 import {
   getSupabaseBrowserClient,
@@ -8,7 +8,6 @@ import {
 } from '@/lib/supabase/browserClient';
 
 export function ForgotPasswordView() {
-  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -25,17 +24,16 @@ export function ForgotPasswordView() {
       return;
     }
 
-    if (!isSupabaseBrowserClientConfigured()) {
-      setStatus('error');
-      setMessage('Configuração do Supabase ausente no frontend.');
-      return;
-    }
-
     setLoading(true);
     setStatus('idle');
     setMessage('');
 
     try {
+      if (!isSupabaseBrowserClientConfigured()) {
+        throw new Error('Configuração do Supabase ausente no frontend.');
+      }
+
+      const supabase = getSupabaseBrowserClient();
       const redirectTo = `${process.env.NEXT_PUBLIC_APP_URL}/auth/redefinir-senha`;
 
       const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
@@ -51,7 +49,11 @@ export function ForgotPasswordView() {
     } catch (error) {
       console.error('Erro ao solicitar redefinição de senha:', error);
       setStatus('error');
-      setMessage('Não foi possível enviar o link de redefinição agora. Tente novamente.');
+      if (error instanceof Error && error.message.includes('Configuração do Supabase')) {
+        setMessage(error.message);
+      } else {
+        setMessage('Não foi possível enviar o link de redefinição agora. Tente novamente.');
+      }
     } finally {
       setLoading(false);
     }

@@ -145,7 +145,11 @@ const runSupabaseOperation = async ({ operation, context = {} }, action) => {
 };
 
 const resolveFrontendBaseUrl = () => {
-  const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:3000';
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.FRONTEND_URL ||
+    process.env.APP_URL ||
+    'http://localhost:3000';
   return baseUrl.replace(/\/+$/, '');
 };
 
@@ -232,11 +236,20 @@ const mapSupabaseSignInError = (error) => {
   }
 
   if (
-    normalizedCode === 'invalid_credentials' ||
     normalizedCode === 'email_not_confirmed' ||
+    normalizedMessage.includes('email not confirmed')
+  ) {
+    return new AppError(
+      'Conta não verificada. Verifique seu e-mail antes de fazer login.',
+      403,
+      'EMAIL_NOT_VERIFIED'
+    );
+  }
+
+  if (
+    normalizedCode === 'invalid_credentials' ||
     normalizedMessage.includes('invalid login credentials') ||
     normalizedMessage.includes('invalid email or password') ||
-    normalizedMessage.includes('email not confirmed') ||
     normalizedMessage.includes('user not found')
   ) {
     return new UnauthorizedError('Email ou senha incorretos');
@@ -324,6 +337,10 @@ export const supabaseAuthService = {
     }
 
     const resolvedUserId = data?.user?.id || null;
+    const confirmedAt =
+      data?.user?.email_confirmed_at ||
+      data?.user?.confirmed_at ||
+      null;
 
     if (!resolvedUserId) {
       throw new AppError(
@@ -336,7 +353,67 @@ export const supabaseAuthService = {
     return {
       userId: resolvedUserId,
       email: normalizeEmail(data?.user?.email || normalizedEmail),
+      emailVerified: Boolean(confirmedAt),
+      emailVerifiedAt: confirmedAt,
       sessionExpiresAt: data?.session?.expires_at || null,
+    };
+  },
+
+  async getVerifiedIdentityFromAccessToken(accessToken) {
+    const normalizedAccessToken = String(accessToken || '').trim();
+
+    if (!normalizedAccessToken) {
+      throw new AppError('Sessão de confirmação inválida ou expirada.', 401, 'INVALID_CONFIRMATION_SESSION');
+    }
+
+    const client = getSupabaseClient();
+    let data;
+    let error;
+
+    try {
+      ({ data, error } = await runSupabaseOperation(
+        {
+          operation: 'getVerifiedIdentityFromAccessToken',
+          context: {
+            accessTokenPrefix: normalizedAccessToken.slice(0, 8),
+          },
+        },
+        () => client.auth.getUser(normalizedAccessToken)
+      ));
+    } catch (operationError) {
+      throw mapSupabaseError(operationError, 'Não foi possível validar a sessão de confirmação.');
+    }
+
+    if (error) {
+      const message = String(error?.message || '').toLowerCase();
+      if (
+        message.includes('jwt') ||
+        message.includes('token') ||
+        message.includes('session') ||
+        message.includes('invalid')
+      ) {
+        throw new AppError('Sessão de confirmação inválida ou expirada.', 401, 'INVALID_CONFIRMATION_SESSION');
+      }
+
+      throw mapSupabaseError(error, 'Não foi possível validar a sessão de confirmação.');
+    }
+
+    const userId = data?.user?.id || null;
+    const email = normalizeEmail(data?.user?.email || '');
+    const confirmedAt =
+      data?.user?.email_confirmed_at ||
+      data?.user?.confirmed_at ||
+      null;
+
+    if (!userId || !email) {
+      throw new AppError('Sessão de confirmação inválida ou expirada.', 401, 'INVALID_CONFIRMATION_SESSION');
+    }
+
+    return {
+      userId,
+      email,
+      emailVerified: Boolean(confirmedAt),
+      verifiedAt: confirmedAt || new Date().toISOString(),
     };
   },
 

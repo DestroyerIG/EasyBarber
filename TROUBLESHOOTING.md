@@ -196,6 +196,8 @@ Checklist:
 - AUTH_PROVIDER_MODE configurado corretamente (`dual`, `supabase` ou `legacy`).
 - SUPABASE_URL e SUPABASE_ANON_KEY configuradas para `dual/supabase`.
 - AUTH_SUPABASE_REDIRECT_TO apontando para `/auth/confirm` no frontend público.
+- NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY configuradas no frontend.
+- NEXT_PUBLIC_APP_URL configurada com a URL pública do frontend.
 - SUPABASE_SERVICE_ROLE_KEY configurada para executar scripts administrativos (`seed:auth-admin` e `seed:system-users`).
 - Variáveis SMTP_* configuradas somente quando usar fallback legado (`AUTH_PROVIDER_MODE=legacy`).
 - APP_URL/FRONTEND_URL apontando para a URL pública correta do frontend.
