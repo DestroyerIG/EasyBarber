@@ -107,6 +107,48 @@ describe('Clients API — /api/v1/clients', () => {
       expect(res.body.success).toBe(true);
     });
 
+    it('deve criar cliente com campos opcionais vazios sem retornar 400', async () => {
+      mockClientRepo.findByPhone.mockResolvedValue(null);
+      mockClientRepo.create.mockImplementation(async (payload) => ({
+        id: 'c-new',
+        ...payload,
+      }));
+
+      const res = await request.post('/api/v1/clients').set(authHeader).send({
+        name: 'Carlos',
+        phone: '11999999999',
+        email: '',
+        birthDate: '',
+        address: '',
+        notes: '',
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(mockClientRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+        email: null,
+        birth_date: null,
+        address: null,
+        notes: null,
+      }));
+    });
+
+    it('deve criar cliente quando vier apenas whatsapp', async () => {
+      mockClientRepo.findByPhone.mockResolvedValue(null);
+      mockClientRepo.create.mockResolvedValue({
+        id: 'c-new', name: 'Pedro', phone: '11888888888',
+      });
+
+      const res = await request.post('/api/v1/clients').set(authHeader).send({
+        name: 'Pedro',
+        whatsapp: '11888888888',
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(mockClientRepo.findByPhone).toHaveBeenCalledWith('bbshop-uuid', '11888888888');
+    });
+
     it('deve retornar 400 com nome muito curto', async () => {
       const res = await request.post('/api/v1/clients').set(authHeader).send({
         name: 'P',

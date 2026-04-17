@@ -1,13 +1,27 @@
 import { z } from 'zod';
-import { optionalString } from './common.js';
+
+const emptyToNull = (value) => {
+  if (typeof value !== 'string') return value ?? null;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+};
+
+const optionalNullable = (schema) => z.preprocess(emptyToNull, schema.nullable().optional());
 
 export const createClientSchema = z.object({
-  name: z.string().min(2, 'Nome deve ter pelo menos 2 caracteres').max(255),
-  phone: z.string().min(10, 'Telefone inválido').max(20),
-  email: z.string().email('Email inválido').optional().or(z.literal('')),
-  birthDate: optionalString(),
-  address: optionalString(500),
-  notes: optionalString(1000),
+  name: z.string().trim().min(2, 'Nome é obrigatório').max(255),
+  phone: z.string().trim().min(8, 'Telefone é obrigatório').max(20),
+  email: optionalNullable(z.string().email('Email inválido')),
+  birthDate: optionalNullable(z.string()),
+  address: optionalNullable(z.string().max(500)),
+  notes: optionalNullable(z.string().max(1000)),
 });
 
-export const updateClientSchema = createClientSchema.partial();
+export const updateClientSchema = z.object({
+  name: z.string().trim().min(2, 'Nome é obrigatório').max(255).optional(),
+  phone: z.string().trim().min(8, 'Telefone é obrigatório').max(20).optional(),
+  email: optionalNullable(z.string().email('Email inválido')),
+  birthDate: optionalNullable(z.string()),
+  address: optionalNullable(z.string().max(500)),
+  notes: optionalNullable(z.string().max(1000)),
+});

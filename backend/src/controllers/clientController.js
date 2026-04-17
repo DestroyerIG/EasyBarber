@@ -4,6 +4,27 @@ import { createClientSchema, updateClientSchema } from '../validators/schemas/in
 
 export { createClientSchema, updateClientSchema };
 
+export const normalizeClientBody = (req, res, next) => {
+  if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
+    req.body = Object.fromEntries(
+      Object.entries(req.body).map(([key, value]) => [
+        key,
+        typeof value === 'string' ? value.trim() : value,
+      ])
+    );
+
+    if (
+      (!req.body.phone || req.body.phone === '')
+      && typeof req.body.whatsapp === 'string'
+      && req.body.whatsapp !== ''
+    ) {
+      req.body.phone = req.body.whatsapp;
+    }
+  }
+
+  next();
+};
+
 export const getClients = async (req, res, next) => {
   try {
     const result = await clientService.getAll(req.user.barbershopId, req.query);
