@@ -1,21 +1,33 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { CheckCircle2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { CheckCircle2, QrCode } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
+import { Modal } from '@/components/ui';
 import {
   billingApi,
   type CheckoutPaymentMethod,
   type PixCheckoutSessionResponse,
+  type SubscriptionStatus,
 } from '@/lib/billing';
-import { SAAS_PLANS, type PlanId } from '@/lib/plans';
+import { PLAN_MAP, SAAS_PLANS, type PlanId, isPlanId } from '@/lib/plans';
 import { formatCurrency } from '@/lib/formatters';
 import { getApiErrorMessage } from '@/utils/handleApiError';
 
 const PIX_STORAGE_KEY = 'easybarber:pixCheckout';
+
+type SupportedPaymentMethod = Extract<CheckoutPaymentMethod, 'card' | 'pix'>;
+
+type CheckoutAction = {
+  planId: PlanId;
+  paymentMethod: SupportedPaymentMethod;
+};
+
+type PixCheckoutStoragePayload = PixCheckoutSessionResponse & {
+  planId?: PlanId | null;
+};
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'Aguardando pagamento',
@@ -27,22 +39,57 @@ const STATUS_LABEL: Record<string, string> = {
   trialing: 'Período de teste',
 };
 
-const PAYMENT_METHOD_OPTIONS: Array<{
-  id: CheckoutPaymentMethod;
-  label: string;
-  description: string;
-}> = [
-  {
-    id: 'card',
-    label: 'Cartão',
-    description: 'Assinatura recorrente mensal',
-  },
-  {
-    id: 'pix',
-    label: 'Pix',
-    description: 'Cobrança Pix no Asaas com QR Code',
-  },
-];
+const STATUS_BADGE_CLASS: Record<string, string> = {
+  pending: 'border-amber-300/40 bg-amber-500/10 text-amber-200',
+  active: 'border-emerald-300/40 bg-emerald-500/10 text-emerald-200',
+  past_due: 'border-orange-300/40 bg-orange-500/10 text-orange-200',
+  unpaid: 'border-rose-300/40 bg-rose-500/10 text-rose-200',
+  canceled: 'border-rose-300/40 bg-rose-500/10 text-rose-200',
+  incomplete: 'border-orange-300/40 bg-orange-500/10 text-orange-200',
+  trialing: 'border-sky-300/40 bg-sky-500/10 text-sky-200',
+};
+
+const STATUS_TOAST_VARIANT: Record<string, 'success' | 'info' | 'error'> = {
+  pending: 'info',
+  active: 'success',
+  past_due: 'error',
+  unpaid: 'error',
+  canceled: 'error',
+  incomplete: 'error',
+  trialing: 'info',
+};
+
+const normalizeQrCodeSource = (value: string | null): string | null => {
+  if (!value) {
+    return null;
+  }
+
+  if (value.startsWith('data:image/')) {
+    return value;
+  }
+
+  if (value.startsWith('http://') || value.startsWith('https://')) {
+    return value;
+  }
+
+  return `data:image/png;base64,${value}`;
+};
+
+const resolveStoredPlanId = (value: unknown): PlanId | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  return isPlanId(value) ? value : null;
+};
+
+const formatPixExpiration = (value: string | null) => {
+  if (!value) {
+    return 'Sem data de expiração informada';
+  }
+
+  return new Date(value).toLocaleString('pt-BR');
+};
 
 interface PricingPlansSectionProps {
   sectionId?: string;
@@ -63,14 +110,19 @@ export function PricingPlansSection({
   showHeader = true,
   className,
 }: PricingPlansSectionProps) {
-  const [processingPlan, setProcessingPlan] = useState<PlanId | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('card');
+  const [processingAction, setProcessingAction] = useState<CheckoutAction | null>(null);
   const [pixCheckout, setPixCheckout] = useState<PixCheckoutSessionResponse | null>(null);
+  const [pixCheckoutPlanId, setPixCheckoutPlanId] = useState<PlanId | null>(null);
+  const [isPixModalOpen, setIsPixModalOpen] = useState(false);
   const [pixStatusLoading, setPixStatusLoading] = useState(false);
   const { user } = useAuth();
   const { showToast } = useToast();
   const router = useRouter();
-  const isRecurringFlow = paymentMethod === 'card';
+  const pixQrCodeSource = useMemo(() => normalizeQrCodeSource(pixCheckout?.qrCode || null), [pixCheckout?.qrCode]);
+  const pixStatusLabel = pixCheckout ? STATUS_LABEL[pixCheckout.status] || pixCheckout.status : null;
+  const pixBadgeClass = pixCheckout
+    ? STATUS_BADGE_CLASS[pixCheckout.status] || 'border-white/20 bg-white/10 text-gray-100'
+    : 'border-white/20 bg-white/10 text-gray-100';
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -83,16 +135,18 @@ export function PricingPlansSection({
     }
 
     try {
-      const parsed = JSON.parse(raw) as PixCheckoutSessionResponse;
+      const parsed = JSON.parse(raw) as PixCheckoutStoragePayload;
       if (parsed?.provider === 'asaas' && parsed?.paymentId) {
-        setPixCheckout(parsed);
+        const { planId, ...checkoutPayload } = parsed;
+        setPixCheckout(checkoutPayload);
+        setPixCheckoutPlanId(resolveStoredPlanId(planId));
       }
     } catch {
       window.sessionStorage.removeItem(PIX_STORAGE_KEY);
     }
   }, []);
 
-  const persistPixCheckout = (value: PixCheckoutSessionResponse | null) => {
+  const persistPixCheckout = (value: PixCheckoutSessionResponse | null, planId: PlanId | null) => {
     if (typeof window === 'undefined') {
       return;
     }
@@ -102,7 +156,16 @@ export function PricingPlansSection({
       return;
     }
 
-    window.sessionStorage.setItem(PIX_STORAGE_KEY, JSON.stringify(value));
+    const payload: PixCheckoutStoragePayload = {
+      ...value,
+      planId,
+    };
+
+    window.sessionStorage.setItem(PIX_STORAGE_KEY, JSON.stringify(payload));
+  };
+
+  const getStatusToastVariant = (status: SubscriptionStatus): 'success' | 'info' | 'error' => {
+    return STATUS_TOAST_VARIANT[status] || 'info';
   };
 
   const copyPixPayload = async () => {
@@ -112,7 +175,20 @@ export function PricingPlansSection({
     }
 
     try {
-      await navigator.clipboard.writeText(pixCheckout.pixCopyPaste);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(pixCheckout.pixCopyPaste);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = pixCheckout.pixCopyPaste;
+        textArea.setAttribute('readonly', 'true');
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+
       showToast('Código Pix copiado para a área de transferência.', 'success');
     } catch {
       showToast('Não foi possível copiar o código Pix.', 'error');
@@ -139,12 +215,13 @@ export function PricingPlansSection({
       };
 
       setPixCheckout(nextCheckout);
-      persistPixCheckout(nextCheckout);
+      persistPixCheckout(nextCheckout, pixCheckoutPlanId);
 
       if (updated.status === 'active') {
         showToast('Pagamento confirmado. Assinatura ativada.', 'success');
       } else {
-        showToast(`Status atualizado: ${STATUS_LABEL[updated.status] || updated.status}.`, 'info');
+        const statusLabel = STATUS_LABEL[updated.status] || updated.status;
+        showToast(`Status atualizado: ${statusLabel}.`, getStatusToastVariant(updated.status));
       }
     } catch (error: unknown) {
       const message = getApiErrorMessage(error, 'Não foi possível atualizar o status do Pix.');
@@ -158,7 +235,7 @@ export function PricingPlansSection({
     return currentPlan === planId && (subscriptionStatus === 'active' || subscriptionStatus === 'trialing');
   };
 
-  const handlePlanSelect = async (planId: PlanId) => {
+  const handlePlanSelect = async (planId: PlanId, paymentMethod: SupportedPaymentMethod) => {
     if (!user) {
       router.push(`/cadastro?plan=${planId}&paymentMethod=${paymentMethod}`);
       return;
@@ -169,23 +246,36 @@ export function PricingPlansSection({
       return;
     }
 
-    setProcessingPlan(planId);
+    setProcessingAction({ planId, paymentMethod });
+
     try {
       const session = await billingApi.createCheckoutSession(planId, paymentMethod);
 
-      if (session.provider === 'stripe') {
-        window.location.assign(session.checkoutUrl);
+      if (paymentMethod === 'card') {
+        if (session.provider !== 'stripe') {
+          showToast('Checkout com cartão indisponível no momento. Tente novamente.', 'error');
+          return;
+        }
+
+        window.location.href = session.checkoutUrl;
+        return;
+      }
+
+      if (session.provider !== 'asaas') {
+        showToast('Checkout Pix indisponível no momento. Tente novamente.', 'error');
         return;
       }
 
       setPixCheckout(session);
-      persistPixCheckout(session);
-      showToast('Cobrança Pix criada. Finalize o pagamento para ativar o plano.', 'success');
+      setPixCheckoutPlanId(planId);
+      persistPixCheckout(session, planId);
+      setIsPixModalOpen(true);
+      showToast('Cobrança Pix criada. Escaneie o QR Code para concluir o pagamento.', 'success');
     } catch (error: unknown) {
       const message = getApiErrorMessage(error, 'Não foi possível iniciar o checkout no momento.');
       showToast(message, 'error');
     } finally {
-      setProcessingPlan(null);
+      setProcessingAction(null);
     }
   };
 
@@ -196,98 +286,31 @@ export function PricingPlansSection({
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Planos</p>
           <h2 className="mt-3 text-3xl font-black leading-tight sm:text-4xl">{title}</h2>
           <p className="mt-4 text-gray-400">{subtitle}</p>
-
-          <div className="mt-6 rounded-2xl border border-white/10 bg-black/30 p-3 text-left">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">Forma de pagamento</p>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {PAYMENT_METHOD_OPTIONS.map((option) => {
-                const selected = paymentMethod === option.id;
-
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => setPaymentMethod(option.id)}
-                    className={[
-                      'rounded-xl border px-3 py-2 text-left transition-colors',
-                      selected
-                        ? 'border-primary bg-primary/10 text-white'
-                        : 'border-white/10 bg-black/20 text-gray-300 hover:border-white/30',
-                    ].join(' ')}
-                  >
-                    <p className="text-sm font-semibold">{option.label}</p>
-                    <p className="mt-1 text-[11px] text-gray-400">{option.description}</p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <p className="mt-3 text-sm text-gray-500">
+            Em cada plano você pode escolher checkout com cartão via Stripe ou pagamento Pix via Asaas.
+          </p>
         </div>
       )}
 
-      {pixCheckout && (
-        <div className="mb-8 rounded-2xl border border-cyan-400/30 bg-cyan-500/5 p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      {pixCheckout && !isPixModalOpen && (
+        <div className="mb-8 rounded-2xl border border-cyan-400/30 bg-cyan-500/5 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200/80">
-                Pagamento Pix em andamento
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200/80">Cobrança Pix pendente</p>
+              <p className="mt-1 text-sm text-cyan-50/95">
+                {pixStatusLabel}
+                {pixCheckoutPlanId ? ` · Plano ${PLAN_MAP[pixCheckoutPlanId].name}` : ''}
               </p>
-              <h4 className="mt-2 text-xl font-black text-white">
-                {STATUS_LABEL[pixCheckout.status] || pixCheckout.status}
-              </h4>
-              <p className="mt-2 text-sm text-cyan-100/90">
-                Escaneie o QR Code ou use o código copia e cola para concluir a cobrança.
-              </p>
-              {pixCheckout.expiresAt && (
-                <p className="mt-2 text-xs text-cyan-100/70">
-                  Expira em: {new Date(pixCheckout.expiresAt).toLocaleString('pt-BR')}
-                </p>
-              )}
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={copyPixPayload}
-                  className="rounded-lg border border-cyan-300/50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-100 transition hover:bg-cyan-300/10"
-                >
-                  Copiar código Pix
-                </button>
-                <button
-                  type="button"
-                  onClick={refreshPixStatus}
-                  disabled={pixStatusLoading}
-                  className="rounded-lg bg-cyan-300 px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-black transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {pixStatusLoading ? 'Atualizando...' : 'Já paguei / Atualizar status'}
-                </button>
-              </div>
             </div>
 
-            <div className="rounded-xl border border-cyan-300/30 bg-black/30 p-3">
-              {pixCheckout.qrCode ? (
-                <Image
-                  src={pixCheckout.qrCode}
-                  alt="QR Code Pix"
-                  width={176}
-                  height={176}
-                  unoptimized
-                  className="h-44 w-44 rounded-lg bg-white p-2"
-                />
-              ) : (
-                <div className="flex h-44 w-44 items-center justify-center rounded-lg border border-dashed border-cyan-300/40 text-xs text-cyan-100/80">
-                  QR Code indisponível para esta cobrança.
-                </div>
-              )}
-            </div>
+            <button
+              type="button"
+              onClick={() => setIsPixModalOpen(true)}
+              className="rounded-lg bg-cyan-300 px-4 py-2 text-xs font-black uppercase tracking-[0.12em] text-black transition hover:bg-cyan-200"
+            >
+              Abrir cobrança Pix
+            </button>
           </div>
-
-          {pixCheckout.pixCopyPaste && (
-            <div className="mt-4 rounded-lg border border-cyan-300/20 bg-black/30 p-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-200/80">
-                Copia e cola
-              </p>
-              <p className="break-all text-xs text-cyan-50/95">{pixCheckout.pixCopyPaste}</p>
-            </div>
-          )}
         </div>
       )}
 
@@ -295,7 +318,9 @@ export function PricingPlansSection({
         {SAAS_PLANS.map((plan) => {
           const recommended = plan.recommended;
           const current = isCurrentPlan(plan.id);
-          const busy = processingPlan === plan.id;
+          const planBusy = processingAction?.planId === plan.id;
+          const cardBusy = planBusy && processingAction?.paymentMethod === 'card';
+          const pixBusy = planBusy && processingAction?.paymentMethod === 'pix';
 
           return (
             <article
@@ -317,14 +342,10 @@ export function PricingPlansSection({
                 <p className="mt-2 text-sm text-gray-400">{plan.description}</p>
                 <p className="mt-4 text-4xl font-black text-primary">
                   {formatCurrency(plan.price)}
-                  <span className="text-sm font-medium text-gray-400">
-                    {isRecurringFlow ? '/mês' : ' pagamento avulso'}
-                  </span>
+                  <span className="text-sm font-medium text-gray-400">/mês</span>
                 </p>
                 <p className="mt-2 inline-flex items-center rounded-full border border-emerald-400/35 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium leading-snug text-emerald-200 sm:text-xs">
-                  {isRecurringFlow
-                    ? `Teste gratuito por ${plan.trialDays} dias com acesso completo.`
-                    : 'Acesso liberado por 30 dias apos a confirmacao do pagamento.'}
+                  {`Teste gratuito por ${plan.trialDays} dias no cartão. No Pix, a ativação ocorre após a confirmação.`}
                 </p>
               </div>
 
@@ -337,25 +358,131 @@ export function PricingPlansSection({
                 ))}
               </ul>
 
-              <button
-                type="button"
-                onClick={() => handlePlanSelect(plan.id)}
-                disabled={busy || current}
-                className={[
-                  'mt-7 w-full rounded-xl px-4 py-3 text-sm font-bold transition-colors',
-                  current
-                    ? 'cursor-not-allowed bg-emerald-500/20 text-emerald-300'
-                    : recommended
-                    ? 'bg-primary text-black hover:bg-orange-500'
-                    : 'bg-white text-black hover:bg-gray-200',
-                ].join(' ')}
-              >
-                {busy ? 'Redirecionando...' : current ? 'Plano atual' : plan.ctaLabel}
-              </button>
+              <div className="mt-7 space-y-2">
+                <button
+                  type="button"
+                  onClick={() => handlePlanSelect(plan.id, 'card')}
+                  disabled={planBusy || current}
+                  className={[
+                    'w-full rounded-xl px-4 py-3 text-sm font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-75',
+                    current
+                      ? 'bg-emerald-500/20 text-emerald-300'
+                      : recommended
+                      ? 'bg-primary text-black hover:bg-orange-500'
+                      : 'bg-white text-black hover:bg-gray-200',
+                  ].join(' ')}
+                >
+                  {cardBusy ? 'Redirecionando...' : current ? 'Plano atual' : 'Assinar com Cartão'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handlePlanSelect(plan.id, 'pix')}
+                  disabled={planBusy || current}
+                  className={[
+                    'w-full rounded-xl border px-4 py-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-75',
+                    current
+                      ? 'border-emerald-300/40 bg-emerald-500/10 text-emerald-200'
+                      : 'border-cyan-300/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20',
+                  ].join(' ')}
+                >
+                  {pixBusy ? 'Gerando Pix...' : current ? 'Plano atual' : 'Pagar com Pix'}
+                </button>
+
+                <p className="text-center text-[11px] text-gray-500">
+                  Cartão abre checkout Stripe. Pix gera QR Code na tela para pagamento imediato.
+                </p>
+              </div>
             </article>
           );
         })}
       </div>
+
+      <Modal
+        isOpen={Boolean(pixCheckout) && isPixModalOpen}
+        onClose={() => setIsPixModalOpen(false)}
+        title={pixCheckoutPlanId ? `Pagamento Pix · ${PLAN_MAP[pixCheckoutPlanId].name}` : 'Pagamento Pix'}
+        icon={QrCode}
+      >
+        {pixCheckout && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={[
+                'inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em]',
+                pixBadgeClass,
+              ].join(' ')}>
+                {pixStatusLabel}
+              </span>
+              <span className="rounded-full border border-white/15 px-3 py-1 text-xs text-gray-300">
+                Expira em {formatPixExpiration(pixCheckout.expiresAt)}
+              </span>
+            </div>
+
+            <p className="text-sm text-gray-300">
+              Escaneie o QR Code no app do banco ou use o código copia e cola para concluir seu pagamento.
+            </p>
+
+            <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-start">
+              <div className="space-y-3">
+                <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">Código Pix copia e cola</p>
+                  <p className="mt-2 break-all text-xs text-gray-100">
+                    {pixCheckout.pixCopyPaste || 'Código Pix indisponível no momento.'}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={copyPixPayload}
+                    disabled={!pixCheckout.pixCopyPaste}
+                    className="rounded-lg border border-cyan-300/50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-100 transition hover:bg-cyan-300/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Copiar código Pix
+                  </button>
+                  <button
+                    type="button"
+                    onClick={refreshPixStatus}
+                    disabled={pixStatusLoading}
+                    className="rounded-lg bg-cyan-300 px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-black transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {pixStatusLoading ? 'Atualizando...' : 'Já paguei / Atualizar status'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mx-auto rounded-xl border border-cyan-300/30 bg-black/30 p-3">
+                {pixQrCodeSource ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={pixQrCodeSource}
+                    alt="QR Code Pix"
+                    className="h-44 w-44 rounded-lg bg-white p-2 object-contain"
+                  />
+                ) : (
+                  <div className="flex h-44 w-44 items-center justify-center rounded-lg border border-dashed border-cyan-300/40 px-2 text-center text-xs text-cyan-100/80">
+                    QR Code indisponível para esta cobrança.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {pixCheckout.status === 'active' && (
+              <div className="rounded-xl border border-emerald-300/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+                Pagamento confirmado. Sua assinatura foi ativada.
+              </div>
+            )}
+
+            {(pixCheckout.status === 'past_due' ||
+              pixCheckout.status === 'unpaid' ||
+              pixCheckout.status === 'canceled') && (
+              <div className="rounded-xl border border-rose-300/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                Esta cobrança Pix não foi concluída. Gere uma nova cobrança para continuar.
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </section>
   );
 }
