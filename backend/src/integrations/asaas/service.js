@@ -123,18 +123,11 @@ const resolvePixQrCode = async (paymentId) => {
 };
 
 const resolveCustomerName = (barbershop) => {
-  return (
-    barbershop?.owner_name ||
-    barbershop?.name ||
-    'Cliente EasyBarber'
-  );
+  return barbershop?.owner_name || barbershop?.name || 'Cliente EasyBarber';
 };
 
 const resolveCustomerEmail = (barbershop) => {
-  return (
-    barbershop?.email ||
-    'cliente@easybarber.com'
-  );
+  return barbershop?.email || 'cliente@easybarber.com';
 };
 
 const resolveCustomerCpfCnpj = (barbershop) => {
@@ -189,7 +182,15 @@ const buildCustomerPayload = (barbershop) => {
   };
 };
 
-const rethrowAsaasError = (error, fallbackMessage, fallbackCode = 'ASAAS_REQUEST_ERROR') => {
+const rethrowAsaasError = (
+  error,
+  fallbackMessage,
+  fallbackCode = 'ASAAS_REQUEST_ERROR'
+) => {
+  if (error instanceof AppError) {
+    throw error;
+  }
+
   const responseData = error?.response?.data;
   const asaasMessage =
     responseData?.errors?.map((item) => item.description).filter(Boolean).join(' | ') ||
@@ -240,6 +241,14 @@ export const asaasService = {
         idempotencyKey,
       });
     } catch (error) {
+      console.error('ASAAS CUSTOMER ERROR', {
+        message: error?.message,
+        statusCode: error?.statusCode || error?.status || null,
+        code: error?.code || null,
+        details: error?.details || null,
+        payload,
+      });
+
       rethrowAsaasError(
         error,
         'Erro Asaas (POST /customers)',
@@ -268,8 +277,7 @@ export const asaasService = {
       dueDate: resolvedDueDate,
       description,
       externalReference:
-        externalReference ||
-        buildExternalReference({ barbershopId, plan }),
+        externalReference || buildExternalReference({ barbershopId, plan }),
     };
 
     try {
@@ -277,6 +285,14 @@ export const asaasService = {
         idempotencyKey,
       });
     } catch (error) {
+      console.error('ASAAS PAYMENT ERROR', {
+        message: error?.message,
+        statusCode: error?.statusCode || error?.status || null,
+        code: error?.code || null,
+        details: error?.details || null,
+        payload,
+      });
+
       rethrowAsaasError(
         error,
         'Erro Asaas (POST /payments)',
@@ -324,6 +340,14 @@ export const asaasService = {
         idempotencyKey,
       });
     } catch (error) {
+      console.error('ASAAS SUBSCRIPTION ERROR', {
+        message: error?.message,
+        statusCode: error?.statusCode || error?.status || null,
+        code: error?.code || null,
+        details: error?.details || null,
+        payload: subscriptionPayload,
+      });
+
       rethrowAsaasError(
         error,
         'Erro Asaas (POST /subscriptions)',
@@ -369,6 +393,14 @@ export const asaasService = {
     try {
       return await asaasClient.get(`/payments/${paymentId}`);
     } catch (error) {
+      console.error('ASAAS GET PAYMENT ERROR', {
+        message: error?.message,
+        statusCode: error?.statusCode || error?.status || null,
+        code: error?.code || null,
+        details: error?.details || null,
+        paymentId,
+      });
+
       rethrowAsaasError(
         error,
         'Erro Asaas (GET /payments/:id)',
@@ -397,6 +429,14 @@ export const asaasService = {
     try {
       await asaasClient.delete(`/subscriptions/${subscriptionId}`);
     } catch (error) {
+      console.error('ASAAS CANCEL SUBSCRIPTION ERROR', {
+        message: error?.message,
+        statusCode: error?.statusCode || error?.status || null,
+        code: error?.code || null,
+        details: error?.details || null,
+        subscriptionId,
+      });
+
       rethrowAsaasError(
         error,
         'Erro Asaas (DELETE /subscriptions/:id)',
@@ -429,6 +469,14 @@ export const asaasService = {
         subscription: restored,
       };
     } catch (error) {
+      console.error('ASAAS REACTIVATE SUBSCRIPTION ERROR', {
+        message: error?.message,
+        statusCode: error?.statusCode || error?.status || null,
+        code: error?.code || null,
+        details: error?.details || null,
+        subscriptionId,
+      });
+
       throw new AppError(
         'Não foi possível reativar a assinatura Pix no Asaas automaticamente',
         409,
