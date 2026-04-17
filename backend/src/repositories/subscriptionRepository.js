@@ -14,6 +14,7 @@ export const subscriptionRepository = {
   async getBarbershopBillingContext(barbershopId, client = null) {
     const result = await db(client).query(
       `SELECT id, name, owner_name, email, whatsapp, plan,
+              cpf_cnpj,
               stripe_customer_id,
               stripe_subscription_id,
               stripe_price_id,

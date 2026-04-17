@@ -1,5 +1,6 @@
 import { barbershopSettingsRepository } from '../repositories/barbershopSettingsRepository.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
+import { isValidCpfCnpj, normalizeDocumentDigits } from '../utils/cpfCnpj.js';
 
 const ALLOWED_SLOT_INTERVALS = new Set([15, 20, 30, 45, 60]);
 
@@ -61,5 +62,32 @@ export const barbershopSettingsService = {
     }
 
     return settings;
+  },
+
+  async getProfile(barbershopId) {
+    const profile = await barbershopSettingsRepository.findProfileByBarbershopId(barbershopId);
+    if (!profile) {
+      throw new NotFoundError('Barbearia');
+    }
+
+    return profile;
+  },
+
+  async updateProfile(barbershopId, data) {
+    const normalizedCpfCnpj = normalizeDocumentDigits(data.cpfCnpj);
+
+    if (!isValidCpfCnpj(normalizedCpfCnpj)) {
+      throw new ValidationError('CPF/CNPJ inválido', ['Informe um CPF ou CNPJ válido para continuar com o Pix.']);
+    }
+
+    const profile = await barbershopSettingsRepository.updateProfile(barbershopId, {
+      cpfCnpj: normalizedCpfCnpj,
+    });
+
+    if (!profile) {
+      throw new NotFoundError('Barbearia');
+    }
+
+    return profile;
   },
 };

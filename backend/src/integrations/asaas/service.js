@@ -153,26 +153,29 @@ const resolveCustomerCpfCnpj = (barbershop) => {
     }
   }
 
-  const isSandbox = (process.env.ASAAS_BASE_URL || '').includes('sandbox');
-  if (isSandbox) {
-    return '12345678909';
-  }
-
   return null;
 };
 
 const buildCustomerPayload = (barbershop) => {
   const name = resolveCustomerName(barbershop);
   const email = resolveCustomerEmail(barbershop);
-  const mobilePhone = normalizeDigits(barbershop?.whatsapp) || undefined;
+  const mobilePhone = normalizeDigits(barbershop?.whatsapp);
   const cpfCnpj = resolveCustomerCpfCnpj(barbershop);
   const externalReference = barbershop.id;
 
   if (!cpfCnpj) {
     throw new AppError(
-      'CPF/CNPJ da barbearia não encontrado para criação de cliente no Asaas',
+      'CPF/CNPJ é obrigatório para pagamentos via Pix',
       400,
-      'ASAAS_CUSTOMER_DOCUMENT_REQUIRED'
+      'CPF_CNPJ_REQUIRED'
+    );
+  }
+
+  if (!mobilePhone) {
+    throw new AppError(
+      'Telefone da barbearia é obrigatório para pagamentos via Pix',
+      400,
+      'MOBILE_PHONE_REQUIRED'
     );
   }
 

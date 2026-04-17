@@ -5,6 +5,7 @@ import { CheckCircle2, QrCode } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
+import { CpfCnpjModal } from '@/components/billing/CpfCnpjModal';
 import { Modal } from '@/components/ui';
 import {
   billingApi,
@@ -12,9 +13,15 @@ import {
   type PixCheckoutSessionResponse,
   type SubscriptionStatus,
 } from '@/lib/billing';
+import { barbershopProfileApi } from '@/lib/barbershopProfile';
 import { PLAN_MAP, SAAS_PLANS, type PlanId, isPlanId } from '@/lib/plans';
 import { formatCurrency } from '@/lib/formatters';
-import { getApiErrorMessage } from '@/utils/handleApiError';
+import { getApiErrorCode, getApiErrorMessage } from '@/utils/handleApiError';
+import {
+  formatCpfCnpj,
+  isValidCpfCnpj,
+  normalizeCpfCnpjDigits,
+} from '@/utils/cpfCnpj';
 
 const PIX_STORAGE_KEY = 'easybarber:pixCheckout';
 
@@ -115,6 +122,12 @@ export function PricingPlansSection({
   const [pixCheckoutPlanId, setPixCheckoutPlanId] = useState<PlanId | null>(null);
   const [isPixModalOpen, setIsPixModalOpen] = useState(false);
   const [pixStatusLoading, setPixStatusLoading] = useState(false);
+  const [barbershopCpfCnpj, setBarbershopCpfCnpj] = useState<string>('');
+  const [pendingPixPlanId, setPendingPixPlanId] = useState<PlanId | null>(null);
+  const [isCpfCnpjModalOpen, setIsCpfCnpjModalOpen] = useState(false);
+  const [cpfCnpjInput, setCpfCnpjInput] = useState('');
+  const [cpfCnpjError, setCpfCnpjError] = useState<string | null>(null);
+  const [cpfCnpjSaving, setCpfCnpjSaving] = useState(false);
   const { user } = useAuth();
   const { showToast } = useToast();
   const router = useRouter();
@@ -235,6 +248,102 @@ export function PricingPlansSection({
     return currentPlan === planId && (subscriptionStatus === 'active' || subscriptionStatus === 'trialing');
   };
 
+  const openCpfCnpjModal = (planId: PlanId, currentValue = '') => {
+    setPendingPixPlanId(planId);
+    setCpfCnpjInput(formatCpfCnpj(currentValue));
+    setCpfCnpjError(null);
+    setIsCpfCnpjModalOpen(true);
+  };
+
+  const closeCpfCnpjModal = () => {
+    if (cpfCnpjSaving) {
+      return;
+    }
+
+    setIsCpfCnpjModalOpen(false);
+    setPendingPixPlanId(null);
+    setCpfCnpjError(null);
+  };
+
+  const ensureCpfCnpjForPix = async (planId: PlanId) => {
+    if (isValidCpfCnpj(barbershopCpfCnpj)) {
+      return true;
+    }
+
+    try {
+      const profile = await barbershopProfileApi.getProfile();
+      const normalizedCpfCnpj = normalizeCpfCnpjDigits(profile.cpfCnpj);
+
+      if (isValidCpfCnpj(normalizedCpfCnpj)) {
+        setBarbershopCpfCnpj(normalizedCpfCnpj);
+        return true;
+      }
+
+      openCpfCnpjModal(planId, normalizedCpfCnpj);
+      showToast('Antes de pagar com Pix, informe o CPF/CNPJ da barbearia.', 'info');
+      return false;
+    } catch (error: unknown) {
+      const errorCode = getApiErrorCode(error);
+
+      if (errorCode === 'NOT_FOUND' || errorCode === 'CPF_CNPJ_REQUIRED' || errorCode === 'VALIDATION_ERROR') {
+        openCpfCnpjModal(planId);
+        showToast('Antes de pagar com Pix, informe o CPF/CNPJ da barbearia.', 'info');
+        return false;
+      }
+
+      const message = getApiErrorMessage(error, 'Não foi possível validar o CPF/CNPJ da barbearia.');
+      showToast(message, 'error');
+      return false;
+    }
+  };
+
+  const handleCpfCnpjInputChange = (value: string) => {
+    setCpfCnpjInput(formatCpfCnpj(value));
+    if (cpfCnpjError) {
+      setCpfCnpjError(null);
+    }
+  };
+
+  const handleSaveCpfCnpj = async () => {
+    const normalizedCpfCnpj = normalizeCpfCnpjDigits(cpfCnpjInput);
+
+    if (!normalizedCpfCnpj) {
+      setCpfCnpjError('Informe o CPF ou CNPJ para continuar.');
+      return;
+    }
+
+    if (!isValidCpfCnpj(normalizedCpfCnpj)) {
+      setCpfCnpjError('CPF/CNPJ inválido. Verifique os números informados.');
+      return;
+    }
+
+    setCpfCnpjSaving(true);
+
+    try {
+      const profile = await barbershopProfileApi.updateProfile(normalizedCpfCnpj);
+      const savedCpfCnpj = normalizeCpfCnpjDigits(profile.cpfCnpj) || normalizedCpfCnpj;
+
+      setBarbershopCpfCnpj(savedCpfCnpj);
+      setCpfCnpjInput(formatCpfCnpj(savedCpfCnpj));
+      setIsCpfCnpjModalOpen(false);
+      setCpfCnpjError(null);
+      showToast('CPF/CNPJ salvo com sucesso.', 'success');
+
+      const planToContinue = pendingPixPlanId;
+      setPendingPixPlanId(null);
+
+      if (planToContinue) {
+        await handlePlanSelect(planToContinue, 'pix');
+      }
+    } catch (error: unknown) {
+      const message = getApiErrorMessage(error, 'Não foi possível salvar o CPF/CNPJ agora.');
+      setCpfCnpjError(message);
+      showToast(message, 'error');
+    } finally {
+      setCpfCnpjSaving(false);
+    }
+  };
+
   const handlePlanSelect = async (planId: PlanId, paymentMethod: SupportedPaymentMethod) => {
     if (!user) {
       router.push(`/cadastro?plan=${planId}&paymentMethod=${paymentMethod}`);
@@ -249,6 +358,13 @@ export function PricingPlansSection({
     setProcessingAction({ planId, paymentMethod });
 
     try {
+      if (paymentMethod === 'pix') {
+        const hasCpfCnpj = await ensureCpfCnpjForPix(planId);
+        if (!hasCpfCnpj) {
+          return;
+        }
+      }
+
       const session = await billingApi.createCheckoutSession(planId, paymentMethod);
 
       if (paymentMethod === 'card') {
@@ -272,6 +388,14 @@ export function PricingPlansSection({
       setIsPixModalOpen(true);
       showToast('Cobrança Pix criada. Escaneie o QR Code para concluir o pagamento.', 'success');
     } catch (error: unknown) {
+      const errorCode = getApiErrorCode(error);
+
+      if (paymentMethod === 'pix' && errorCode === 'CPF_CNPJ_REQUIRED') {
+        openCpfCnpjModal(planId, barbershopCpfCnpj);
+        showToast('Para continuar no Pix, informe o CPF/CNPJ da barbearia.', 'info');
+        return;
+      }
+
       const message = getApiErrorMessage(error, 'Não foi possível iniciar o checkout no momento.');
       showToast(message, 'error');
     } finally {
@@ -483,6 +607,16 @@ export function PricingPlansSection({
           </div>
         )}
       </Modal>
+
+      <CpfCnpjModal
+        isOpen={isCpfCnpjModalOpen}
+        value={cpfCnpjInput}
+        errorMessage={cpfCnpjError}
+        submitting={cpfCnpjSaving}
+        onChange={handleCpfCnpjInputChange}
+        onClose={closeCpfCnpjModal}
+        onSubmit={handleSaveCpfCnpj}
+      />
     </section>
   );
 }

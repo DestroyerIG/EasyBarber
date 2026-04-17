@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isValidCpfCnpj, normalizeDocumentDigits } from '../../utils/cpfCnpj.js';
 
 export const updateBarbershopSettingsSchema = z.object({
   shopName: z.string().trim().min(2, 'Nome da barbearia deve ter pelo menos 2 caracteres').max(255),
@@ -18,4 +19,18 @@ export const updateBarbershopSettingsSchema = z.object({
     .union([z.literal(''), z.string().url('Webhook deve ser uma URL válida')])
     .optional()
     .default(''),
+});
+
+export const updateBarbershopProfileSchema = z.object({
+  cpfCnpj: z
+    .string()
+    .trim()
+    .min(1, 'CPF/CNPJ é obrigatório')
+    .transform((value) => normalizeDocumentDigits(value))
+    .refine((value) => value.length === 11 || value.length === 14, {
+      message: 'CPF/CNPJ deve ter 11 ou 14 dígitos',
+    })
+    .refine((value) => isValidCpfCnpj(value), {
+      message: 'CPF/CNPJ inválido',
+    }),
 });

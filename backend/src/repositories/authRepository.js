@@ -1,5 +1,18 @@
 import pool from '../config/database.js';
 
+const normalizeCpfCnpj = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const digits = value.replace(/\D+/g, '');
+  if (digits.length !== 11 && digits.length !== 14) {
+    return null;
+  }
+
+  return digits;
+};
+
 const upsertManagedUser = async (client, {
   barbershopId,
   email,
@@ -254,12 +267,22 @@ export const authRepository = {
     return result.rows[0] || null;
   },
 
-  async createBarbershop(client, { name, ownerName, email, whatsapp, plan, desiredPlan }) {
+  async createBarbershop(client, {
+    name,
+    ownerName,
+    email,
+    whatsapp,
+    plan,
+    desiredPlan,
+    cpfCnpj = null,
+  }) {
+    const normalizedCpfCnpj = normalizeCpfCnpj(cpfCnpj);
+
     try {
       const result = await client.query(
-        `INSERT INTO barbershops (name, owner_name, email, whatsapp, plan, desired_plan) 
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-        [name, ownerName, email, whatsapp, plan, desiredPlan]
+        `INSERT INTO barbershops (name, owner_name, email, whatsapp, plan, desired_plan, cpf_cnpj) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [name, ownerName, email, whatsapp, plan, desiredPlan, normalizedCpfCnpj]
       );
       return result.rows[0];
     } catch (error) {

@@ -14,7 +14,10 @@ export { createClientSchema, updateClientSchema } from './clientSchemas.js';
 export { addExpenseSchema, updateExpenseSchema } from './financeSchemas.js';
 export { createServiceSchema, updateServiceSchema } from './serviceSchemas.js';
 export { createBarberSchema, updateBarberSchema } from './barberSchemas.js';
-export { updateBarbershopSettingsSchema } from './barbershopSettingsSchemas.js';
+export {
+	updateBarbershopSettingsSchema,
+	updateBarbershopProfileSchema,
+} from './barbershopSettingsSchemas.js';
 export { createCheckoutSessionSchema } from './subscriptionSchemas.js';
 export {
 	createBillingCheckoutSessionSchema,

@@ -15,6 +15,10 @@ const mapRowToSettings = (row) => ({
   customWebhookUrl: row.custom_webhook_url,
 });
 
+const mapRowToProfile = (row) => ({
+  cpfCnpj: row.cpf_cnpj || null,
+});
+
 class BarbershopSettingsRepository extends BaseRepository {
   constructor() {
     super('barbershop_settings');
@@ -46,6 +50,40 @@ class BarbershopSettingsRepository extends BaseRepository {
     }
 
     return mapRowToSettings(result.rows[0]);
+  }
+
+  async findProfileByBarbershopId(barbershopId, executor = this.pool) {
+    const result = await executor.query(
+      `SELECT b.cpf_cnpj
+       FROM barbershops b
+       WHERE b.id = $1
+         AND b.active = true`,
+      [barbershopId]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return mapRowToProfile(result.rows[0]);
+  }
+
+  async updateProfile(barbershopId, payload, executor = this.pool) {
+    const result = await executor.query(
+      `UPDATE barbershops
+       SET cpf_cnpj = $2,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+         AND active = true
+       RETURNING cpf_cnpj`,
+      [barbershopId, payload.cpfCnpj]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return mapRowToProfile(result.rows[0]);
   }
 
   async upsert(barbershopId, payload) {

@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS barbershops (
     owner_name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     whatsapp VARCHAR(20) NOT NULL,
+    cpf_cnpj VARCHAR(20),
     plan VARCHAR(50) NOT NULL DEFAULT 'basico'
         CHECK (plan IN ('basico', 'profissional', 'premium')),
     desired_plan VARCHAR(50) NOT NULL DEFAULT 'basico'

@@ -11,9 +11,12 @@ import {
 	createBarberSchema,
 	updateBarberSchema,
 	updateBarbershopSettingsSchema,
+	updateBarbershopProfileSchema,
 } from '../validators/schemas/index.js';
 import {
 	getBarbershopSettings,
+	getBarbershopProfile,
+	updateBarbershopProfile,
 	updateBarbershopSettings,
 } from '../controllers/barbershopSettingsController.js';
 
@@ -31,5 +34,8 @@ router.delete('/barbers/:id', authMiddleware, requireTenantRoles, requireFeature
 
 router.get('/settings', authMiddleware, requireTenantRoles, requireFeature('advanced_admin'), getBarbershopSettings);
 router.put('/settings', authMiddleware, requireTenantRoles, requireFeature('advanced_admin'), validate({ body: updateBarbershopSettingsSchema }), updateBarbershopSettings);
+
+router.get('/profile', authMiddleware, requireTenantRoles, requireFeature('billing'), getBarbershopProfile);
+router.put('/profile', authMiddleware, requireTenantRoles, requireFeature('billing'), validate({ body: updateBarbershopProfileSchema }), updateBarbershopProfile);
 
 export default router;
