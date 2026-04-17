@@ -9,12 +9,13 @@ const PLAN_VALUES = Object.freeze({
 });
 
 const normalizeDigits = (value) => {
-  if (typeof value !== 'string') {
+  if (value === undefined || value === null) {
     return null;
   }
 
-  const digits = value.replace(/\D+/g, '');
-  return digits.length >= 10 && digits.length <= 15 ? digits : null;
+  const stringValue = String(value);
+  const digits = stringValue.replace(/\D+/g, '');
+  return digits.length >= 10 && digits.length <= 18 ? digits : null;
 };
 
 const resolvePlanValue = (plan) => {
@@ -96,8 +97,7 @@ const findCustomerByExternalReference = async (externalReference) => {
     },
   });
 
-  const customer = response?.data?.[0] || null;
-  return customer;
+  return response?.data?.[0] || null;
 };
 
 const findMostRecentPaymentBySubscription = async (subscriptionId) => {
@@ -122,12 +122,98 @@ const resolvePixQrCode = async (paymentId) => {
   }
 };
 
+const resolveCustomerName = (barbershop) => {
+  return (
+    barbershop?.owner_name ||
+    barbershop?.name ||
+    'Cliente EasyBarber'
+  );
+};
+
+const resolveCustomerEmail = (barbershop) => {
+  return (
+    barbershop?.email ||
+    'cliente@easybarber.com'
+  );
+};
+
+const resolveCustomerCpfCnpj = (barbershop) => {
+  const candidates = [
+    barbershop?.cpf_cnpj,
+    barbershop?.cpfCnpj,
+    barbershop?.document,
+    barbershop?.cpf,
+    barbershop?.cnpj,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeDigits(candidate);
+    if (normalized && (normalized.length === 11 || normalized.length === 14)) {
+      return normalized;
+    }
+  }
+
+  const isSandbox = (process.env.ASAAS_BASE_URL || '').includes('sandbox');
+  if (isSandbox) {
+    return '12345678909';
+  }
+
+  return null;
+};
+
+const buildCustomerPayload = (barbershop) => {
+  const name = resolveCustomerName(barbershop);
+  const email = resolveCustomerEmail(barbershop);
+  const mobilePhone = normalizeDigits(barbershop?.whatsapp) || undefined;
+  const cpfCnpj = resolveCustomerCpfCnpj(barbershop);
+  const externalReference = barbershop.id;
+
+  if (!cpfCnpj) {
+    throw new AppError(
+      'CPF/CNPJ da barbearia não encontrado para criação de cliente no Asaas',
+      400,
+      'ASAAS_CUSTOMER_DOCUMENT_REQUIRED'
+    );
+  }
+
+  return {
+    name,
+    email,
+    mobilePhone,
+    cpfCnpj,
+    externalReference,
+    notificationDisabled: false,
+  };
+};
+
+const rethrowAsaasError = (error, fallbackMessage, fallbackCode = 'ASAAS_REQUEST_ERROR') => {
+  const responseData = error?.response?.data;
+  const asaasMessage =
+    responseData?.errors?.map((item) => item.description).filter(Boolean).join(' | ') ||
+    responseData?.message ||
+    error?.message ||
+    fallbackMessage;
+
+  const appError = new AppError(
+    asaasMessage || fallbackMessage,
+    error?.response?.status || 502,
+    fallbackCode
+  );
+
+  appError.details = responseData || null;
+  throw appError;
+};
+
 export const asaasService = {
   resolvePlanValue,
 
   async createOrGetCustomer({ barbershop, idempotencyKey = null }) {
     if (!barbershop?.id) {
-      throw new AppError('Barbearia inválida para criação de cliente Asaas', 400, 'INVALID_BARBERSHOP');
+      throw new AppError(
+        'Barbearia inválida para criação de cliente Asaas',
+        400,
+        'INVALID_BARBERSHOP'
+      );
     }
 
     if (barbershop.provider_customer_id && barbershop.provider === 'asaas') {
@@ -144,17 +230,19 @@ export const asaasService = {
       return existing;
     }
 
-    const payload = {
-      name: barbershop.owner_name || barbershop.name,
-      email: barbershop.email || undefined,
-      mobilePhone: normalizeDigits(barbershop.whatsapp) || undefined,
-      externalReference,
-      notificationDisabled: false,
-    };
+    const payload = buildCustomerPayload(barbershop);
 
-    return asaasClient.post('/customers', payload, {
-      idempotencyKey,
-    });
+    try {
+      return await asaasClient.post('/customers', payload, {
+        idempotencyKey,
+      });
+    } catch (error) {
+      rethrowAsaasError(
+        error,
+        'Erro Asaas (POST /customers)',
+        'ASAAS_CUSTOMER_CREATE_ERROR'
+      );
+    }
   },
 
   async createPixCharge({
@@ -181,9 +269,17 @@ export const asaasService = {
         buildExternalReference({ barbershopId, plan }),
     };
 
-    return asaasClient.post('/payments', payload, {
-      idempotencyKey,
-    });
+    try {
+      return await asaasClient.post('/payments', payload, {
+        idempotencyKey,
+      });
+    } catch (error) {
+      rethrowAsaasError(
+        error,
+        'Erro Asaas (POST /payments)',
+        'ASAAS_PIX_PAYMENT_CREATE_ERROR'
+      );
+    }
   },
 
   async createPixSubscription({
@@ -218,9 +314,19 @@ export const asaasService = {
       }),
     };
 
-    const subscription = await asaasClient.post('/subscriptions', subscriptionPayload, {
-      idempotencyKey,
-    });
+    let subscription;
+
+    try {
+      subscription = await asaasClient.post('/subscriptions', subscriptionPayload, {
+        idempotencyKey,
+      });
+    } catch (error) {
+      rethrowAsaasError(
+        error,
+        'Erro Asaas (POST /subscriptions)',
+        'ASAAS_SUBSCRIPTION_CREATE_ERROR'
+      );
+    }
 
     let payment = await findMostRecentPaymentBySubscription(subscription.id);
 
@@ -257,7 +363,15 @@ export const asaasService = {
       throw new AppError('paymentId é obrigatório', 400, 'INVALID_PAYMENT');
     }
 
-    return asaasClient.get(`/payments/${paymentId}`);
+    try {
+      return await asaasClient.get(`/payments/${paymentId}`);
+    } catch (error) {
+      rethrowAsaasError(
+        error,
+        'Erro Asaas (GET /payments/:id)',
+        'ASAAS_PAYMENT_FETCH_ERROR'
+      );
+    }
   },
 
   async getPaymentWithPixData(paymentId) {
@@ -277,7 +391,15 @@ export const asaasService = {
       throw new AppError('subscriptionId é obrigatório', 400, 'INVALID_SUBSCRIPTION');
     }
 
-    await asaasClient.delete(`/subscriptions/${subscriptionId}`);
+    try {
+      await asaasClient.delete(`/subscriptions/${subscriptionId}`);
+    } catch (error) {
+      rethrowAsaasError(
+        error,
+        'Erro Asaas (DELETE /subscriptions/:id)',
+        'ASAAS_SUBSCRIPTION_CANCEL_ERROR'
+      );
+    }
 
     return {
       canceled: true,
@@ -291,9 +413,13 @@ export const asaasService = {
     }
 
     try {
-      const restored = await asaasClient.post(`/subscriptions/${subscriptionId}/restore`, {}, {
-        idempotencyKey: `restore:${subscriptionId}`,
-      });
+      const restored = await asaasClient.post(
+        `/subscriptions/${subscriptionId}/restore`,
+        {},
+        {
+          idempotencyKey: `restore:${subscriptionId}`,
+        }
+      );
 
       return {
         restored: true,
