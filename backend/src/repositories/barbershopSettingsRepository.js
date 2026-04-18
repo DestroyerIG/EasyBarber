@@ -19,6 +19,15 @@ const mapRowToProfile = (row) => ({
   cpfCnpj: row.cpf_cnpj || null,
 });
 
+const mapRowToOperationalSettings = (row) => ({
+  openingTime: row.opening_time,
+  closingTime: row.closing_time,
+  slotIntervalMinutes: row.slot_interval_minutes,
+  allowWalkins: row.allow_walkins,
+  autoConfirmAppointments: row.auto_confirm_appointments,
+  timezone: row.timezone,
+});
+
 class BarbershopSettingsRepository extends BaseRepository {
   constructor() {
     super('barbershop_settings');
@@ -50,6 +59,29 @@ class BarbershopSettingsRepository extends BaseRepository {
     }
 
     return mapRowToSettings(result.rows[0]);
+  }
+
+  async findOperationalSettingsByBarbershopId(barbershopId, executor = this.pool) {
+    const result = await executor.query(
+      `SELECT
+         to_char(s.opening_time, 'HH24:MI') AS opening_time,
+         to_char(s.closing_time, 'HH24:MI') AS closing_time,
+         s.slot_interval_minutes,
+         s.allow_walkins,
+         s.auto_confirm_appointments,
+         COALESCE(NULLIF(to_jsonb(s) ->> 'timezone', ''), NULLIF(to_jsonb(b) ->> 'timezone', '')) AS timezone
+       FROM barbershops b
+       LEFT JOIN barbershop_settings s ON s.barbershop_id = b.id
+       WHERE b.id = $1 AND b.active = true
+       LIMIT 1`,
+      [barbershopId]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return mapRowToOperationalSettings(result.rows[0]);
   }
 
   async findProfileByBarbershopId(barbershopId, executor = this.pool) {
