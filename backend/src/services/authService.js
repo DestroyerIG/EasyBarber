@@ -206,6 +206,7 @@ const registerWithLegacyFlow = async ({
   ownerName,
   email,
   whatsapp,
+  cpfCnpj,
   password,
   desiredPlan,
 }) => {
@@ -224,6 +225,7 @@ const registerWithLegacyFlow = async ({
       ownerName,
       email: normalizedEmail,
       whatsapp,
+      cpfCnpj,
       plan,
       desiredPlan: onboardingDesiredPlan,
     });
@@ -317,6 +319,7 @@ const registerWithSupabasePrimaryFlow = async ({
   ownerName,
   email,
   whatsapp,
+  cpfCnpj,
   password,
   desiredPlan,
 }) => {
@@ -399,6 +402,7 @@ const registerWithSupabasePrimaryFlow = async ({
       barbershopName,
       ownerName,
       whatsapp,
+      cpfCnpj,
       desiredPlan: onboardingDesiredPlan,
       passwordHash,
     });
@@ -568,6 +572,7 @@ const syncSupabaseVerifiedIdentity = async ({ email, userId, verifiedAt }) => {
         ownerName: pendingRegistration.owner_name,
         email: pendingRegistration.email,
         whatsapp: pendingRegistration.whatsapp,
+        cpfCnpj: pendingRegistration.cpf_cnpj,
         plan,
         desiredPlan,
       });
@@ -674,6 +679,7 @@ export const authService = {
     ownerName,
     email,
     whatsapp,
+    cpfCnpj,
     password,
     desiredPlan,
   }) {
@@ -683,6 +689,7 @@ export const authService = {
         ownerName,
         email,
         whatsapp,
+        cpfCnpj,
         password,
         desiredPlan,
       });
@@ -693,6 +700,7 @@ export const authService = {
       ownerName,
       email,
       whatsapp,
+      cpfCnpj,
       password,
       desiredPlan,
     });

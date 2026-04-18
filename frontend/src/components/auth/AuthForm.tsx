@@ -10,6 +10,7 @@ import { isPlanId, PLAN_MAP, SAAS_PLANS, type PlanId } from '@/lib/plans';
 import { formatCurrency } from '@/lib/formatters';
 import api from '@/lib/api';
 import { getApiErrorCode, getApiErrorMessage } from '@/utils/handleApiError';
+import { formatCpfCnpj, isValidCpfCnpj, normalizeCpfCnpjDigits } from '@/utils/cpfCnpj';
 import easyBarberLogo from '@/icons/easybarber.png';
 
 type AuthMode = 'login' | 'register';
@@ -43,12 +44,14 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
   const [verificationNotice, setVerificationNotice] = useState<string | null>(null);
   const [verificationEmail, setVerificationEmail] = useState('');
   const [verificationSent, setVerificationSent] = useState(false);
+  const [cpfCnpjValidationError, setCpfCnpjValidationError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     barbershopName: '',
     ownerName: '',
     whatsapp: '',
+    cpfCnpj: '',
   });
 
   const { login, register } = useAuth();
@@ -72,7 +75,22 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
   }, [isLogin]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+    const { name, value } = e.target;
+
+    if (name === 'cpfCnpj') {
+      setFormData((prev) => ({
+        ...prev,
+        cpfCnpj: formatCpfCnpj(value),
+      }));
+
+      if (cpfCnpjValidationError) {
+        setCpfCnpjValidationError(null);
+      }
+
+      return;
+    }
+
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handlePlanChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -92,11 +110,28 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
         await login(formData.email, formData.password);
         showToast('Login realizado com sucesso.', 'success');
       } else {
+        const normalizedCpfCnpj = normalizeCpfCnpjDigits(formData.cpfCnpj);
+
+        if (!normalizedCpfCnpj) {
+          setCpfCnpjValidationError('CPF/CNPJ é obrigatório.');
+          showToast('Informe o CPF/CNPJ para concluir o cadastro.', 'error');
+          return;
+        }
+
+        if (!isValidCpfCnpj(normalizedCpfCnpj)) {
+          setCpfCnpjValidationError('CPF/CNPJ inválido. Verifique os dados informados.');
+          showToast('CPF/CNPJ inválido. Verifique os dados informados.', 'error');
+          return;
+        }
+
+        setCpfCnpjValidationError(null);
+
         const result = await register({
           barbershopName: formData.barbershopName,
           ownerName: formData.ownerName,
           email: formData.email,
           whatsapp: formData.whatsapp,
+          cpfCnpj: normalizedCpfCnpj,
           password: formData.password,
           desiredPlan,
         });
@@ -274,6 +309,29 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
 
                 <div>
                   <label
+                    htmlFor="register-cpf-cnpj"
+                    className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-gray-400"
+                  >
+                    CPF/CNPJ
+                  </label>
+                  <input
+                    id="register-cpf-cnpj"
+                    type="text"
+                    name="cpfCnpj"
+                    placeholder="Digite o CPF ou CNPJ"
+                    value={formData.cpfCnpj}
+                    onChange={handleChange}
+                    required
+                    maxLength={18}
+                    className="input"
+                  />
+                  {cpfCnpjValidationError && (
+                    <p className="mt-2 text-sm text-rose-300">{cpfCnpjValidationError}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label
                     htmlFor="desiredPlan"
                     className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400"
                   >
@@ -320,6 +378,17 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
               minLength={isLogin ? 1 : 8}
               className="input"
             />
+
+            {isLogin && (
+              <div className="-mt-2 text-right">
+                <Link
+                  href="/esqueci-senha"
+                  className="text-xs font-semibold text-primary transition hover:text-orange-400"
+                >
+                  Esqueceu sua senha?
+                </Link>
+              </div>
+            )}
 
             <button
               type="submit"

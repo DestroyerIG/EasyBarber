@@ -354,51 +354,107 @@ export const authRepository = {
     barbershopName,
     ownerName,
     whatsapp,
+    cpfCnpj,
     desiredPlan,
     passwordHash,
   }) {
-    const result = await client.query(
-      `INSERT INTO pending_registrations (
-         email,
-         supabase_user_id,
-         barbershop_name,
-         owner_name,
-         whatsapp,
-         desired_plan,
-         password_hash,
-         auth_provider,
-         status,
-         verification_sent_at
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'supabase', 'pending', NOW())
-       ON CONFLICT (email)
-       DO UPDATE SET
-         supabase_user_id = COALESCE(EXCLUDED.supabase_user_id, pending_registrations.supabase_user_id),
-         barbershop_name = EXCLUDED.barbershop_name,
-         owner_name = EXCLUDED.owner_name,
-         whatsapp = EXCLUDED.whatsapp,
-         desired_plan = EXCLUDED.desired_plan,
-         password_hash = EXCLUDED.password_hash,
-         auth_provider = 'supabase',
-         status = 'pending',
-         verification_sent_at = NOW(),
-         confirmed_at = NULL
-       RETURNING id,
-                 email,
-                 supabase_user_id,
-                 barbershop_name,
-                 owner_name,
-                 whatsapp,
-                 desired_plan,
-                 password_hash,
-                 auth_provider,
-                 status,
-                 verification_sent_at,
-                 confirmed_at`,
-      [email, supabaseUserId, barbershopName, ownerName, whatsapp, desiredPlan, passwordHash]
-    );
+    const normalizedCpfCnpj = normalizeCpfCnpj(cpfCnpj);
 
-    return result.rows[0] || null;
+    try {
+      const result = await client.query(
+        `INSERT INTO pending_registrations (
+           email,
+           supabase_user_id,
+           barbershop_name,
+           owner_name,
+           whatsapp,
+           cpf_cnpj,
+           desired_plan,
+           password_hash,
+           auth_provider,
+           status,
+           verification_sent_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'supabase', 'pending', NOW())
+         ON CONFLICT (email)
+         DO UPDATE SET
+           supabase_user_id = COALESCE(EXCLUDED.supabase_user_id, pending_registrations.supabase_user_id),
+           barbershop_name = EXCLUDED.barbershop_name,
+           owner_name = EXCLUDED.owner_name,
+           whatsapp = EXCLUDED.whatsapp,
+           cpf_cnpj = EXCLUDED.cpf_cnpj,
+           desired_plan = EXCLUDED.desired_plan,
+           password_hash = EXCLUDED.password_hash,
+           auth_provider = 'supabase',
+           status = 'pending',
+           verification_sent_at = NOW(),
+           confirmed_at = NULL
+         RETURNING id,
+                   email,
+                   supabase_user_id,
+                   barbershop_name,
+                   owner_name,
+                   whatsapp,
+                   cpf_cnpj,
+                   desired_plan,
+                   password_hash,
+                   auth_provider,
+                   status,
+                   verification_sent_at,
+                   confirmed_at`,
+        [email, supabaseUserId, barbershopName, ownerName, whatsapp, normalizedCpfCnpj, desiredPlan, passwordHash]
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code !== '42703') {
+        throw error;
+      }
+
+      const legacyResult = await client.query(
+        `INSERT INTO pending_registrations (
+           email,
+           supabase_user_id,
+           barbershop_name,
+           owner_name,
+           whatsapp,
+           desired_plan,
+           password_hash,
+           auth_provider,
+           status,
+           verification_sent_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'supabase', 'pending', NOW())
+         ON CONFLICT (email)
+         DO UPDATE SET
+           supabase_user_id = COALESCE(EXCLUDED.supabase_user_id, pending_registrations.supabase_user_id),
+           barbershop_name = EXCLUDED.barbershop_name,
+           owner_name = EXCLUDED.owner_name,
+           whatsapp = EXCLUDED.whatsapp,
+           desired_plan = EXCLUDED.desired_plan,
+           password_hash = EXCLUDED.password_hash,
+           auth_provider = 'supabase',
+           status = 'pending',
+           verification_sent_at = NOW(),
+           confirmed_at = NULL
+         RETURNING id,
+                   email,
+                   supabase_user_id,
+                   barbershop_name,
+                   owner_name,
+                   whatsapp,
+                   NULL::VARCHAR AS cpf_cnpj,
+                   desired_plan,
+                   password_hash,
+                   auth_provider,
+                   status,
+                   verification_sent_at,
+                   confirmed_at`,
+        [email, supabaseUserId, barbershopName, ownerName, whatsapp, desiredPlan, passwordHash]
+      );
+
+      return legacyResult.rows[0] || null;
+    }
   },
 
   async findPendingRegistrationByEmail(email) {
@@ -410,6 +466,7 @@ export const authRepository = {
                 barbershop_name,
                 owner_name,
                 whatsapp,
+                cpf_cnpj,
                 desired_plan,
                 password_hash,
                 auth_provider,
@@ -429,6 +486,31 @@ export const authRepository = {
         return null;
       }
 
+      if (error?.code === '42703') {
+        const legacyResult = await pool.query(
+          `SELECT id,
+                  email,
+                  supabase_user_id,
+                  barbershop_name,
+                  owner_name,
+                  whatsapp,
+                  NULL::VARCHAR AS cpf_cnpj,
+                  desired_plan,
+                  password_hash,
+                  auth_provider,
+                  status,
+                  verification_sent_at,
+                  confirmed_at
+           FROM pending_registrations
+           WHERE LOWER(email) = LOWER($1)
+             AND status = 'pending'
+           LIMIT 1`,
+          [email]
+        );
+
+        return legacyResult.rows[0] || null;
+      }
+
       throw error;
     }
   },
@@ -442,6 +524,7 @@ export const authRepository = {
                 barbershop_name,
                 owner_name,
                 whatsapp,
+                cpf_cnpj,
                 desired_plan,
                 password_hash,
                 auth_provider,
@@ -460,6 +543,32 @@ export const authRepository = {
     } catch (error) {
       if (error?.code === '42P01') {
         return null;
+      }
+
+      if (error?.code === '42703') {
+        const legacyResult = await client.query(
+          `SELECT id,
+                  email,
+                  supabase_user_id,
+                  barbershop_name,
+                  owner_name,
+                  whatsapp,
+                  NULL::VARCHAR AS cpf_cnpj,
+                  desired_plan,
+                  password_hash,
+                  auth_provider,
+                  status,
+                  verification_sent_at,
+                  confirmed_at
+           FROM pending_registrations
+           WHERE LOWER(email) = LOWER($1)
+             AND status = 'pending'
+           LIMIT 1
+           FOR UPDATE`,
+          [email]
+        );
+
+        return legacyResult.rows[0] || null;
       }
 
       throw error;

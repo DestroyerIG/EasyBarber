@@ -157,6 +157,7 @@ describe('Auth API — /api/v1/auth', () => {
       ownerName: 'João Silva',
       email: 'joao@teste.com',
       whatsapp: '11999999999',
+      cpfCnpj: '52998224725',
       password: 'Senha123!',
     };
 
@@ -210,6 +211,7 @@ describe('Auth API — /api/v1/auth', () => {
         expect.objectContaining({
           plan: 'basico',
           desiredPlan: 'premium',
+          cpfCnpj: '52998224725',
         })
       );
     });
@@ -219,6 +221,7 @@ describe('Auth API — /api/v1/auth', () => {
         barbershopName: 'Teste',
         ownerName: 'João',
         whatsapp: '11999999999',
+        cpfCnpj: '52998224725',
         password: 'Senha123!',
       });
 
@@ -235,6 +238,17 @@ describe('Auth API — /api/v1/auth', () => {
 
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
+    });
+
+    it('deve retornar 400 ao enviar CPF/CNPJ inválido', async () => {
+      const res = await request.post('/api/v1/auth/register').send({
+        ...validBody,
+        cpfCnpj: '12345678900',
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
     });
 
     it('deve retornar 409 ao registrar email duplicado', async () => {

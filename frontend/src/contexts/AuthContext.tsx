@@ -32,6 +32,7 @@ interface RegisterData {
   ownerName: string;
   email: string;
   whatsapp: string;
+  cpfCnpj: string;
   password: string;
   desiredPlan: PlanId;
 }

@@ -1,4 +1,5 @@
 import { AppError } from '../../utils/errors.js';
+import { isValidCpfCnpj, normalizeDocumentDigits } from '../../utils/cpfCnpj.js';
 import { asaasClient } from './client.js';
 import { asaasMapper } from './mapper.js';
 
@@ -8,7 +9,7 @@ const PLAN_VALUES = Object.freeze({
   premium: 199.9,
 });
 
-const normalizeDigits = (value) => {
+const normalizePhoneDigits = (value) => {
   if (value === undefined || value === null) {
     return null;
   }
@@ -134,14 +135,11 @@ const resolveCustomerCpfCnpj = (barbershop) => {
   const candidates = [
     barbershop?.cpf_cnpj,
     barbershop?.cpfCnpj,
-    barbershop?.document,
-    barbershop?.cpf,
-    barbershop?.cnpj,
   ];
 
   for (const candidate of candidates) {
-    const normalized = normalizeDigits(candidate);
-    if (normalized && (normalized.length === 11 || normalized.length === 14)) {
+    const normalized = normalizeDocumentDigits(candidate);
+    if (isValidCpfCnpj(normalized)) {
       return normalized;
     }
   }
@@ -152,13 +150,13 @@ const resolveCustomerCpfCnpj = (barbershop) => {
 const buildCustomerPayload = (barbershop) => {
   const name = resolveCustomerName(barbershop);
   const email = resolveCustomerEmail(barbershop);
-  const mobilePhone = normalizeDigits(barbershop?.whatsapp);
+  const mobilePhone = normalizePhoneDigits(barbershop?.whatsapp);
   const cpfCnpj = resolveCustomerCpfCnpj(barbershop);
   const externalReference = barbershop.id;
 
   if (!cpfCnpj) {
     throw new AppError(
-      'CPF/CNPJ é obrigatório para pagamentos via Pix',
+      'Cadastre CPF ou CNPJ antes de gerar pagamento via PIX.',
       400,
       'CPF_CNPJ_REQUIRED'
     );
@@ -208,6 +206,44 @@ const rethrowAsaasError = (
   throw appError;
 };
 
+const syncExistingCustomer = async ({
+  customerId,
+  payload,
+  idempotencyKey,
+  allowNotFound = false,
+}) => {
+  try {
+    return await asaasClient.put(`/customers/${customerId}`, payload, {
+      idempotencyKey,
+    });
+  } catch (error) {
+    const statusCode =
+      error?.statusCode ||
+      error?.details?.statusCode ||
+      error?.response?.status ||
+      null;
+
+    if (allowNotFound && statusCode === 404) {
+      return null;
+    }
+
+    console.error('ASAAS CUSTOMER SYNC ERROR', {
+      message: error?.message,
+      statusCode,
+      code: error?.code || null,
+      details: error?.details || null,
+      customerId,
+      payload,
+    });
+
+    rethrowAsaasError(
+      error,
+      'Erro Asaas (PUT /customers/:id)',
+      'ASAAS_CUSTOMER_UPDATE_ERROR'
+    );
+  }
+};
+
 export const asaasService = {
   resolvePlanValue,
 
@@ -220,21 +256,33 @@ export const asaasService = {
       );
     }
 
+    const payload = buildCustomerPayload(barbershop);
+
     if (barbershop.provider_customer_id && barbershop.provider === 'asaas') {
-      return {
-        id: barbershop.provider_customer_id,
-        externalReference: barbershop.id,
-      };
+      const syncedCustomer = await syncExistingCustomer({
+        customerId: barbershop.provider_customer_id,
+        payload,
+        idempotencyKey,
+        allowNotFound: true,
+      });
+
+      if (syncedCustomer?.id) {
+        return syncedCustomer;
+      }
     }
 
     const externalReference = barbershop.id;
 
     const existing = await findCustomerByExternalReference(externalReference);
     if (existing?.id) {
-      return existing;
-    }
+      const syncedCustomer = await syncExistingCustomer({
+        customerId: existing.id,
+        payload,
+        idempotencyKey,
+      });
 
-    const payload = buildCustomerPayload(barbershop);
+      return syncedCustomer || existing;
+    }
 
     try {
       return await asaasClient.post('/customers', payload, {
@@ -263,12 +311,14 @@ export const asaasService = {
     plan,
     amount,
     dueDate,
+    cpfCnpj = null,
     description,
     externalReference,
     idempotencyKey = null,
   }) {
     const resolvedAmount = typeof amount === 'number' ? amount : resolvePlanValue(plan);
     const resolvedDueDate = toAsaasDate(dueDate || addDays(new Date(), 3));
+    const normalizedCpfCnpj = normalizeDocumentDigits(cpfCnpj);
 
     const payload = {
       customer: customerId,
@@ -278,6 +328,7 @@ export const asaasService = {
       description,
       externalReference:
         externalReference || buildExternalReference({ barbershopId, plan }),
+      ...(isValidCpfCnpj(normalizedCpfCnpj) ? { cpfCnpj: normalizedCpfCnpj } : {}),
     };
 
     try {
@@ -308,6 +359,16 @@ export const asaasService = {
     amount,
     idempotencyKey = null,
   }) {
+    const payerCpfCnpj = resolveCustomerCpfCnpj(barbershop);
+
+    if (!payerCpfCnpj) {
+      throw new AppError(
+        'Cadastre CPF ou CNPJ antes de gerar pagamento via PIX.',
+        400,
+        'CPF_CNPJ_REQUIRED'
+      );
+    }
+
     const customer = await this.createOrGetCustomer({
       barbershop,
       idempotencyKey,
@@ -364,6 +425,7 @@ export const asaasService = {
         plan,
         amount: resolvedAmount,
         dueDate: resolvedDueDate,
+        cpfCnpj: payerCpfCnpj,
         description,
         externalReference: buildExternalReference({
           barbershopId: barbershop.id,

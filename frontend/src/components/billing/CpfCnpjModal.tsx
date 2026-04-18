@@ -40,13 +40,13 @@ export function CpfCnpjModal({
 
         <div>
           <label htmlFor="cpf-cnpj-input" className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">
-            CPF ou CNPJ
+            CPF/CNPJ
           </label>
           <input
             id="cpf-cnpj-input"
             value={value}
             onChange={(event) => onChange(event.target.value)}
-            placeholder="000.000.000-00 ou 00.000.000/0000-00"
+            placeholder="Digite o CPF ou CNPJ"
             maxLength={18}
             className={[
               'w-full rounded-xl border bg-black/30 px-4 py-3 text-sm text-white outline-none transition',

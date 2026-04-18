@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { passwordSchema } from './common.js';
+import { isValidCpfCnpj, normalizeDocumentDigits } from '../../utils/cpfCnpj.js';
 
 const planSchema = z.enum(['basico', 'profissional', 'premium']);
 
@@ -8,6 +9,17 @@ export const registerSchema = z.object({
   ownerName: z.string().min(2, 'Nome do responsável deve ter pelo menos 2 caracteres').max(255),
   email: z.string().email('Email inválido').max(255),
   whatsapp: z.string().min(10, 'WhatsApp inválido').max(20),
+  cpfCnpj: z
+    .string()
+    .trim()
+    .min(1, 'CPF/CNPJ é obrigatório')
+    .transform((value) => normalizeDocumentDigits(value))
+    .refine((value) => value.length === 11 || value.length === 14, {
+      message: 'CPF/CNPJ deve ter 11 ou 14 dígitos',
+    })
+    .refine((value) => isValidCpfCnpj(value), {
+      message: 'CPF/CNPJ inválido',
+    }),
   password: passwordSchema,
   desiredPlan: planSchema.default('basico'),
 });
