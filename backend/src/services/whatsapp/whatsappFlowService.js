@@ -860,6 +860,7 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
 
 export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) => {
   const payloadFromMe = phoneOrPayload && typeof phoneOrPayload === 'object' && !Array.isArray(phoneOrPayload) && isFromMe(phoneOrPayload);
+  const isPayloadInput = phoneOrPayload && typeof phoneOrPayload === 'object' && !Array.isArray(phoneOrPayload);
 
   const {
     normalizedPhone,
@@ -885,6 +886,32 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       : null;
   const allowLidDestination = Boolean(
     phoneExtraction?.sourcePath && phoneExtraction.sourcePath.includes('participant')
+  );
+  const destinationSource = phoneExtraction?.sourcePath
+    || (isPayloadInput ? 'payload_normalized_phone' : 'direct_input');
+
+  logger.info(
+    {
+      phone: normalizedPhone || null,
+      destinationCalculated: normalizedPhone || null,
+      destinationSource,
+      connectedNumber,
+      rawPayloadSummary: payloadSummary,
+      authorResolved: phoneExtraction
+        ? {
+            phone: phoneExtraction.phone,
+            sourcePath: phoneExtraction.sourcePath,
+            candidateType: phoneExtraction.candidateType,
+            confidence: phoneExtraction.confidence,
+            fromMe: phoneExtraction.fromMe,
+            remoteJidOriginal: phoneExtraction.remoteJidOriginal,
+          }
+        : null,
+      eventName: normalizedEventName,
+      messageId: options?.messageId || null,
+      dedupeKey: options?.dedupeKey || null,
+    },
+    'TRACE destino WhatsApp antes da decisao'
   );
 
   const sendContext = {
@@ -955,6 +982,7 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
           connectedNumber,
           knownInstanceNumbers,
           destination: destinationDecision.destination,
+          destinationSource,
           destinationReason: destinationDecision.reason,
           destinationConversationKind: destinationDecision.conversationKind,
         },

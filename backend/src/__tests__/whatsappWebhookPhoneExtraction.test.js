@@ -116,7 +116,7 @@ describe('whatsapp webhook phone extraction', () => {
     );
   });
 
-  it('accepts sender-only messages.upsert payload when text is present and fromMe is false', () => {
+  it('rejects sender-only messages.upsert payload under @lid when participant is absent', () => {
     const payload = {
       event: 'messages.upsert',
       sender: '558396311811@s.whatsapp.net',
@@ -133,12 +133,11 @@ describe('whatsapp webhook phone extraction', () => {
 
     const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
 
-    expect(extraction.phone).toBe('558396311811');
-    expect(extraction.sourcePath).toBe('sender');
-    expect(extraction.confidence).toBe('low');
+    expect(extraction.phone).toBeNull();
+    expect(extraction.sourcePath).toBeNull();
     expect(extraction.rejections).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ sourcePath: 'data.key.remoteJid', reason: 'blocked_jid_suffix' }),
+        expect.objectContaining({ sourcePath: 'sender', reason: 'lid_sender_untrusted' }),
       ])
     );
   });

@@ -992,11 +992,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
   const participant = extractWebhookParticipantCandidate(payload);
   const pushName = extractWebhookPushNameCandidate(payload);
   const incomingText = extractIncomingTextCandidate(payload, options);
-  const allowLidSenderFallback =
-    conversationKind === 'lid' &&
-    LID_SENDER_FALLBACK_EVENTS.has(eventName) &&
-    !fromMe &&
-    Boolean(incomingText);
+  const allowLidSenderFallback = false;
   const candidates = resolveWebhookPhoneExtractionCandidates(payload);
 
   const serializeCandidates = () =>
@@ -1277,7 +1273,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
             candidate.score > senderFallbackCandidate.score
         )
       : false;
-    const canPromoteSenderFallback = conversationKind !== 'lid' || allowLidSenderFallback;
+    const canPromoteSenderFallback = conversationKind !== 'lid';
     const shouldPromoteSenderFallback =
       !fromMe &&
       Boolean(incomingText) &&
