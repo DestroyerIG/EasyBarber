@@ -114,23 +114,33 @@ describe('whatsappClient destination resolution', () => {
     );
   });
 
-  it('sends using canonical phone even when remoteJidOriginal is @lid', async () => {
+  it('blocks send when remoteJidOriginal is @lid without trusted context', async () => {
     const sent = await sendWhatsAppText('558396311811', 'Ola', {
       remoteJidOriginal: '236197968359561@lid',
+    });
+
+    expect(sent).toBe(false);
+    expect(mockSendTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('sends when phone is valid and context is compatible', async () => {
+    const sent = await sendWhatsAppText('558396311811', 'Oi', {
+      remoteJidOriginal: '558396311811@s.whatsapp.net',
     });
 
     expect(sent).toBe(true);
     expect(mockSendTextMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         phone: '558396311811',
-        text: 'Ola',
+        text: 'Oi',
       })
     );
   });
 
-  it('sends when phone is valid and context is compatible', async () => {
+  it('allows @lid send when context is explicitly trusted', async () => {
     const sent = await sendWhatsAppText('558396311811', 'Oi', {
-      remoteJidOriginal: '558396311811@s.whatsapp.net',
+      remoteJidOriginal: '236197968359561@lid',
+      allowLidDestination: true,
     });
 
     expect(sent).toBe(true);
@@ -151,18 +161,13 @@ describe('whatsappClient destination resolution', () => {
     expect(mockSendTextMessage).not.toHaveBeenCalled();
   });
 
-  it('sends using canonical phone even when remoteJidOriginal is group jid', async () => {
+  it('blocks send when remoteJidOriginal is group jid', async () => {
     const sent = await sendWhatsAppText('558396311811', 'Oi', {
       remoteJidOriginal: '120363012345678901@g.us',
     });
 
-    expect(sent).toBe(true);
-    expect(mockSendTextMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        phone: '558396311811',
-        text: 'Oi',
-      })
-    );
+    expect(sent).toBe(false);
+    expect(mockSendTextMessage).not.toHaveBeenCalled();
   });
 
   it('runs session recovery flow when provider returns session state error', async () => {
@@ -177,7 +182,7 @@ describe('whatsappClient destination resolution', () => {
     mockGetProviderErrorMessage.mockReturnValue('Error: not-acceptable');
 
     const sent = await sendWhatsAppText('558396311811', 'Oi', {
-      remoteJidOriginal: '236197968359561@lid',
+      remoteJidOriginal: '558396311811@s.whatsapp.net',
     });
 
     expect(sent).toBe(false);

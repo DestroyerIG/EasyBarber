@@ -235,6 +235,23 @@ const getWebhookPayloadSize = (payload = {}) => {
   }
 };
 
+const buildPayloadLogSummary = (payload = {}) => ({
+  payloadKeys: Object.keys(payload || {}),
+  payloadSizeBytes: getWebhookPayloadSize(payload),
+  hasMessagesArray:
+    Array.isArray(payload?.messages) ||
+    Array.isArray(payload?.data?.messages),
+  messageCount:
+    (Array.isArray(payload?.messages) ? payload.messages.length : 0) ||
+    (Array.isArray(payload?.data?.messages) ? payload.data.messages.length : 0),
+  remoteJid:
+    payload?.key?.remoteJid ||
+    payload?.data?.key?.remoteJid ||
+    payload?.data?.messages?.[0]?.key?.remoteJid ||
+    payload?.messages?.[0]?.key?.remoteJid ||
+    null,
+});
+
 const logWebhookReceipt = ({ req, route, eventName = null, payload = {}, parseError = null, bodyType = null }) => {
   logger.info(
     {
@@ -253,8 +270,7 @@ const logWebhookReceipt = ({ req, route, eventName = null, payload = {}, parseEr
       route,
       event: eventName,
       bodyType,
-      payloadKeys: Object.keys(payload || {}),
-      payloadSizeBytes: getWebhookPayloadSize(payload),
+      ...buildPayloadLogSummary(payload),
       parseError,
     },
     'Webhook WhatsApp recebido'
@@ -265,9 +281,9 @@ const logWebhookReceipt = ({ req, route, eventName = null, payload = {}, parseEr
       requestId: req?.id || null,
       route,
       event: eventName,
-      payload,
+      ...buildPayloadLogSummary(payload),
     },
-    'Webhook WhatsApp payload completo'
+    'Webhook WhatsApp payload resumido'
   );
 };
 
@@ -418,7 +434,7 @@ const mapWebhookIncomingMessage = (payload) => {
         authorCandidates: extraction.candidates,
         extractionRejections: extraction.rejections,
         instanceNumbers: extraction.instanceNumbers,
-        payloadSnapshot: normalizedPayload,
+        payloadSummary: buildPayloadLogSummary(normalizedPayload),
       },
       'Webhook ignorado: messages-upsert sem telefone extraivel'
     );
@@ -638,6 +654,24 @@ router.post('/webhook', async (req, res, next) => {
     const startedAt = Date.now();
     const { payload, parseError, bodyType } = parseWebhookPayload(req.body);
 
+    if (extractWebhookFromMe(payload)) {
+      logger.info(
+        {
+          route: '/api/v1/whatsapp/webhook',
+          fromMe: true,
+          durationMs: Date.now() - startedAt,
+        },
+        'Webhook legado ignorado: mensagem fromMe=true'
+      );
+
+      return sendSuccess(res, {
+        received: true,
+        processed: false,
+        ignored: true,
+        reason: 'from_me',
+      });
+    }
+
     logWebhookReceipt({
       req,
       route: '/api/v1/whatsapp/webhook',
@@ -751,6 +785,25 @@ router.post('/webhook/:event', async (req, res, next) => {
     const eventName = normalizeWebhookEventName(req.params.event || '');
     const { payload, parseError, bodyType } = parseWebhookPayload(req.body);
 
+    if (extractWebhookFromMe(payload)) {
+      logger.info(
+        {
+          route: '/api/v1/whatsapp/webhook/:event',
+          event: eventName,
+          fromMe: true,
+          durationMs: Date.now() - startedAt,
+        },
+        'Webhook Evolution sub-rota ignorado: mensagem fromMe=true'
+      );
+
+      return sendSuccess(res, {
+        received: true,
+        processed: false,
+        ignored: true,
+        reason: 'from_me',
+      });
+    }
+
     logWebhookReceipt({
       req,
       route: '/api/v1/whatsapp/webhook/:event',
@@ -856,6 +909,73 @@ router.post('/webhook/:event', async (req, res, next) => {
       deduped: false,
       ignored: Boolean(result?.ignored),
       reason: result?.reason || null,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/simulator/message', ...waProtected, async (req, res, next) => {
+  try {
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    const fallbackPhone = '5511999999999';
+    const phone = normalizeWhatsAppNumber(req.body?.phone) || fallbackPhone;
+    const pushName =
+      typeof req.body?.pushName === 'string' && req.body.pushName.trim()
+        ? req.body.pushName.trim()
+        : 'Simulador';
+
+    if (!text) {
+      return sendError(
+        res,
+        400,
+        'WHATSAPP_SIMULATOR_INVALID_PAYLOAD',
+        'Campo text e obrigatorio'
+      );
+    }
+
+    const messageId = `SIMULATOR_${Date.now()}`;
+    const remoteJid = `${phone}@s.whatsapp.net`;
+    const payload = {
+      event: 'messages.upsert',
+      data: {
+        messages: [
+          {
+            key: {
+              remoteJid,
+              fromMe: false,
+              id: messageId,
+            },
+            message: {
+              conversation: text,
+            },
+            pushName,
+          },
+        ],
+      },
+    };
+
+    const botResponses = [];
+
+    const result = await handleIncomingMessage(payload, text, {
+      eventName: 'messages-upsert',
+      preExtractedPhone: phone,
+      preExtractedText: text,
+      dedupeKey: `simulator:${messageId}`,
+      messageId,
+      simulationMode: true,
+      responseCollector: botResponses,
+    });
+
+    const lastBotResponse = botResponses.length > 0 ? botResponses[botResponses.length - 1] : null;
+
+    return sendSuccess(res, {
+      received: true,
+      processed: Boolean(result?.ok),
+      ignored: Boolean(result?.ignored),
+      reason: result?.reason || null,
+      botResponses,
+      lastBotResponse,
     });
   } catch (error) {
     return next(error);

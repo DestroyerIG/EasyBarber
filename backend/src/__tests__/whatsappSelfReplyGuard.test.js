@@ -126,7 +126,7 @@ describe('whatsappSelfReplyGuard — bot nao deve responder a si proprio', () =>
 
     const result = await handleIncomingMessage(payload, 'oi', { eventName: 'messages-upsert' });
 
-    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'self_target' });
+    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'from_me' });
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
   });
 
@@ -138,7 +138,7 @@ describe('whatsappSelfReplyGuard — bot nao deve responder a si proprio', () =>
 
     const result = await handleIncomingMessage(payload, 'oi', { eventName: 'messages-upsert' });
 
-    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'self_target' });
+    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'from_me' });
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
   });
 
@@ -165,7 +165,7 @@ describe('whatsappSelfReplyGuard — bot nao deve responder a si proprio', () =>
       eventName: 'messages-upsert',
     });
 
-    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'self_target' });
+    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'from_me' });
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
   });
 
@@ -177,7 +177,7 @@ describe('whatsappSelfReplyGuard — bot nao deve responder a si proprio', () =>
 
     const result = await handleIncomingMessage(payload, 'oi', { eventName: 'messages-upsert' });
 
-    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'self_target' });
+    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'from_me' });
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
   });
 
@@ -196,7 +196,7 @@ describe('whatsappSelfReplyGuard — bot nao deve responder a si proprio', () =>
       preExtractedPhone: INSTANCE_NUMBER,
     });
 
-    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'self_target' });
+    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'connected_number_match' });
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
   });
 
@@ -210,7 +210,7 @@ describe('whatsappSelfReplyGuard — bot nao deve responder a si proprio', () =>
       }
     );
 
-    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'self_target' });
+    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'connected_number_match' });
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
   });
 

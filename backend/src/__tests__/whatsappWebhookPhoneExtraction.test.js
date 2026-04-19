@@ -10,6 +10,7 @@ import {
   normalizePhoneForSend,
   resolveIncomingAuthor,
   resolveReplyDestination,
+  resolveSafeReplyDestination,
 } from '../utils/whatsapp.js';
 
 describe('whatsapp webhook phone extraction', () => {
@@ -280,6 +281,53 @@ describe('whatsapp webhook phone extraction', () => {
         remoteJidOriginal: '236197968359561@lid',
       })
     ).toBeNull();
+  });
+
+  it('blocks destination when message is from_me', () => {
+    const decision = resolveSafeReplyDestination({
+      phone: '5511999999999',
+      fromMe: true,
+      remoteJidOriginal: '5511999999999@s.whatsapp.net',
+    });
+
+    expect(decision).toEqual(
+      expect.objectContaining({
+        ok: false,
+        reason: 'from_me',
+      })
+    );
+  });
+
+  it('blocks ambiguous @lid destination without trusted participant source', () => {
+    const decision = resolveSafeReplyDestination({
+      phone: '5511999999999',
+      remoteJidOriginal: '236197968359561@lid',
+      extraction: {
+        sourcePath: 'sender',
+      },
+    });
+
+    expect(decision).toEqual(
+      expect.objectContaining({
+        ok: false,
+        reason: 'ambiguous_phone',
+      })
+    );
+  });
+
+  it('blocks destination when it matches connected number', () => {
+    const decision = resolveSafeReplyDestination({
+      phone: '5511888888888',
+      connectedNumber: '5511888888888',
+      remoteJidOriginal: '5511777777777@s.whatsapp.net',
+    });
+
+    expect(decision).toEqual(
+      expect.objectContaining({
+        ok: false,
+        reason: 'connected_number_match',
+      })
+    );
   });
 
   it('validates blocked jid contexts for send', () => {

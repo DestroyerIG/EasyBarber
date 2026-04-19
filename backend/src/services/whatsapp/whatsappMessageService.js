@@ -31,6 +31,15 @@ export const sendWhatsAppMessage = async (phone, message, context = {}) => {
   }
 
   try {
+    if (typeof context?.captureCollector === 'function') {
+      context.captureCollector(normalizedMessage);
+    }
+
+    if (context?.simulate === true) {
+      logger.info(logContext, 'ENVIO DISPARADO (SIMULADOR)');
+      return true;
+    }
+
     logger.info(logContext, 'ENVIO DISPARADO');
     logger.debug(logContext, 'Solicitacao de envio WhatsApp ao provider');
 

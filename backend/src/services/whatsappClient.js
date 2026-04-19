@@ -18,6 +18,7 @@ import {
   isInvalidJidContext,
   isValidPhone,
   normalizePhoneForSend,
+  resolveSafeReplyDestination,
 } from '../utils/whatsapp.js';
 
 const STATUS = {
@@ -146,7 +147,20 @@ const extractQrCode = (payload) => {
     if (parsed) return parsed;
   }
 
-  logger.warn({ payload }, 'Evolution retornou payload de QR sem imagem renderizavel');
+  logger.warn(
+    {
+      payloadKeys: Object.keys(payload || {}),
+      payloadSizeBytes: (() => {
+        try {
+          return Buffer.byteLength(JSON.stringify(payload), 'utf8');
+        } catch {
+          return null;
+        }
+      })(),
+      hasQrcodeNode: Boolean(payload?.qrcode || payload?.data?.qrcode),
+    },
+    'Evolution retornou payload de QR sem imagem renderizavel'
+  );
   return null;
 };
 
@@ -625,6 +639,10 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   const destination = normalizedPhone;
   const discardedRemoteJid = isInvalidJidContext(remoteJidOriginal);
   const connectedNumber = normalizeWhatsAppNumber(getWhatsAppStatus()?.connectedNumber);
+  const knownInstanceNumbers = Array.isArray(context?.knownInstanceNumbers)
+    ? context.knownInstanceNumbers
+    : [];
+  const allowLidDestination = context?.allowLidDestination === true;
 
   if (!isValidPhone(normalizedPhone || '')) {
     logger.warn(
@@ -662,16 +680,25 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
     return false;
   }
 
-  if (connectedNumber && destination === connectedNumber) {
+  const destinationDecision = resolveSafeReplyDestination({
+    phone: destination,
+    remoteJidOriginal,
+    connectedNumber,
+    knownInstanceNumbers,
+    allowLidDestination,
+  });
+
+  if (!destinationDecision.ok) {
     logger.warn(
       {
         phone: normalizedPhone || rawPhone || null,
-        destination,
+        destination: destinationDecision.destination,
         connectedNumber,
+        knownInstanceNumbers,
         remoteJidOriginal,
-        reason: 'self_target_blocked',
+        reason: destinationDecision.reason,
       },
-      'Envio WhatsApp bloqueado: tentativa de resposta para o proprio numero da instancia'
+      'Envio WhatsApp bloqueado pela politica de destino'
     );
     return false;
   }

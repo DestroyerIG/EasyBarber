@@ -284,27 +284,13 @@ export const WhatsAppModule = () => {
 
   const handleSimulatorMessage = async (text: string): Promise<string | null> => {
     try {
-      // CORREÇÃO: payload no formato correto de webhook Evolution API
-      // O campo `phone` não é reconhecido pelo router — precisa de key.remoteJid
-      const response = await api.post('/whatsapp/webhook', {
-        event: 'messages.upsert',
-        data: {
-          messages: [
-            {
-              key: {
-                remoteJid: '5511999999999@s.whatsapp.net',
-                fromMe: false,
-                id: `SIMULATOR_${Date.now()}`,
-              },
-              message: {
-                conversation: text,
-              },
-              pushName: 'Simulador',
-            },
-          ],
-        },
+      const response = await api.post('/whatsapp/simulator/message', {
+        text,
+        phone: '5511999999999',
+        pushName: 'Simulador',
       });
-      return response.data?.botResponse || null;
+
+      return response.data?.lastBotResponse || null;
     } catch {
       showToast('Erro ao enviar mensagem para o bot', 'error');
       return null;

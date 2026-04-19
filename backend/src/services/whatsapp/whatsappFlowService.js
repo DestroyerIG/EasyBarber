@@ -18,6 +18,7 @@ import {
   extractWhatsAppPhoneFromWebhookDetailed,
   extractWhatsAppInstanceNumbersFromWebhook,
   extractWhatsAppRemoteJidFromWebhook,
+  resolveSafeReplyDestination,
 } from '../../utils/whatsapp.js';
 import {
   getSession,
@@ -874,11 +875,27 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     options?.eventName || payloadSummary?.event || payloadSummary?.type || ''
   ) || null;
 
+  const connectedNumber = resolveConnectedNumber();
+  const responseCollector = typeof options?.captureCollector === 'function'
+    ? options.captureCollector
+    : Array.isArray(options?.responseCollector)
+      ? (messageText) => {
+          options.responseCollector.push(messageText);
+        }
+      : null;
+  const allowLidDestination = Boolean(
+    phoneExtraction?.sourcePath && phoneExtraction.sourcePath.includes('participant')
+  );
+
   const sendContext = {
     ...(remoteJidOriginal ? { remoteJidOriginal } : {}),
     ...(normalizedEventName ? { eventName: normalizedEventName } : {}),
     ...(options?.dedupeKey ? { dedupeKey: options.dedupeKey } : {}),
     ...(options?.messageId ? { messageId: options.messageId } : {}),
+    ...(responseCollector ? { captureCollector: responseCollector } : {}),
+    ...(options?.simulationMode ? { simulate: true } : {}),
+    ...(allowLidDestination ? { allowLidDestination: true } : {}),
+    knownInstanceNumbers,
   };
 
   const flowDebugBase = {
@@ -912,7 +929,7 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
   try {
     if (payloadFromMe) {
       logger.info({ ...flowDebugBase }, 'Mensagem ignorada: fromMe');
-      return { ok: false, ignored: true, reason: 'self_target' };
+      return { ok: false, ignored: true, reason: 'from_me' };
     }
 
     if (!normalizedPhone) {
@@ -921,14 +938,35 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       return { ok: false, ignored: true, reason: 'ambiguous_phone' };
     }
 
+    const destinationDecision = resolveSafeReplyDestination({
+      phone: normalizedPhone,
+      fromMe: payloadFromMe || phoneExtraction?.fromMe,
+      remoteJidOriginal,
+      connectedNumber,
+      knownInstanceNumbers,
+      extraction: phoneExtraction,
+      allowLidDestination,
+    });
+
+    if (!destinationDecision.ok) {
+      logger.warn(
+        {
+          ...flowDebugBase,
+          connectedNumber,
+          knownInstanceNumbers,
+          destination: destinationDecision.destination,
+          destinationReason: destinationDecision.reason,
+          destinationConversationKind: destinationDecision.conversationKind,
+        },
+        'Mensagem ignorada pela politica de destino'
+      );
+
+      return { ok: false, ignored: true, reason: destinationDecision.reason };
+    }
+
     if (!normalizedText) {
       logger.info({ ...flowDebugBase }, 'Mensagem ignorada: texto vazio');
       return { ok: false, ignored: true, reason: 'empty_text' };
-    }
-
-    if (knownInstanceNumbers.includes(normalizedPhone)) {
-      logger.warn({ ...flowDebugBase, knownInstanceNumbers }, 'Mensagem ignorada: self_target');
-      return { ok: false, ignored: true, reason: 'self_target' };
     }
 
     const barbershopId = await resolveFlowBarbershopId();

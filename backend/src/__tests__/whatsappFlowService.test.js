@@ -168,7 +168,7 @@ describe('whatsappFlowService guards', () => {
       expect.objectContaining({
         ok: false,
         ignored: true,
-        reason: 'self_target',
+        reason: 'from_me',
       })
     );
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
@@ -201,7 +201,7 @@ describe('whatsappFlowService guards', () => {
       expect.objectContaining({
         ok: false,
         ignored: true,
-        reason: 'self_target',
+        reason: 'connected_number_match',
       })
     );
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
@@ -256,7 +256,9 @@ describe('whatsappFlowService guards', () => {
     expect(mockSendWhatsAppMessage).toHaveBeenCalledWith(
       '5511777777777',
       expect.stringContaining('08:00 as 18:00'),
-      {}
+      expect.objectContaining({
+        knownInstanceNumbers: ['5511888888888'],
+      })
     );
   });
 

@@ -576,6 +576,125 @@ export const resolveReplyDestination = ({ phone } = {}) => {
   return normalizedPhone;
 };
 
+const hasTrustedLidParticipantSource = (sourcePath = '') => {
+  if (typeof sourcePath !== 'string') return false;
+
+  const normalized = sourcePath.trim();
+  if (!normalized) return false;
+
+  return normalized.includes('participant');
+};
+
+export const resolveSafeReplyDestination = ({
+  phone,
+  fromMe = false,
+  remoteJidOriginal = null,
+  connectedNumber = null,
+  knownInstanceNumbers = [],
+  extraction = null,
+  allowLidDestination = false,
+} = {}) => {
+  if (normalizeWebhookBoolean(fromMe)) {
+    return {
+      ok: false,
+      destination: null,
+      reason: 'from_me',
+      conversationKind: resolveIncomingConversationKind(remoteJidOriginal),
+    };
+  }
+
+  const conversationKind = resolveIncomingConversationKind(remoteJidOriginal);
+
+  if (conversationKind === 'group' || conversationKind === 'broadcast' || conversationKind === 'newsletter') {
+    return {
+      ok: false,
+      destination: null,
+      reason: 'blocked_conversation',
+      conversationKind,
+    };
+  }
+
+  if (Array.isArray(extraction?.rejections)) {
+    const hasAmbiguousRejection = extraction.rejections.some(
+      (item) => item?.reason === 'ambiguous_author_candidates'
+    );
+
+    if (hasAmbiguousRejection) {
+      return {
+        ok: false,
+        destination: null,
+        reason: 'ambiguous_phone',
+        conversationKind,
+      };
+    }
+  }
+
+  if (conversationKind === 'lid') {
+    const sourcePath = extraction?.sourcePath || '';
+    const lidTrustedByExtraction = hasTrustedLidParticipantSource(sourcePath);
+    const lidTrustedByContext = allowLidDestination === true;
+
+    if (!lidTrustedByExtraction && !lidTrustedByContext) {
+      return {
+        ok: false,
+        destination: null,
+        reason: 'ambiguous_phone',
+        conversationKind,
+      };
+    }
+  }
+
+  const destination = resolveReplyDestination({ phone });
+
+  if (!destination) {
+    return {
+      ok: false,
+      destination: null,
+      reason: 'invalid_destination',
+      conversationKind,
+    };
+  }
+
+  const instanceNumbers = new Set();
+  const normalizedConnectedNumber = normalizeWhatsAppNumber(connectedNumber);
+
+  if (normalizedConnectedNumber) {
+    instanceNumbers.add(normalizedConnectedNumber);
+  }
+
+  for (const value of knownInstanceNumbers) {
+    const normalized = normalizeWhatsAppNumber(value);
+    if (normalized) {
+      instanceNumbers.add(normalized);
+    }
+  }
+
+  if (normalizedConnectedNumber && destination === normalizedConnectedNumber) {
+    return {
+      ok: false,
+      destination,
+      reason: 'connected_number_match',
+      conversationKind,
+    };
+  }
+
+  if (instanceNumbers.has(destination)) {
+    return {
+      ok: false,
+      destination,
+      reason: 'self_target',
+      conversationKind,
+    };
+  }
+
+  return {
+    ok: true,
+    destination,
+    reason: null,
+    conversationKind,
+  };
+};
+
 export const extractWhatsAppRemoteJidFromWebhook = (payload = {}) => {
   const remoteJid = extractWebhookRemoteJidCandidate(payload);
 
