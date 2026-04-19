@@ -181,7 +181,7 @@ export const WhatsAppModule = () => {
 
   // Status polling com backoff exponencial para evitar flood quando API cai
   useEffect(() => {
-    let intervalMs = 3000;
+    const intervalMs = 3000;
     let timeoutId: ReturnType<typeof setTimeout>;
 
     const poll = () => {
