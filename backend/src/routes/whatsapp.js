@@ -271,6 +271,21 @@ const logWebhookReceipt = ({ req, route, eventName = null, payload = {}, parseEr
   );
 };
 
+// CORREÇÃO: extractWebhookFromMe definido ANTES de normalizeWebhookEventPayload
+// para que possa ser chamado dentro da normalização sem ReferenceError.
+const extractWebhookFromMe = (payload) => {
+  const candidates = [
+    payload?.fromMe,
+    payload?.key?.fromMe,
+    payload?.data?.fromMe,
+    payload?.data?.key?.fromMe,
+    payload?.data?.messages?.[0]?.key?.fromMe,
+    payload?.messages?.[0]?.key?.fromMe,
+  ];
+
+  return candidates.some((value) => isWebhookBooleanTrue(value));
+};
+
 const normalizeWebhookEventPayload = (payload = {}, forcedEvent = null) => {
   const dataNode = payload?.data && typeof payload.data === 'object' ? payload.data : null;
   const dataMessage = dataNode?.message && typeof dataNode.message === 'object' ? dataNode.message : null;
@@ -297,14 +312,30 @@ const normalizeWebhookEventPayload = (payload = {}, forcedEvent = null) => {
     dataNode?.message ||
     null;
 
+  // CORREÇÃO: extrair sender e from com prioridade explícita ANTES do spread
+  // O spread encadeado (payload → dataNode → messageNode) sobrescrevia sender/from
+  // do nível raiz com valores de níveis aninhados, causando identificação errada do autor.
+  const resolvedSender =
+    payload?.sender ||
+    dataNode?.sender ||
+    messageNode?.sender ||
+    null;
+
+  const resolvedFrom =
+    payload?.from ||
+    dataNode?.from ||
+    messageNode?.from ||
+    null;
+
   return {
     ...payload,
     ...(dataNode || {}),
     ...(messageNode || {}),
     key: key || undefined,
     message: message || undefined,
-    sender: payload?.sender || dataNode?.sender || messageNode?.sender || null,
-    from: payload?.from || dataNode?.from || messageNode?.from || null,
+    // Restaurar sender e from após o spread para evitar contaminação
+    sender: resolvedSender,
+    from: resolvedFrom,
     event:
       forcedEvent ||
       payload?.event ||
@@ -320,19 +351,6 @@ const normalizeWebhookEventPayload = (payload = {}, forcedEvent = null) => {
       forcedEvent ||
       null,
   };
-};
-
-const extractWebhookFromMe = (payload) => {
-  const candidates = [
-    payload?.fromMe,
-    payload?.key?.fromMe,
-    payload?.data?.fromMe,
-    payload?.data?.key?.fromMe,
-    payload?.data?.messages?.[0]?.key?.fromMe,
-    payload?.messages?.[0]?.key?.fromMe,
-  ];
-
-  return candidates.some((value) => isWebhookBooleanTrue(value));
 };
 
 const buildWebhookPhoneExtractionOptions = () => {
@@ -355,7 +373,9 @@ const mapWebhookIncomingMessage = (payload) => {
     return null;
   }
 
-  const fromMe = extractWebhookFromMe(normalizedPayload);
+  // CORREÇÃO: verificar fromMe sobre o payload RAW (antes do spread/normalização)
+  // para evitar falso-positivo causado por contaminação de fromMe aninhado
+  const fromMe = extractWebhookFromMe(payload);
   if (fromMe) {
     logger.info(
       {
@@ -751,12 +771,11 @@ router.post('/webhook/:event', async (req, res, next) => {
     });
 
     if (!incoming) {
-      const normalizedPayload = normalizeWebhookEventPayload(payload, eventName);
-
       logger.debug(
         {
           event: eventName,
-          fromMe: extractWebhookFromMe(normalizedPayload),
+          // CORREÇÃO: fromMe verificado no payload raw, não no normalizado (evita spread contaminado)
+          fromMe: extractWebhookFromMe(payload),
           parseError,
           durationMs: Date.now() - startedAt,
         },

@@ -179,10 +179,18 @@ export const WhatsAppModule = () => {
     }
   }, [showToast]);
 
+  // Status polling com backoff exponencial para evitar flood quando API cai
   useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 3000);
-    return () => clearInterval(interval);
+    let intervalMs = 3000;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const poll = () => {
+      fetchStatus();
+      timeoutId = setTimeout(poll, intervalMs);
+    };
+
+    timeoutId = setTimeout(poll, 0);
+    return () => clearTimeout(timeoutId);
   }, [fetchStatus]);
 
   useEffect(() => {
@@ -276,10 +284,27 @@ export const WhatsAppModule = () => {
 
   const handleSimulatorMessage = async (text: string): Promise<string | null> => {
     try {
+      // CORREÇÃO: payload no formato correto de webhook Evolution API
+      // O campo `phone` não é reconhecido pelo router — precisa de key.remoteJid
       const response = await api.post('/whatsapp/webhook', {
-        phone: '5511999999999', message: text, barbershopId: 'local-test',
+        event: 'messages.upsert',
+        data: {
+          messages: [
+            {
+              key: {
+                remoteJid: '5511999999999@s.whatsapp.net',
+                fromMe: false,
+                id: `SIMULATOR_${Date.now()}`,
+              },
+              message: {
+                conversation: text,
+              },
+              pushName: 'Simulador',
+            },
+          ],
+        },
       });
-      return response.data.botResponse || null;
+      return response.data?.botResponse || null;
     } catch {
       showToast('Erro ao enviar mensagem para o bot', 'error');
       return null;
