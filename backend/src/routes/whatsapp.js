@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import express from 'express';
-import { handleIncomingMessage } from '../services/whatsapp/index.js';
+import { handleIncomingMessage, sendWhatsAppMessage } from '../services/whatsapp/index.js';
 import {
   getWhatsAppStatus,
   connectWhatsApp,
@@ -34,17 +34,22 @@ const WEBHOOK_DEDUPE_MAX_KEYS = 10000;
 const normalizeWebhookEventName = (value) =>
   String(value || '')
     .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
     .toLowerCase()
-    .replace(/[._\s]+/g, '-');
+    .replace(/[._\s]+/g, '-')
+    .replace(/-+/g, '-');
 
 const INCOMING_WEBHOOK_EVENTS = new Set([
   'messages-upsert',
+  'messagesupsert',
   'message-upsert',
+  'messageupsert',
   'messages',
   'message',
   'new-message',
   'incoming-message',
   'message-received',
+  'messagereceived',
 ]);
 
 const isIncomingWebhookEvent = (eventName, { allowEmpty = true } = {}) => {
@@ -67,6 +72,60 @@ const isWebhookBooleanTrue = (value) => {
 
   const normalized = value.trim().toLowerCase();
   return normalized === 'true' || normalized === '1';
+};
+
+const WEBHOOK_MESSAGE_WRAPPER_KEYS = [
+  'ephemeralMessage',
+  'viewOnceMessage',
+  'viewOnceMessageV2',
+  'viewOnceMessageV2Extension',
+  'documentWithCaptionMessage',
+];
+
+const extractTextFromMessageContent = (messageContent, depth = 0) => {
+  if (!messageContent || typeof messageContent !== 'object' || depth > 8) {
+    return null;
+  }
+
+  const directText = [
+    messageContent?.conversation,
+    messageContent?.extendedTextMessage?.text,
+    messageContent?.extendedTextMessage?.caption,
+    messageContent?.imageMessage?.caption,
+    messageContent?.videoMessage?.caption,
+    messageContent?.documentMessage?.caption,
+    messageContent?.documentWithCaptionMessage?.message?.documentMessage?.caption,
+  ].find((value) => typeof value === 'string' && value.trim());
+
+  if (directText) {
+    return directText.trim();
+  }
+
+  const editedMessage = messageContent?.protocolMessage?.editedMessage;
+  if (editedMessage && typeof editedMessage === 'object') {
+    const editedText = extractTextFromMessageContent(editedMessage, depth + 1);
+    if (editedText) {
+      return editedText;
+    }
+  }
+
+  for (const wrapperKey of WEBHOOK_MESSAGE_WRAPPER_KEYS) {
+    const wrapperNode = messageContent?.[wrapperKey];
+    if (!wrapperNode || typeof wrapperNode !== 'object') {
+      continue;
+    }
+
+    const nestedMessage = wrapperNode?.message && typeof wrapperNode.message === 'object'
+      ? wrapperNode.message
+      : wrapperNode;
+
+    const nestedText = extractTextFromMessageContent(nestedMessage, depth + 1);
+    if (nestedText) {
+      return nestedText;
+    }
+  }
+
+  return null;
 };
 
 const extractWebhookText = (payload) => {
@@ -94,7 +153,121 @@ const extractWebhookText = (payload) => {
     payload?.messages?.[0]?.message?.videoMessage?.caption,
   ].find((value) => typeof value === 'string' && value.trim());
 
-  return directText ? directText.trim() : null;
+  if (directText) {
+    return directText.trim();
+  }
+
+  const messageNodes = [
+    payload?.message,
+    payload?.data?.message,
+    payload?.data?.messages?.[0]?.message,
+    payload?.messages?.[0]?.message,
+  ];
+
+  for (const messageNode of messageNodes) {
+    const extractedText = extractTextFromMessageContent(messageNode);
+    if (extractedText) {
+      return extractedText;
+    }
+  }
+
+  return null;
+};
+
+const parseWebhookPayload = (rawBody) => {
+  if (rawBody && typeof rawBody === 'object' && !Array.isArray(rawBody)) {
+    return {
+      payload: rawBody,
+      bodyType: 'object',
+      parseError: null,
+    };
+  }
+
+  if (typeof rawBody === 'string') {
+    const trimmedBody = rawBody.trim();
+
+    if (!trimmedBody) {
+      return {
+        payload: {},
+        bodyType: 'string',
+        parseError: 'empty_string_body',
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(trimmedBody);
+
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return {
+          payload: parsed,
+          bodyType: 'json_string',
+          parseError: null,
+        };
+      }
+
+      return {
+        payload: {},
+        bodyType: 'json_string',
+        parseError: 'json_body_not_object',
+      };
+    } catch (error) {
+      return {
+        payload: {},
+        bodyType: 'string',
+        parseError: `json_parse_error:${error?.message || 'unknown_error'}`,
+      };
+    }
+  }
+
+  return {
+    payload: {},
+    bodyType: rawBody === null ? 'null' : typeof rawBody,
+    parseError: 'unsupported_body_type',
+  };
+};
+
+const getWebhookPayloadSize = (payload = {}) => {
+  try {
+    return Buffer.byteLength(JSON.stringify(payload), 'utf8');
+  } catch {
+    return null;
+  }
+};
+
+const logWebhookReceipt = ({ req, route, eventName = null, payload = {}, parseError = null, bodyType = null }) => {
+  logger.info(
+    {
+      requestId: req?.id || null,
+      route,
+      event: eventName,
+      parseError,
+      bodyType,
+    },
+    'WEBHOOK RECEBIDO'
+  );
+
+  logger.info(
+    {
+      requestId: req?.id || null,
+      route,
+      event: eventName,
+      bodyType,
+      payloadKeys: Object.keys(payload || {}),
+      payloadSizeBytes: getWebhookPayloadSize(payload),
+      parseError,
+    },
+    'Webhook WhatsApp recebido'
+  );
+
+  logger.debug(
+    {
+      requestId: req?.id || null,
+      route,
+      event: eventName,
+      payload,
+    },
+    'Webhook WhatsApp payload completo'
+  );
 };
 
 const normalizeWebhookEventPayload = (payload = {}, forcedEvent = null) => {
@@ -183,6 +356,15 @@ const mapWebhookIncomingMessage = (payload) => {
 
   const fromMe = extractWebhookFromMe(normalizedPayload);
   if (fromMe) {
+    logger.info(
+      {
+        event: eventName,
+        fromMe,
+        keyRemoteJid: normalizedPayload?.key?.remoteJid || null,
+        sender: normalizedPayload?.sender || null,
+      },
+      'Webhook ignorado: mensagem fromMe=true'
+    );
     return null;
   }
 
@@ -215,6 +397,7 @@ const mapWebhookIncomingMessage = (payload) => {
         authorCandidates: extraction.candidates,
         extractionRejections: extraction.rejections,
         instanceNumbers: extraction.instanceNumbers,
+        payloadSnapshot: normalizedPayload,
       },
       'Webhook ignorado: messages-upsert sem telefone extraivel'
     );
@@ -222,6 +405,15 @@ const mapWebhookIncomingMessage = (payload) => {
   }
 
   if (!text) {
+    logger.debug(
+      {
+        event: eventName,
+        authorPhone: extraction.authorPhone,
+        sourcePath: extraction.sourcePath,
+        remoteJidOriginal: extraction.remoteJidOriginal,
+      },
+      'Webhook ignorado: mensagem sem texto'
+    );
     return null;
   }
 
@@ -229,6 +421,20 @@ const mapWebhookIncomingMessage = (payload) => {
     {
       event: eventName,
       text,
+      authorPhone: extraction.authorPhone,
+      sourcePath: extraction.sourcePath,
+      confidence: extraction.confidence,
+      remoteJidOriginal: extraction.remoteJidOriginal,
+      sender: extraction.sender || normalizedPayload?.sender || null,
+      participant: extraction.participant || normalizedPayload?.participant || null,
+      fromMe: extraction.fromMe,
+    },
+    'AUTOR RESOLVIDO'
+  );
+
+  logger.info(
+    {
+      event: eventName,
       authorPhone: extraction.authorPhone,
       sourcePath: extraction.sourcePath,
       confidence: extraction.confidence,
@@ -408,11 +614,22 @@ const registerWebhookMessageDeduplication = ({
 // Webhook local / legado
 router.post('/webhook', async (req, res, next) => {
   try {
-    const payload = req.body || {};
+    const startedAt = Date.now();
+    const { payload, parseError, bodyType } = parseWebhookPayload(req.body);
+
+    logWebhookReceipt({
+      req,
+      route: '/api/v1/whatsapp/webhook',
+      eventName: normalizeWebhookEventName(payload?.event || payload?.type || ''),
+      payload,
+      parseError,
+      bodyType,
+    });
 
     logger.warn(
       {
         route: '/api/v1/whatsapp/webhook',
+        parseError,
       },
       'Webhook legado recebido. Recomenda-se migrar para /api/v1/whatsapp/webhook/messages-upsert'
     );
@@ -426,6 +643,8 @@ router.post('/webhook', async (req, res, next) => {
         {
           event: normalizedPayload?.event || normalizedPayload?.type,
           fromMe: extractWebhookFromMe(normalizedPayload),
+          parseError,
+          durationMs: Date.now() - startedAt,
         },
         'Webhook ignorado sem payload de mensagem util'
       );
@@ -442,6 +661,7 @@ router.post('/webhook', async (req, res, next) => {
           dedupeKey: dedupe.dedupeKey,
           messageId: dedupe.messageId,
           phone: incoming.extractedPhone,
+          durationMs: Date.now() - startedAt,
         },
         'Webhook ignorado por deduplicacao'
       );
@@ -457,6 +677,16 @@ router.post('/webhook', async (req, res, next) => {
     const debugFields = buildWebhookDebugFields(incoming.payload, incoming.extraction);
 
     logger.debug(debugFields, 'Webhook WhatsApp debug de extração de telefone');
+
+    logger.info(
+      {
+        event: incoming.eventName,
+        phone: incoming.extractedPhone,
+        messageId: dedupe.messageId,
+        dedupeKey: dedupe.dedupeKey,
+      },
+      'FLUXO EXECUTADO'
+    );
 
     const result = await handleIncomingMessage(incoming.payload, incoming.extractedText, {
       preExtractedPhone: incoming.extractedPhone,
@@ -476,6 +706,7 @@ router.post('/webhook', async (req, res, next) => {
         processed: result?.ok,
         ignored: result?.ignored,
         reason: result?.reason,
+        durationMs: Date.now() - startedAt,
       },
       'Resultado do processamento de mensagem WhatsApp'
     );
@@ -495,16 +726,18 @@ router.post('/webhook', async (req, res, next) => {
 // Webhook Evolution API — sub-rotas: /webhook/messages-upsert, /webhook/chats-update, etc.
 router.post('/webhook/:event', async (req, res, next) => {
   try {
-    const payload = req.body || {};
+    const startedAt = Date.now();
     const eventName = normalizeWebhookEventName(req.params.event || '');
+    const { payload, parseError, bodyType } = parseWebhookPayload(req.body);
 
-    logger.debug(
-      {
-        event: eventName,
-        payloadKeys: Object.keys(payload),
-      },
-      'Webhook Evolution sub-rota recebida'
-    );
+    logWebhookReceipt({
+      req,
+      route: '/api/v1/whatsapp/webhook/:event',
+      eventName,
+      payload,
+      parseError,
+      bodyType,
+    });
 
     if (!isIncomingWebhookEvent(eventName, { allowEmpty: false })) {
       logger.debug({ event: eventName }, 'Webhook Evolution sub-rota ignorada (nao e mensagem)');
@@ -523,6 +756,8 @@ router.post('/webhook/:event', async (req, res, next) => {
         {
           event: eventName,
           fromMe: extractWebhookFromMe(normalizedPayload),
+          parseError,
+          durationMs: Date.now() - startedAt,
         },
         'Webhook Evolution sub-rota sem payload util'
       );
@@ -539,6 +774,7 @@ router.post('/webhook/:event', async (req, res, next) => {
           dedupeKey: dedupe.dedupeKey,
           messageId: dedupe.messageId,
           phone: incoming.extractedPhone,
+          durationMs: Date.now() - startedAt,
         },
         'Webhook Evolution ignorado por deduplicacao'
       );
@@ -561,6 +797,16 @@ router.post('/webhook/:event', async (req, res, next) => {
       'Webhook Evolution messages-upsert debug de extração de telefone'
     );
 
+    logger.info(
+      {
+        event: eventName,
+        phone: incoming.extractedPhone,
+        messageId: dedupe.messageId,
+        dedupeKey: dedupe.dedupeKey,
+      },
+      'FLUXO EXECUTADO'
+    );
+
     const result = await handleIncomingMessage(incoming.payload, incoming.extractedText, {
       preExtractedPhone: incoming.extractedPhone,
       preExtractedText: incoming.extractedText,
@@ -579,6 +825,7 @@ router.post('/webhook/:event', async (req, res, next) => {
         processed: result?.ok,
         ignored: result?.ignored,
         reason: result?.reason,
+        durationMs: Date.now() - startedAt,
       },
       'Resultado do processamento de mensagem WhatsApp'
     );
@@ -680,9 +927,13 @@ router.post('/disconnect', ...waProtected, async (req, res, next) => {
 
 router.post('/send', ...waProtected, async (req, res, next) => {
   try {
-    const { phone, message } = req.body || {};
+    const { phone, message, remoteJidOriginal } = req.body || {};
     const normalizedPhone = normalizeWhatsAppNumber(phone);
     const normalizedMessage = String(message || '').trim();
+    const normalizedRemoteJidOriginal =
+      typeof remoteJidOriginal === 'string' && remoteJidOriginal.trim()
+        ? remoteJidOriginal.trim()
+        : null;
 
     if (!normalizedPhone || !normalizedMessage) {
       return sendError(
@@ -693,7 +944,19 @@ router.post('/send', ...waProtected, async (req, res, next) => {
       );
     }
 
-    const sent = await sendWhatsAppText(normalizedPhone, normalizedMessage);
+    logger.info(
+      {
+        route: '/api/v1/whatsapp/send',
+        phone: normalizedPhone,
+        remoteJidOriginal: normalizedRemoteJidOriginal,
+        messageLength: normalizedMessage.length,
+      },
+      'Solicitacao manual de envio WhatsApp recebida'
+    );
+
+    const sent = await sendWhatsAppText(normalizedPhone, normalizedMessage, {
+      remoteJidOriginal: normalizedRemoteJidOriginal,
+    });
 
     if (!sent) {
       const status = getWhatsAppStatus();
@@ -703,6 +966,147 @@ router.post('/send', ...waProtected, async (req, res, next) => {
     return sendSuccess(res, {
       sent: true,
       phone: normalizedPhone,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/test-send', ...waProtected, async (req, res, next) => {
+  try {
+    const { phone, message, remoteJidOriginal } = req.body || {};
+    const normalizedPhone = normalizeWhatsAppNumber(phone);
+    const normalizedMessage = String(message || '').trim();
+    const normalizedRemoteJidOriginal =
+      typeof remoteJidOriginal === 'string' && remoteJidOriginal.trim()
+        ? remoteJidOriginal.trim()
+        : null;
+
+    if (!normalizedPhone || !normalizedMessage) {
+      return sendError(
+        res,
+        400,
+        'WHATSAPP_TEST_SEND_INVALID_PAYLOAD',
+        'Campos phone valido e message sao obrigatorios'
+      );
+    }
+
+    logger.info(
+      {
+        route: '/api/v1/whatsapp/test-send',
+        phone: normalizedPhone,
+        remoteJidOriginal: normalizedRemoteJidOriginal,
+        messageLength: normalizedMessage.length,
+      },
+      'Executando teste isolado de envio WhatsApp'
+    );
+
+    const sent = await sendWhatsAppText(normalizedPhone, normalizedMessage, {
+      remoteJidOriginal: normalizedRemoteJidOriginal,
+    });
+
+    if (!sent) {
+      const status = getWhatsAppStatus();
+      logger.warn(
+        {
+          route: '/api/v1/whatsapp/test-send',
+          phone: normalizedPhone,
+          remoteJidOriginal: normalizedRemoteJidOriginal,
+          providerStatus: status.status,
+          providerError: status.error,
+        },
+        'Teste isolado de envio WhatsApp falhou'
+      );
+
+      return sendError(
+        res,
+        502,
+        'WHATSAPP_TEST_SEND_FAILED',
+        status.error || 'Falha ao enviar mensagem no teste isolado'
+      );
+    }
+
+    logger.info(
+      {
+        route: '/api/v1/whatsapp/test-send',
+        phone: normalizedPhone,
+        remoteJidOriginal: normalizedRemoteJidOriginal,
+      },
+      'Teste isolado de envio WhatsApp concluido com sucesso'
+    );
+
+    return sendSuccess(res, {
+      sent: true,
+      phone: normalizedPhone,
+      remoteJidOriginal: normalizedRemoteJidOriginal,
+      messageLength: normalizedMessage.length,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/debug-send', ...waProtected, async (req, res, next) => {
+  try {
+    const { phone, message, remoteJidOriginal } = req.body || {};
+    const normalizedPhone = normalizeWhatsAppNumber(phone);
+    const normalizedMessage = String(message || 'teste').trim() || 'teste';
+    const normalizedRemoteJidOriginal =
+      typeof remoteJidOriginal === 'string' && remoteJidOriginal.trim()
+        ? remoteJidOriginal.trim()
+        : null;
+
+    if (!normalizedPhone) {
+      return sendError(
+        res,
+        400,
+        'WHATSAPP_DEBUG_SEND_INVALID_PAYLOAD',
+        'Campo phone valido e obrigatorio'
+      );
+    }
+
+    logger.info(
+      {
+        route: '/api/v1/whatsapp/debug-send',
+        phone: normalizedPhone,
+        remoteJidOriginal: normalizedRemoteJidOriginal,
+        messageLength: normalizedMessage.length,
+      },
+      'Executando debug-send isolado via sendWhatsAppMessage'
+    );
+
+    const sent = await sendWhatsAppMessage(normalizedPhone, normalizedMessage, {
+      remoteJidOriginal: normalizedRemoteJidOriginal,
+      eventName: 'debug-send',
+    });
+
+    if (!sent) {
+      const status = getWhatsAppStatus();
+
+      logger.warn(
+        {
+          route: '/api/v1/whatsapp/debug-send',
+          phone: normalizedPhone,
+          remoteJidOriginal: normalizedRemoteJidOriginal,
+          providerStatus: status.status,
+          providerError: status.error,
+        },
+        'debug-send falhou no provider'
+      );
+
+      return sendError(
+        res,
+        502,
+        'WHATSAPP_DEBUG_SEND_FAILED',
+        status.error || 'Falha no envio do debug-send'
+      );
+    }
+
+    return sendSuccess(res, {
+      sent: true,
+      phone: normalizedPhone,
+      remoteJidOriginal: normalizedRemoteJidOriginal,
+      message: normalizedMessage,
     });
   } catch (error) {
     return next(error);

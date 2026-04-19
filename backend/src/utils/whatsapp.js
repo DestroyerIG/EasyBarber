@@ -15,6 +15,12 @@ const INCOMING_AUTHOR_SENDER_FALLBACK_SOURCE_PATHS = new Set([
   'data.messages[0].sender',
   'messages[0].sender',
 ]);
+const LID_SENDER_FALLBACK_EVENTS = new Set([
+  'messages-upsert',
+  'messagesupsert',
+  'message-upsert',
+  'messageupsert',
+]);
 
 /**
  * Cache em memória para mapear @lid -> telefone real quando observado.
@@ -387,6 +393,35 @@ const normalizeWebhookBoolean = (value) => {
 
   const normalized = value.trim().toLowerCase();
   return normalized === 'true' || normalized === '1';
+};
+
+const normalizeIncomingEventName = (value) =>
+  String(value || '')
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .toLowerCase()
+    .replace(/[._\s]+/g, '-')
+    .replace(/-+/g, '-');
+
+const extractIncomingEventName = (payload = {}, options = {}) => {
+  const forcedEvent = normalizeIncomingEventName(options?.eventName || '');
+  if (forcedEvent) {
+    return forcedEvent;
+  }
+
+  return normalizeIncomingEventName(
+    payload?.event ||
+      payload?.type ||
+      payload?.data?.event ||
+      payload?.data?.type ||
+      payload?.message?.event ||
+      payload?.message?.type ||
+      payload?.data?.messages?.[0]?.event ||
+      payload?.data?.messages?.[0]?.type ||
+      payload?.messages?.[0]?.event ||
+      payload?.messages?.[0]?.type ||
+      ''
+  );
 };
 
 const extractWebhookFromMe = (payload = {}) =>
@@ -832,11 +867,17 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
   const blockedConversation = findBlockedConversationCandidate(payload);
   const remoteJidOriginal = extractWhatsAppRemoteJidFromWebhook(payload);
   const conversationKind = resolveIncomingConversationKind(remoteJidOriginal);
+  const eventName = extractIncomingEventName(payload, options);
   const fromMe = extractWebhookFromMe(payload);
   const sender = extractWebhookSenderCandidate(payload);
   const participant = extractWebhookParticipantCandidate(payload);
   const pushName = extractWebhookPushNameCandidate(payload);
   const incomingText = extractIncomingTextCandidate(payload, options);
+  const allowLidSenderFallback =
+    conversationKind === 'lid' &&
+    LID_SENDER_FALLBACK_EVENTS.has(eventName) &&
+    !fromMe &&
+    Boolean(incomingText);
   const candidates = resolveWebhookPhoneExtractionCandidates(payload);
 
   const serializeCandidates = () =>
@@ -902,38 +943,6 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
     };
   }
 
-  // Se já existe mapeamento seguro para esse @lid, usa primeiro.
-  if (conversationKind === 'lid' && remoteJidOriginal) {
-    const cachedPhone = getPhoneFromLidCache(remoteJidOriginal);
-    if (cachedPhone && !instanceNumbersSet.has(cachedPhone)) {
-      return {
-        authorPhone: cachedPhone,
-        sourcePath: 'lid_cache',
-        candidateType: 'lid_cached_phone',
-        confidence: 'high',
-        remoteJidOriginal,
-        sender,
-        participant,
-        pushName,
-        fromMe,
-        instanceNumbers,
-        rejections,
-        candidates: [
-          {
-            sourcePath: 'lid_cache',
-            candidateType: 'lid_cached_phone',
-            rawValue: remoteJidOriginal,
-            phone: cachedPhone,
-            score: 999,
-            confidence: 'high',
-            authorRole: 'cached_lid_phone',
-            rejectedReason: null,
-          },
-        ],
-      };
-    }
-  }
-
   const matchedCandidates = [];
 
   for (const [index, candidate] of candidates.entries()) {
@@ -997,7 +1006,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
     // Regra crítica:
     // em @lid nunca confiar em sender como autor,
     // porque no seu payload ele pode vir com o número da instância.
-    if (isLidConversation && isSenderLikeCandidate) {
+    if (isLidConversation && isSenderLikeCandidate && !allowLidSenderFallback) {
       adjustedScore = 0;
       adjustedConfidence = 'none';
       rejectedReason = 'lid_sender_untrusted';
@@ -1038,8 +1047,46 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
           candidate.phone === normalizedSenderPhone
       ) || null
     : null;
+  const cachedPhone =
+    conversationKind === 'lid' && remoteJidOriginal
+      ? getPhoneFromLidCache(remoteJidOriginal)
+      : null;
+  const hasExplicitAuthorSignal = matchedCandidates.some((candidate) => Boolean(candidate.phone));
 
   if (!bestCandidate) {
+    if (cachedPhone && !instanceNumbersSet.has(cachedPhone) && !hasExplicitAuthorSignal) {
+      return {
+        authorPhone: cachedPhone,
+        sourcePath: 'lid_cache',
+        candidateType: 'lid_cached_phone',
+        confidence: 'medium',
+        remoteJidOriginal,
+        sender,
+        participant,
+        pushName,
+        fromMe,
+        instanceNumbers,
+        rejections,
+        candidates: [
+          ...serializeCandidates(),
+          {
+            sourcePath: 'lid_cache',
+            candidateType: 'lid_cached_phone',
+            rawValue: remoteJidOriginal,
+            phone: cachedPhone,
+            score: 70,
+            confidence: 'medium',
+            authorRole: 'cached_lid_phone',
+            rejectedReason: null,
+          },
+        ],
+      };
+    }
+
+    if (hasExplicitAuthorSignal) {
+      appendRejection(rejections, 'author_candidates', 'low_confidence_author');
+    }
+
     return {
       authorPhone: null,
       sourcePath: null,
@@ -1082,6 +1129,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
   if (
     conversationKind === 'lid' &&
     bestCandidate &&
+    !allowLidSenderFallback &&
     INCOMING_AUTHOR_SENDER_FALLBACK_SOURCE_PATHS.has(bestCandidate.sourcePath)
   ) {
     appendRejection(rejections, bestCandidate.sourcePath, 'lid_sender_untrusted');
@@ -1110,12 +1158,13 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
             candidate.score > senderFallbackCandidate.score
         )
       : false;
+    const canPromoteSenderFallback = conversationKind !== 'lid' || allowLidSenderFallback;
     const shouldPromoteSenderFallback =
       !fromMe &&
       Boolean(incomingText) &&
       senderFallbackCandidate &&
       !hasBetterCandidateThanSender &&
-      conversationKind !== 'lid' &&
+      canPromoteSenderFallback &&
       !instanceNumbersSet.has(senderFallbackCandidate.phone);
 
     if (shouldPromoteSenderFallback) {

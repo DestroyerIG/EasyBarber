@@ -52,7 +52,12 @@ const normalizeText = (value) => {
 };
 
 const normalizeWebhookEventName = (value) =>
-  String(value || '').trim().toLowerCase().replace(/[._\s]+/g, '-');
+  String(value || '')
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .toLowerCase()
+    .replace(/[._\s]+/g, '-')
+    .replace(/-+/g, '-');
 
 const isWebhookBooleanTrue = (value) => {
   if (value === true || value === 1) return true;
@@ -67,12 +72,15 @@ const isWebhookBooleanTrue = (value) => {
  */
 const INCOMING_MESSAGE_EVENTS = new Set([
   'messages-upsert',
+  'messagesupsert',
   'message-upsert',
+  'messageupsert',
   'messages',
   'message',
   'new-message',
   'incoming-message',
   'message-received',
+  'messagereceived',
 ]);
 
 const isGreeting = (text) => {
@@ -109,6 +117,60 @@ const isIncomingMessageEvent = (payload = {}) => {
   return INCOMING_MESSAGE_EVENTS.has(eventName);
 };
 
+const WEBHOOK_MESSAGE_WRAPPER_KEYS = [
+  'ephemeralMessage',
+  'viewOnceMessage',
+  'viewOnceMessageV2',
+  'viewOnceMessageV2Extension',
+  'documentWithCaptionMessage',
+];
+
+const extractTextFromMessageContent = (messageContent, depth = 0) => {
+  if (!messageContent || typeof messageContent !== 'object' || depth > 8) {
+    return '';
+  }
+
+  const directText = [
+    messageContent?.conversation,
+    messageContent?.extendedTextMessage?.text,
+    messageContent?.extendedTextMessage?.caption,
+    messageContent?.imageMessage?.caption,
+    messageContent?.videoMessage?.caption,
+    messageContent?.documentMessage?.caption,
+    messageContent?.documentWithCaptionMessage?.message?.documentMessage?.caption,
+  ].find((value) => typeof value === 'string' && value.trim());
+
+  if (directText) {
+    return directText.trim();
+  }
+
+  const editedMessage = messageContent?.protocolMessage?.editedMessage;
+  if (editedMessage && typeof editedMessage === 'object') {
+    const editedText = extractTextFromMessageContent(editedMessage, depth + 1);
+    if (editedText) {
+      return editedText;
+    }
+  }
+
+  for (const wrapperKey of WEBHOOK_MESSAGE_WRAPPER_KEYS) {
+    const wrapperNode = messageContent?.[wrapperKey];
+    if (!wrapperNode || typeof wrapperNode !== 'object') {
+      continue;
+    }
+
+    const nestedMessage = wrapperNode?.message && typeof wrapperNode.message === 'object'
+      ? wrapperNode.message
+      : wrapperNode;
+
+    const nestedText = extractTextFromMessageContent(nestedMessage, depth + 1);
+    if (nestedText) {
+      return nestedText;
+    }
+  }
+
+  return '';
+};
+
 const extractTextFromWebhook = (payload = {}) => {
   const candidates = [
     payload?.text, payload?.body, payload?.message, payload?.content,
@@ -124,6 +186,21 @@ const extractTextFromWebhook = (payload = {}) => {
     const n = normalizeText(c);
     if (n) return n;
   }
+
+  const messageNodes = [
+    payload?.message,
+    payload?.data?.message,
+    payload?.data?.messages?.[0]?.message,
+    payload?.messages?.[0]?.message,
+  ];
+
+  for (const messageNode of messageNodes) {
+    const extractedText = extractTextFromMessageContent(messageNode);
+    if (extractedText) {
+      return extractedText;
+    }
+  }
+
   return '';
 };
 
@@ -783,43 +860,97 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
 export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) => {
   const payloadFromMe = phoneOrPayload && typeof phoneOrPayload === 'object' && !Array.isArray(phoneOrPayload) && isFromMe(phoneOrPayload);
 
-  const { normalizedPhone, normalizedText, remoteJidOriginal, payloadSummary, knownInstanceNumbers } =
+  const {
+    normalizedPhone,
+    normalizedText,
+    remoteJidOriginal,
+    payloadSummary,
+    phoneExtraction,
+    knownInstanceNumbers,
+  } =
     resolveIncomingMessageInput(phoneOrPayload, text, options);
 
-  const sendContext = remoteJidOriginal ? { remoteJidOriginal } : {};
+  const normalizedEventName = normalizeWebhookEventName(
+    options?.eventName || payloadSummary?.event || payloadSummary?.type || ''
+  ) || null;
+
+  const sendContext = {
+    ...(remoteJidOriginal ? { remoteJidOriginal } : {}),
+    ...(normalizedEventName ? { eventName: normalizedEventName } : {}),
+    ...(options?.dedupeKey ? { dedupeKey: options.dedupeKey } : {}),
+    ...(options?.messageId ? { messageId: options.messageId } : {}),
+  };
+
+  const flowDebugBase = {
+    phone: normalizedPhone || null,
+    remoteJidOriginal: remoteJidOriginal || null,
+    eventName: normalizedEventName,
+    dedupeKey: sendContext.dedupeKey,
+    messageId: sendContext.messageId,
+  };
+
+  logger.debug(
+    {
+      ...flowDebugBase,
+      normalizedTextLength: normalizedText ? normalizedText.length : 0,
+      knownInstanceNumbers,
+      payloadSummary,
+      authorResolution: phoneExtraction
+        ? {
+            phone: phoneExtraction.phone,
+            sourcePath: phoneExtraction.sourcePath,
+            candidateType: phoneExtraction.candidateType,
+            confidence: phoneExtraction.confidence,
+            rejections: phoneExtraction.rejections,
+            instanceNumbers: phoneExtraction.instanceNumbers,
+          }
+        : null,
+    },
+    'Entrada normalizada do fluxo WhatsApp'
+  );
 
   try {
     if (payloadFromMe) {
-      logger.debug({ remoteJid: remoteJidOriginal }, 'Mensagem ignorada: fromMe');
+      logger.info({ ...flowDebugBase }, 'Mensagem ignorada: fromMe');
       return { ok: false, ignored: true, reason: 'self_target' };
     }
 
     if (!normalizedPhone) {
-      logger.warn({ remoteJid: remoteJidOriginal, payload: payloadSummary, knownInstanceNumbers },
+      logger.warn({ ...flowDebugBase, payload: payloadSummary, knownInstanceNumbers, phoneExtraction },
         'Mensagem ignorada: telefone nao identificado');
       return { ok: false, ignored: true, reason: 'ambiguous_phone' };
     }
 
     if (!normalizedText) {
-      logger.debug({ phone: normalizedPhone }, 'Mensagem ignorada: texto vazio');
+      logger.info({ ...flowDebugBase }, 'Mensagem ignorada: texto vazio');
       return { ok: false, ignored: true, reason: 'empty_text' };
     }
 
     if (knownInstanceNumbers.includes(normalizedPhone)) {
-      logger.warn({ phone: normalizedPhone, knownInstanceNumbers }, 'Mensagem ignorada: self_target');
+      logger.warn({ ...flowDebugBase, knownInstanceNumbers }, 'Mensagem ignorada: self_target');
       return { ok: false, ignored: true, reason: 'self_target' };
     }
 
     const barbershopId = await resolveFlowBarbershopId();
     if (!barbershopId) {
-      logger.warn({ phone: normalizedPhone }, 'Mensagem ignorada: barbershop nao resolvido');
+      logger.warn({ ...flowDebugBase }, 'Mensagem ignorada: barbershop nao resolvido');
       return { ok: false, ignored: true, reason: 'barbershop_not_resolved' };
     }
 
     logger.info({
-      phone: normalizedPhone, text: normalizedText, barbershopId,
-      eventName: options?.eventName || null, dedupeKey: options?.dedupeKey || null,
+      ...flowDebugBase,
+      text: normalizedText,
+      barbershopId,
     }, 'Processando mensagem no fluxo WhatsApp');
+
+    logger.info(
+      {
+        ...flowDebugBase,
+        text: normalizedText,
+        barbershopId,
+      },
+      'FLUXO EXECUTADO'
+    );
 
     const config = await getBotConfig(barbershopId);
     const businessSettings = await getBarbershopBusinessSettings(barbershopId);
@@ -843,6 +974,16 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
         sendContext
       );
 
+      logger.info(
+        {
+          ...flowDebugBase,
+          barbershopId,
+          decision: 'outside_business_hours',
+          sent,
+        },
+        'Decisao de fluxo WhatsApp aplicada'
+      );
+
       return { ok: sent, ignored: false, reason: sent ? null : 'send_failed' };
     }
 
@@ -854,6 +995,17 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
         await buildContextualMenuMessage(barbershopId, businessSettings),
         sendContext
       );
+
+      logger.info(
+        {
+          ...flowDebugBase,
+          barbershopId,
+          decision: 'greeting_menu',
+          sent,
+        },
+        'Decisao de fluxo WhatsApp aplicada'
+      );
+
       return { ok: sent, ignored: false, reason: sent ? null : 'send_failed' };
     }
 
@@ -872,13 +1024,32 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
         await buildContextualMenuMessage(barbershopId, businessSettings),
         sendContext
       );
+
+      logger.info(
+        {
+          ...flowDebugBase,
+          barbershopId,
+          decision: session ? 'session_expired_restarted' : 'session_created',
+          sent,
+        },
+        'Decisao de fluxo WhatsApp aplicada'
+      );
+
       return { ok: sent, ignored: false, reason: sent ? null : 'send_failed' };
     }
 
     const currentStep = session.step;
     const sessionData = typeof session.data === 'object' ? session.data : {};
 
-    logger.debug({ phone: normalizedPhone, barbershopId, step: currentStep, text: normalizedText }, 'Processando step');
+    logger.debug(
+      {
+        ...flowDebugBase,
+        barbershopId,
+        step: currentStep,
+        text: normalizedText,
+      },
+      'Processando step'
+    );
 
     let stepResult = { ok: false };
 
@@ -950,9 +1121,26 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       }
     }
 
+    logger.info(
+      {
+        ...flowDebugBase,
+        barbershopId,
+        step: currentStep,
+        processed: stepResult.ok,
+      },
+      'Resultado do fluxo WhatsApp'
+    );
+
     return { ok: stepResult.ok, ignored: false, reason: stepResult.ok ? null : 'send_failed' };
   } catch (error) {
-    logger.error({ err: error, phone: normalizedPhone, text: normalizedText }, 'Erro no fluxo WhatsApp');
+    logger.error(
+      {
+        err: error,
+        ...flowDebugBase,
+        text: normalizedText,
+      },
+      'Erro no fluxo WhatsApp'
+    );
     return { ok: false, ignored: false, reason: 'flow_error', error: error?.message };
   }
 };

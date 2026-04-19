@@ -9,36 +9,42 @@ import logger from '../../utils/logger.js';
  * Envia mensagem via provider configurado (Evolution API).
  */
 export const sendWhatsAppMessage = async (phone, message, context = {}) => {
+  const normalizedPhone = typeof phone === 'string' ? phone.trim() : String(phone || '').trim();
+  const normalizedMessage = typeof message === 'string' ? message.trim() : String(message || '').trim();
+  const logContext = {
+    phone: normalizedPhone || null,
+    remoteJidOriginal: context?.remoteJidOriginal || null,
+    eventName: context?.eventName || null,
+    dedupeKey: context?.dedupeKey || null,
+    messageId: context?.messageId || null,
+    messageLength: normalizedMessage.length,
+  };
+
+  if (!normalizedPhone) {
+    logger.warn(logContext, 'Mensagem nao enviada: telefone ausente');
+    return false;
+  }
+
+  if (!normalizedMessage) {
+    logger.warn(logContext, 'Mensagem nao enviada: texto vazio');
+    return false;
+  }
+
   try {
-    const sent = await sendWhatsAppText(phone, message, context);
+    logger.info(logContext, 'ENVIO DISPARADO');
+    logger.debug(logContext, 'Solicitacao de envio WhatsApp ao provider');
+
+    const sent = await sendWhatsAppText(normalizedPhone, normalizedMessage, context);
+
     if (!sent) {
-      logger.warn(
-        {
-          phone,
-          remoteJidOriginal: context?.remoteJidOriginal || null,
-        },
-        'Mensagem nao enviada pelo provider WhatsApp'
-      );
+      logger.warn(logContext, 'Mensagem nao enviada pelo provider WhatsApp');
       return false;
     }
 
-    logger.debug(
-      {
-        phone,
-        remoteJidOriginal: context?.remoteJidOriginal || null,
-      },
-      'Mensagem enviada'
-    );
+    logger.info(logContext, 'Mensagem enviada via provider WhatsApp');
     return true;
   } catch (error) {
-    logger.error(
-      {
-        err: error,
-        phone,
-        remoteJidOriginal: context?.remoteJidOriginal || null,
-      },
-      'Erro ao enviar mensagem WhatsApp'
-    );
+    logger.error({ err: error, ...logContext }, 'Erro ao enviar mensagem WhatsApp');
     return false;
   }
 };

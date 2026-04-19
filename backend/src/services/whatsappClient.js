@@ -606,6 +606,26 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   }
 
   try {
+    logger.info(
+      {
+        phone: normalizedPhone || rawPhone || null,
+        remoteJidOriginal,
+        destination,
+        endpoint,
+      },
+      'DESTINO FINAL'
+    );
+
+    logger.info(
+      {
+        number: destination,
+        textMessagePreview: normalizedMessage,
+        payloadShape: 'number+textMessage',
+        endpoint,
+      },
+      'ENVIO PAYLOAD EVOLUTION'
+    );
+
     const sendResult = await sendTextMessage({
       phone: destination,
       text: normalizedMessage,
