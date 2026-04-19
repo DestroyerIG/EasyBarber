@@ -10,6 +10,7 @@ const mockLogoutInstance = jest.fn();
 const mockGetEvolutionConfig = jest.fn();
 const mockIsSessionStateError = jest.fn();
 const mockGetProviderErrorMessage = jest.fn();
+const mockIsInstanceNotFoundError = jest.fn();
 
 class MockEvolutionApiError extends Error {
   constructor(message, { status = null, details = null, code = 'EVOLUTION_API_ERROR' } = {}) {
@@ -33,6 +34,7 @@ jest.unstable_mockModule('../services/evolutionApiService.js', () => ({
   EvolutionApiError: MockEvolutionApiError,
   isSessionStateError: mockIsSessionStateError,
   getProviderErrorMessage: mockGetProviderErrorMessage,
+  isInstanceNotFoundError: mockIsInstanceNotFoundError,
 }));
 
 jest.unstable_mockModule('../utils/logger.js', () => ({
@@ -45,7 +47,11 @@ jest.unstable_mockModule('../utils/logger.js', () => ({
   },
 }));
 
-const { sendWhatsAppText } = await import('../services/whatsappClient.js');
+const {
+  sendWhatsAppText,
+  refreshWhatsAppStatus,
+  getWhatsAppStatus,
+} = await import('../services/whatsappClient.js');
 
 describe('whatsappClient destination resolution', () => {
   beforeEach(() => {
@@ -70,6 +76,42 @@ describe('whatsappClient destination resolution', () => {
     });
     mockIsSessionStateError.mockReturnValue(false);
     mockGetProviderErrorMessage.mockReturnValue('');
+    mockIsInstanceNotFoundError.mockReturnValue(false);
+  });
+
+  it('sets status as instance_not_found when Evolution reports missing instance', async () => {
+    mockGetInstanceStatus.mockRejectedValue(
+      new MockEvolutionApiError("The 'easybarber' instance does not exist", {
+        status: 404,
+        code: 'EVOLUTION_API_ERROR',
+      })
+    );
+    mockIsInstanceNotFoundError.mockImplementation((error) => Number(error?.status || 0) === 404);
+
+    await refreshWhatsAppStatus();
+
+    expect(getWhatsAppStatus()).toEqual(
+      expect.objectContaining({
+        status: 'instance_not_found',
+        connectedNumber: null,
+        connectedName: null,
+      })
+    );
+  });
+
+  it('sets status as provider_unavailable when health check fails', async () => {
+    mockHealthCheck.mockResolvedValue({
+      ok: false,
+      error: new Error('provider down'),
+    });
+
+    await refreshWhatsAppStatus();
+
+    expect(getWhatsAppStatus()).toEqual(
+      expect.objectContaining({
+        status: 'provider_unavailable',
+      })
+    );
   });
 
   it('sends using canonical phone even when remoteJidOriginal is @lid', async () => {

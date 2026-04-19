@@ -10,6 +10,7 @@ import {
   EvolutionApiError,
   isSessionStateError,
   getProviderErrorMessage,
+  isInstanceNotFoundError,
 } from './evolutionApiService.js';
 import logger from '../utils/logger.js';
 import {
@@ -20,7 +21,8 @@ import {
 } from '../utils/whatsapp.js';
 
 const STATUS = {
-  UNAVAILABLE: 'unavailable',
+  PROVIDER_UNAVAILABLE: 'provider_unavailable',
+  INSTANCE_NOT_FOUND: 'instance_not_found',
   DISCONNECTED: 'disconnected',
   PAIRING: 'pairing',
   CONNECTED: 'connected',
@@ -51,11 +53,36 @@ const updateState = (patch) => {
 
 const updateUnavailableState = (error) => {
   updateState({
-    status: STATUS.UNAVAILABLE,
+    status: STATUS.PROVIDER_UNAVAILABLE,
     qrCode: null,
     connectedNumber: null,
     connectedName: null,
     error: error?.message || 'Evolution API indisponivel',
+  });
+};
+
+const buildStatusLookupUrls = (baseURL, instanceName) => [
+  `${baseURL}/instance/connectionState/${instanceName}`,
+  `${baseURL}/instance/status/${instanceName}`,
+];
+
+const buildInstanceNotFoundError = (details = null) => {
+  const { instanceName } = getEvolutionConfig();
+
+  return new EvolutionApiError(`A instancia '${instanceName}' nao existe na Evolution API`, {
+    status: 404,
+    details,
+    code: 'EVOLUTION_INSTANCE_NOT_FOUND',
+  });
+};
+
+const updateInstanceNotFoundState = (error = null) => {
+  updateState({
+    status: STATUS.INSTANCE_NOT_FOUND,
+    qrCode: null,
+    connectedNumber: null,
+    connectedName: null,
+    error: error?.message || buildInstanceNotFoundError().message,
   });
 };
 
@@ -212,8 +239,19 @@ const syncStateFromEvolution = async ({ includeQr = false } = {}) => {
     return waState;
   }
 
+  const { baseURL, instanceName } = getEvolutionConfig();
+  const statusLookupUrls = buildStatusLookupUrls(baseURL, instanceName);
+
   const health = await healthCheck();
   if (!health.ok) {
+    logger.warn(
+      {
+        urlCalled: [`${baseURL}/instance/fetchInstances`, `${baseURL}/instance/list`],
+        instanceName,
+        evolutionStatus: health?.error?.status || null,
+      },
+      'Falha ao validar disponibilidade da Evolution antes de sincronizar status'
+    );
     updateUnavailableState(health.error);
     return waState;
   }
@@ -223,14 +261,16 @@ const syncStateFromEvolution = async ({ includeQr = false } = {}) => {
   try {
     statusPayload = await getInstanceStatus();
   } catch (error) {
-    if (error instanceof EvolutionApiError && error.status === 404) {
-      updateState({
-        status: STATUS.DISCONNECTED,
-        qrCode: null,
-        connectedNumber: null,
-        connectedName: null,
-        error: null,
-      });
+    if (isInstanceNotFoundError(error)) {
+      logger.warn(
+        {
+          urlCalled: statusLookupUrls,
+          instanceName,
+          evolutionStatus: error?.status || null,
+        },
+        'Instancia configurada nao existe na Evolution API'
+      );
+      updateInstanceNotFoundState(error);
       return waState;
     }
 
@@ -238,9 +278,33 @@ const syncStateFromEvolution = async ({ includeQr = false } = {}) => {
     return waState;
   }
 
+  if (!statusPayload || isInstanceNotFoundError({ details: statusPayload })) {
+    logger.warn(
+      {
+        urlCalled: statusLookupUrls,
+        instanceName,
+        evolutionStatus: null,
+      },
+      'Evolution retornou payload sem instancia correspondente'
+    );
+    updateInstanceNotFoundState(buildInstanceNotFoundError(statusPayload));
+    return waState;
+  }
+
   const qrCode = includeQr ? extractQrCode(statusPayload) : waState.qrCode;
+  const rawEvolutionState = extractConnectionState(statusPayload);
   const identity = extractIdentity(statusPayload);
-  const status = normalizeStatus(extractConnectionState(statusPayload), qrCode);
+  const status = normalizeStatus(rawEvolutionState, qrCode);
+
+  logger.info(
+    {
+      urlCalled: statusLookupUrls,
+      instanceName,
+      evolutionStatus: rawEvolutionState,
+      normalizedStatus: status,
+    },
+    'Status da instancia sincronizado com a Evolution API'
+  );
 
   updateState({
     status,
@@ -307,7 +371,14 @@ export const connectWhatsApp = async () => {
     }
 
     const qrCode = extractQrCode(qrPayload);
-    await syncStateFromEvolution({ includeQr: !qrCode });
+    const syncedState = await syncStateFromEvolution({ includeQr: !qrCode });
+
+    if (
+      syncedState.status === STATUS.INSTANCE_NOT_FOUND ||
+      syncedState.status === STATUS.PROVIDER_UNAVAILABLE
+    ) {
+      return false;
+    }
 
     if (qrCode) {
       updateState({
@@ -323,7 +394,9 @@ export const connectWhatsApp = async () => {
   } catch (error) {
     logger.error({ err: error }, 'Erro ao conectar instancia Evolution');
 
-    if (error instanceof EvolutionApiError && error.code === 'EVOLUTION_CONFIG_ERROR') {
+    if (isInstanceNotFoundError(error)) {
+      updateInstanceNotFoundState(error);
+    } else if (error instanceof EvolutionApiError && error.code === 'EVOLUTION_CONFIG_ERROR') {
       updateState({
         status: STATUS.ERROR,
         qrCode: null,
@@ -370,7 +443,15 @@ export const getWhatsAppQrCode = async () => {
 export const disconnectWhatsApp = async () => {
   try {
     await logoutInstance();
-    await syncStateFromEvolution({ includeQr: false });
+    const syncedState = await syncStateFromEvolution({ includeQr: false });
+
+    if (syncedState.status === STATUS.INSTANCE_NOT_FOUND) {
+      return true;
+    }
+
+    if (syncedState.status === STATUS.PROVIDER_UNAVAILABLE) {
+      return false;
+    }
 
     updateState({
       status: STATUS.DISCONNECTED,
@@ -384,7 +465,9 @@ export const disconnectWhatsApp = async () => {
   } catch (error) {
     logger.error({ err: error }, 'Erro ao desconectar instancia Evolution');
 
-    if (error instanceof EvolutionApiError) {
+    if (isInstanceNotFoundError(error)) {
+      updateInstanceNotFoundState(error);
+    } else if (error instanceof EvolutionApiError) {
       updateUnavailableState(error);
     }
 
@@ -707,7 +790,9 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
     }
 
     if (error instanceof EvolutionApiError) {
-      if (
+      if (isInstanceNotFoundError(error)) {
+        updateInstanceNotFoundState(error);
+      } else if (
         error.code === 'EVOLUTION_NETWORK_ERROR' ||
         error.code === 'EVOLUTION_TIMEOUT' ||
         error.code === 'EVOLUTION_CONFIG_ERROR'
@@ -738,5 +823,23 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
 export const logoutWhatsApp = async () => disconnectWhatsApp();
 
 export const restartWhatsApp = async () => connectWhatsApp();
+
+export const initializeWhatsAppInstance = async () => {
+  const { baseURL, instanceName } = getEvolutionConfig();
+
+  logger.info(
+    {
+      urlCalled: `${baseURL}/instance/create`,
+      instanceName,
+    },
+    'Inicializando/recriando instancia Evolution'
+  );
+
+  const ok = await connectWhatsApp();
+  return {
+    ok,
+    status: getWhatsAppStatus(),
+  };
+};
 
 export const refreshWhatsAppStatus = async () => syncStateFromEvolution({ includeQr: false });

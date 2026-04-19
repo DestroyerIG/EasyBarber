@@ -12,7 +12,14 @@ import {
 } from 'lucide-react';
 
 interface WhatsAppStatus {
-  status: 'unavailable' | 'disconnected' | 'pairing' | 'connected' | 'error';
+  status:
+    | 'provider_unavailable'
+    | 'instance_not_found'
+    | 'disconnected'
+    | 'pairing'
+    | 'connected'
+    | 'error'
+    | 'unavailable';
   qrCode: string | null;
   connectedNumber: string | null;
   connectedName: string | null;
@@ -121,7 +128,7 @@ export const ConnectionPanel = ({ waStatus, statusLoading, actionLoading, onConn
         </div>
       )}
 
-      {!statusLoading && waStatus.status === 'unavailable' && (
+      {!statusLoading && (waStatus.status === 'provider_unavailable' || waStatus.status === 'unavailable') && (
         <div className="flex flex-col items-center space-y-6 py-8">
           <div className="w-24 h-24 bg-slate-500/10 rounded-full flex items-center justify-center border-2 border-slate-500/30">
             <WifiOff size={48} className="text-slate-400" />
@@ -129,6 +136,28 @@ export const ConnectionPanel = ({ waStatus, statusLoading, actionLoading, onConn
           <div className="text-center space-y-2">
             <h4 className="text-xl font-bold text-white">Evolution API Indisponivel</h4>
             <p className="text-gray-400 text-sm">{waStatus.error || 'Nao foi possivel acessar o servico externo agora.'}</p>
+          </div>
+        </div>
+      )}
+
+      {!statusLoading && waStatus.status === 'instance_not_found' && (
+        <div className="flex flex-col items-center space-y-6 py-8">
+          <div className="w-24 h-24 bg-yellow-500/10 rounded-full flex items-center justify-center border-2 border-yellow-500/30">
+            <AlertTriangle size={48} className="text-yellow-500" />
+          </div>
+          <div className="text-center space-y-2">
+            <h4 className="text-xl font-bold text-white">Instancia Inexistente</h4>
+            <p className="text-gray-400 text-sm">
+              {waStatus.error || 'A instancia configurada nao existe na Evolution. Inicialize para criar/recriar.'}
+            </p>
+            <button
+              onClick={onConnect}
+              disabled={actionLoading}
+              className="mt-4 btn-primary flex items-center gap-2 mx-auto disabled:opacity-50"
+            >
+              {actionLoading ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
+              Criar/Recriar Instancia
+            </button>
           </div>
         </div>
       )}

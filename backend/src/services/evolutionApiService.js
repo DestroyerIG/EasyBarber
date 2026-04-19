@@ -127,6 +127,42 @@ const safeStringify = (value) => {
   }
 };
 
+const normalizeProviderMessage = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const hasInstanceNotFoundMessage = (value, instanceName = '') => {
+  const normalized = normalizeProviderMessage(value);
+
+  if (!normalized) {
+    return false;
+  }
+
+  const hasGenericPattern =
+    (
+      normalized.includes('instance') &&
+      (
+        normalized.includes('does not exist') ||
+        normalized.includes('doesn\'t exist') ||
+        normalized.includes('not found')
+      )
+    ) ||
+    normalized.includes('instancia inexistente') ||
+    normalized.includes('instancia nao existe');
+
+  if (!hasGenericPattern) {
+    return false;
+  }
+
+  if (!instanceName) {
+    return true;
+  }
+
+  return normalized.includes(instanceName.toLowerCase()) || normalized.includes('instance');
+};
+
 export const getProviderErrorMessage = (error = null) => {
   if (!error) return '';
 
@@ -151,6 +187,31 @@ export const getProviderErrorMessage = (error = null) => {
   }
 
   return Array.from(new Set(chunks)).join(' | ');
+};
+
+export const isInstanceNotFoundError = (error = null) => {
+  if (!error) {
+    return false;
+  }
+
+  if (error?.code === 'EVOLUTION_INSTANCE_NOT_FOUND') {
+    return true;
+  }
+
+  const status = Number(error?.status || 0);
+  if (status === 404) {
+    return true;
+  }
+
+  const { instanceName } = getConfig();
+  const providerError = getProviderErrorMessage(error);
+  const detailMessage = extractErrorMessage(error?.details);
+
+  return (
+    hasInstanceNotFoundMessage(providerError, instanceName) ||
+    hasInstanceNotFoundMessage(detailMessage, instanceName) ||
+    hasInstanceNotFoundMessage(safeStringify(error?.details), instanceName)
+  );
 };
 
 export const isSessionStateError = (error = null) => {
@@ -196,7 +257,7 @@ const isRetriableStatus = (status) => [408, 429, 500, 502, 503, 504].includes(st
 const request = async ({ method, path, body = undefined, expectedStatuses = [200, 201] }) => {
   ensureConfigured();
 
-  const { baseURL, timeoutMs, retryAttempts } = getConfig();
+  const { baseURL, timeoutMs, retryAttempts, instanceName } = getConfig();
   const url = `${baseURL}${normalizePath(path)}`;
   const maxAttempts = retryAttempts + 1;
   let lastError = null;
@@ -212,6 +273,7 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
           url,
           hasBody: body !== undefined,
           bodyKeys: body && typeof body === 'object' ? Object.keys(body) : [],
+          instanceName,
           attempt,
           maxAttempts,
         },
@@ -227,6 +289,18 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
 
       const payload = await parseResponseBody(response);
 
+      logger.debug(
+        {
+          method,
+          url,
+          instanceName,
+          status: response.status,
+          attempt,
+          maxAttempts,
+        },
+        'Evolution API response'
+      );
+
       if (!expectedStatuses.includes(response.status)) {
         const message = extractErrorMessage(payload) || `Evolution API respondeu com status ${response.status}`;
         const apiError = new EvolutionApiError(message, {
@@ -240,6 +314,7 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
               status: response.status,
               method,
               url,
+              instanceName,
               attempt,
               maxAttempts,
             },
@@ -256,6 +331,7 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
             payload,
             url,
             method,
+            instanceName,
             attempt,
           },
           'Erro na Evolution API'
@@ -292,6 +368,7 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
             status: normalizedError.status,
             method,
             url,
+            instanceName,
             attempt,
             maxAttempts,
           },
@@ -454,6 +531,23 @@ const unwrapInstancesList = (payload) => {
   return [];
 };
 
+const extractInstanceConnectionState = (payload) => {
+  const candidates = [
+    payload?.status,
+    payload?.state,
+    payload?.connectionStatus,
+    payload?.instance?.status,
+    payload?.instance?.state,
+    payload?.instance?.connectionStatus,
+    payload?.data?.status,
+    payload?.data?.state,
+    payload?.data?.connectionStatus,
+  ];
+
+  const match = candidates.find((value) => typeof value === 'string' && value.trim());
+  return match ? match.trim().toLowerCase() : null;
+};
+
 export const getEvolutionConfig = () => {
   const { baseURL, instanceName, webhookUrl, timeoutMs, retryAttempts } = getConfig();
 
@@ -521,20 +615,55 @@ export const connectInstance = async () => {
 };
 
 export const getInstanceStatus = async () => {
-  const { instanceName } = getConfig();
+  const { instanceName, baseURL } = getConfig();
+  const statusUrls = [
+    `${baseURL}/instance/connectionState/${instanceName}`,
+    `${baseURL}/instance/status/${instanceName}`,
+  ];
 
   try {
-    return await requestWithFallback(
+    const payload = await requestWithFallback(
       [
         { method: 'GET', path: `/instance/connectionState/${instanceName}` },
         { method: 'GET', path: `/instance/status/${instanceName}` },
       ],
       'getInstanceStatus'
     );
+
+    if (isInstanceNotFoundError({ details: payload })) {
+      throw new EvolutionApiError(`Instancia '${instanceName}' nao existe na Evolution`, {
+        status: 404,
+        details: payload,
+        code: 'EVOLUTION_INSTANCE_NOT_FOUND',
+      });
+    }
+
+    logger.info(
+      {
+        urlCalled: statusUrls,
+        instanceName,
+        evolutionStatus: extractInstanceConnectionState(payload),
+      },
+      'Status da instancia consultado na Evolution API'
+    );
+
+    return payload;
   } catch (error) {
-    if (!(error instanceof EvolutionApiError) || ![404, 405].includes(error.status || 0)) {
+    if (
+      !(error instanceof EvolutionApiError) ||
+      (![404, 405].includes(error.status || 0) && !isInstanceNotFoundError(error))
+    ) {
       throw error;
     }
+
+    logger.warn(
+      {
+        urlCalled: statusUrls,
+        instanceName,
+        evolutionStatus: error?.status || null,
+      },
+      'Consulta direta de status da instancia falhou, tentando via lista de instancias'
+    );
 
     const payload = await requestWithFallback(
       [
@@ -552,7 +681,24 @@ export const getInstanceStatus = async () => {
       return n === name;
     });
 
-    return current || null;
+    if (!current) {
+      throw new EvolutionApiError(`Instancia '${name}' nao existe na Evolution`, {
+        status: 404,
+        details: payload,
+        code: 'EVOLUTION_INSTANCE_NOT_FOUND',
+      });
+    }
+
+    logger.info(
+      {
+        urlCalled: [`${baseURL}/instance/fetchInstances`, `${baseURL}/instance/list`],
+        instanceName: name,
+        evolutionStatus: extractInstanceConnectionState(current),
+      },
+      'Status da instancia resolvido via lista de instancias da Evolution'
+    );
+
+    return current;
   }
 };
 

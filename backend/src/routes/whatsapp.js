@@ -10,6 +10,7 @@ import {
   refreshWhatsAppStatus,
   logoutWhatsApp,
   restartWhatsApp,
+  initializeWhatsAppInstance,
 } from '../services/whatsappClient.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { requireTenantRoles } from '../middleware/rbac.js';
@@ -858,12 +859,50 @@ router.post('/connect', ...waProtected, async (req, res, next) => {
     const connected = await connectWhatsApp();
     const status = getWhatsAppStatus();
 
-    if (!connected && status.status === 'unavailable') {
+    if (!connected && (status.status === 'provider_unavailable' || status.status === 'unavailable')) {
       return sendError(
         res,
         503,
         'WHATSAPP_PROVIDER_UNAVAILABLE',
         status.error || 'Evolution API indisponivel'
+      );
+    }
+
+    if (!connected && status.status === 'instance_not_found') {
+      return sendError(
+        res,
+        404,
+        'WHATSAPP_INSTANCE_NOT_FOUND',
+        status.error || 'Instancia configurada nao existe na Evolution API'
+      );
+    }
+
+    return sendSuccess(res, status);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/initialize', ...waProtected, async (req, res, next) => {
+  try {
+    const result = await initializeWhatsAppInstance();
+    const status = result?.status || getWhatsAppStatus();
+
+    if (!result?.ok && (status.status === 'provider_unavailable' || status.status === 'unavailable')) {
+      return sendError(
+        res,
+        503,
+        'WHATSAPP_PROVIDER_UNAVAILABLE',
+        status.error || 'Evolution API indisponivel'
+      );
+    }
+
+    if (!result?.ok && status.status === 'instance_not_found') {
+      return sendError(
+        res,
+        404,
+        'WHATSAPP_INSTANCE_NOT_FOUND',
+        status.error || 'Instancia configurada nao existe na Evolution API'
       );
     }
 
@@ -877,11 +916,19 @@ router.get('/qrcode', ...waProtected, async (req, res, next) => {
   try {
     const status = getWhatsAppStatus();
 
-    if (status.status === 'unavailable') {
+    if (status.status === 'provider_unavailable' || status.status === 'unavailable') {
       return sendSuccess(res, {
-        status: 'unavailable',
+        status: 'provider_unavailable',
         qrCode: null,
         message: status.error || 'Evolution API indisponivel',
+      });
+    }
+
+    if (status.status === 'instance_not_found') {
+      return sendSuccess(res, {
+        status: 'instance_not_found',
+        qrCode: null,
+        message: status.error || 'Instancia configurada nao existe na Evolution API',
       });
     }
 
@@ -1119,11 +1166,19 @@ router.get('/qr', ...waProtected, async (req, res, next) => {
   try {
     const status = getWhatsAppStatus();
 
-    if (status.status === 'unavailable') {
+    if (status.status === 'provider_unavailable' || status.status === 'unavailable') {
       return sendSuccess(res, {
-        status: 'unavailable',
+        status: 'provider_unavailable',
         qrCode: null,
         message: status.error || 'Evolution API indisponivel',
+      });
+    }
+
+    if (status.status === 'instance_not_found') {
+      return sendSuccess(res, {
+        status: 'instance_not_found',
+        qrCode: null,
+        message: status.error || 'Instancia configurada nao existe na Evolution API',
       });
     }
 

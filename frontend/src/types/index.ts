@@ -188,7 +188,14 @@ export interface MenuOption {
 }
 
 export interface WhatsAppStatus {
-    status: 'unavailable' | 'disconnected' | 'pairing' | 'connected' | 'error';
+    status:
+        | 'provider_unavailable'
+        | 'instance_not_found'
+        | 'disconnected'
+        | 'pairing'
+        | 'connected'
+        | 'error'
+        | 'unavailable';
     qrCode: string | null;
     connectedNumber: string | null;
     connectedName: string | null;

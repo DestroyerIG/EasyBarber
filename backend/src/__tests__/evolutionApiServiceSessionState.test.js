@@ -2,6 +2,7 @@ import { describe, it, expect } from '@jest/globals';
 import {
   EvolutionApiError,
   getProviderErrorMessage,
+  isInstanceNotFoundError,
   isSessionStateError,
 } from '../services/evolutionApiService.js';
 
@@ -65,5 +66,24 @@ describe('evolutionApiService session state error classification', () => {
     });
 
     expect(getProviderErrorMessage(error)).toContain('Error: not-acceptable');
+  });
+
+  it('classifies 404 as instance_not_found', () => {
+    const error = new EvolutionApiError("The 'easybarber' instance does not exist", {
+      status: 404,
+    });
+
+    expect(isInstanceNotFoundError(error)).toBe(true);
+  });
+
+  it('classifies provider message with instance does not exist as instance_not_found', () => {
+    const error = new EvolutionApiError('Falha ao consultar instancia', {
+      status: 400,
+      details: {
+        message: ["The 'easybarber' instance does not exist"],
+      },
+    });
+
+    expect(isInstanceNotFoundError(error)).toBe(true);
   });
 });

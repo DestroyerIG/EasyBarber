@@ -28,13 +28,70 @@ import {
 } from 'lucide-react';
 
 interface WhatsAppStatus {
-  status: 'unavailable' | 'disconnected' | 'pairing' | 'connected' | 'error';
+  status:
+    | 'provider_unavailable'
+    | 'instance_not_found'
+    | 'disconnected'
+    | 'pairing'
+    | 'connected'
+    | 'error'
+    | 'unavailable';
   qrCode: string | null;
   connectedNumber: string | null;
   connectedName: string | null;
   error: string | null;
   provider?: string;
 }
+
+const SUPPORTED_STATUS = [
+  'provider_unavailable',
+  'instance_not_found',
+  'disconnected',
+  'pairing',
+  'connected',
+  'error',
+] as const;
+
+const asObjectPayload = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
+};
+
+const normalizeStatusValue = (value: unknown): WhatsAppStatus['status'] => {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (normalized === 'unavailable') {
+    return 'provider_unavailable';
+  }
+
+  if (SUPPORTED_STATUS.includes(normalized as (typeof SUPPORTED_STATUS)[number])) {
+    return normalized as WhatsAppStatus['status'];
+  }
+
+  return 'disconnected';
+};
+
+const normalizeStatusPayload = (value: unknown): WhatsAppStatus => {
+  const payload = asObjectPayload(value);
+
+  return {
+    status: normalizeStatusValue(payload.status),
+    qrCode: typeof payload.qrCode === 'string' && payload.qrCode.trim() ? payload.qrCode : null,
+    connectedNumber:
+      typeof payload.connectedNumber === 'string' && payload.connectedNumber.trim()
+        ? payload.connectedNumber
+        : null,
+    connectedName:
+      typeof payload.connectedName === 'string' && payload.connectedName.trim()
+        ? payload.connectedName
+        : null,
+    error: typeof payload.error === 'string' && payload.error.trim() ? payload.error : null,
+    provider: typeof payload.provider === 'string' && payload.provider.trim() ? payload.provider : undefined,
+  };
+};
 
 const DEFAULT_WA_STATUS: WhatsAppStatus = {
   status: 'disconnected',
@@ -66,25 +123,20 @@ export const WhatsAppModule = () => {
   const fetchStatus = useCallback(async () => {
     try {
       const response = await api.get('/whatsapp/status');
-      const payload = response.data as Partial<WhatsAppStatus>;
-      const allowedStatus = ['unavailable', 'disconnected', 'pairing', 'connected', 'error'];
-      const normalizedStatus = allowedStatus.includes(String(payload.status))
-        ? (payload.status as WhatsAppStatus['status'])
-        : 'error';
-
       const mergedStatus: WhatsAppStatus = {
         ...DEFAULT_WA_STATUS,
-        ...payload,
-        status: normalizedStatus,
+        ...normalizeStatusPayload(response.data),
       };
 
       if (mergedStatus.status === 'pairing' && !mergedStatus.qrCode) {
         try {
           const qrResponse = await api.get('/whatsapp/qrcode');
-          const qrPayload = qrResponse.data as Partial<WhatsAppStatus> & { qrCode?: string | null };
-          mergedStatus.qrCode = qrPayload.qrCode || null;
-          if (qrPayload.status && allowedStatus.includes(String(qrPayload.status))) {
-            mergedStatus.status = qrPayload.status as WhatsAppStatus['status'];
+          const qrNormalized = normalizeStatusPayload(qrResponse.data);
+          const qrPayload = asObjectPayload(qrResponse.data);
+
+          mergedStatus.qrCode = qrNormalized.qrCode;
+          if (qrPayload.status !== undefined) {
+            mergedStatus.status = qrNormalized.status;
           }
         } catch {
           // manter fallback do status principal
@@ -95,7 +147,7 @@ export const WhatsAppModule = () => {
     } catch {
       setWaStatus({
         ...DEFAULT_WA_STATUS,
-        status: 'unavailable',
+        status: 'provider_unavailable',
         error: 'Nao foi possivel consultar a Evolution API no momento.',
       });
     } finally {
@@ -147,7 +199,18 @@ export const WhatsAppModule = () => {
 
   const handleConnect = async () => {
     setActionLoading(true);
-    try { await api.post('/whatsapp/connect'); showToast('Conexao iniciada. Aguardando status...', 'success'); fetchStatus(); }
+    try {
+      const initializeMode = waStatus.status === 'instance_not_found';
+      const endpoint = initializeMode ? '/whatsapp/initialize' : '/whatsapp/connect';
+      await api.post(endpoint);
+      showToast(
+        initializeMode
+          ? 'Inicializacao da instancia solicitada. Aguardando status...'
+          : 'Conexao iniciada. Aguardando status...',
+        'success'
+      );
+      fetchStatus();
+    }
     catch { showToast('Erro ao reconectar', 'error'); }
     finally { setActionLoading(false); }
   };
@@ -227,6 +290,8 @@ export const WhatsAppModule = () => {
     switch (waStatus.status) {
       case 'connected': return { icon: <CheckCircle size={20} />, label: 'Conectado', sublabel: waStatus.connectedName || waStatus.connectedNumber || '', color: 'text-green-500', bg: 'bg-green-500/10', border: 'border-green-500/20', barColor: 'bg-green-500', pulse: true };
       case 'pairing': return { icon: <QrCode size={20} />, label: 'Aguardando pareamento', sublabel: 'Escaneie o QR Code no WhatsApp', color: 'text-amber-500', bg: 'bg-amber-500/10', border: 'border-amber-500/20', barColor: 'bg-amber-500', pulse: false };
+      case 'instance_not_found': return { icon: <AlertTriangle size={20} />, label: 'Instancia inexistente', sublabel: waStatus.error || 'A instancia configurada nao existe na Evolution', color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20', barColor: 'bg-yellow-500', pulse: false };
+      case 'provider_unavailable':
       case 'unavailable': return { icon: <WifiOff size={20} />, label: 'API indisponivel', sublabel: waStatus.error || 'Evolution API fora do ar', color: 'text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/20', barColor: 'bg-slate-500', pulse: false };
       case 'error': return { icon: <AlertTriangle size={20} />, label: 'Erro', sublabel: waStatus.error || 'Falha inesperada no provider', color: 'text-orange-500', bg: 'bg-orange-500/10', border: 'border-orange-500/20', barColor: 'bg-orange-500', pulse: false };
       default: return { icon: <WifiOff size={20} />, label: 'Desconectado', sublabel: waStatus.error || 'Clique em conectar para iniciar', color: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/20', barColor: 'bg-red-500', pulse: false };
@@ -234,6 +299,11 @@ export const WhatsAppModule = () => {
   };
 
   const statusConfig = getStatusConfig();
+  const connectButtonLabel = waStatus.status === 'instance_not_found'
+    ? 'Criar/Recriar'
+    : waStatus.status === 'provider_unavailable' || waStatus.status === 'unavailable'
+      ? 'Tentar Novamente'
+      : 'Conectar';
 
   const tabs = [
     { id: 'config' as const, label: 'Conexão', icon: Smartphone },
@@ -289,9 +359,16 @@ export const WhatsAppModule = () => {
                   {actionLoading ? <Loader2 size={12} className="animate-spin" /> : <LogOut size={12} />} Desconectar
                 </button>
               )}
-              {(waStatus.status === 'disconnected' || waStatus.status === 'error' || waStatus.status === 'pairing') && (
+              {(
+                waStatus.status === 'disconnected' ||
+                waStatus.status === 'error' ||
+                waStatus.status === 'pairing' ||
+                waStatus.status === 'instance_not_found' ||
+                waStatus.status === 'provider_unavailable' ||
+                waStatus.status === 'unavailable'
+              ) && (
                 <button onClick={handleConnect} disabled={actionLoading} className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] uppercase font-bold tracking-wider bg-primary/10 text-primary hover:bg-primary/20 rounded-lg transition-all disabled:opacity-50">
-                  {actionLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Conectar
+                  {actionLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} {connectButtonLabel}
                 </button>
               )}
             </div>
