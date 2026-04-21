@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
 import { useToast } from './Toast';
+import { useAuth } from '@/contexts/AuthContext';
 import { PageHeader } from '@/components/ui';
 import { ConnectionPanel } from '@/components/whatsapp/ConnectionPanel';
 import { MessageConfigPanel, BotConfig } from '@/components/whatsapp/MessageConfigPanel';
@@ -119,6 +120,7 @@ export const WhatsAppModule = () => {
   const [statusLoading, setStatusLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const { showToast } = useToast();
+  const { user } = useAuth();
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -283,16 +285,47 @@ export const WhatsAppModule = () => {
   };
 
   const handleSimulatorMessage = async (text: string): Promise<string | null> => {
+    const barbershopId =
+      typeof user?.barbershopId === 'string' && user.barbershopId.trim()
+        ? user.barbershopId.trim()
+        : null;
+
+    if (!barbershopId) {
+      showToast(
+        'Nao foi possivel identificar a barbearia autenticada para o simulador. Faca login novamente.',
+        'error'
+      );
+      return null;
+    }
+
     try {
       const response = await api.post('/whatsapp/simulator/message', {
         text,
         phone: '5511999999999',
         pushName: 'Simulador',
+        barbershopId,
       });
 
       return response.data?.lastBotResponse || null;
-    } catch {
-      showToast('Erro ao enviar mensagem para o bot', 'error');
+    } catch (error) {
+      const apiError = error as {
+        response?: {
+          data?: {
+            error?: { message?: string } | string;
+            message?: string;
+          };
+        };
+      };
+
+      const rawError = apiError.response?.data?.error;
+      const backendMessage =
+        typeof rawError === 'object'
+          ? rawError?.message
+          : typeof rawError === 'string'
+            ? rawError
+            : apiError.response?.data?.message;
+
+      showToast(backendMessage || 'Erro ao enviar mensagem para o bot', 'error');
       return null;
     }
   };

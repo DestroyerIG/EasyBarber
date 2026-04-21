@@ -147,6 +147,36 @@ describe('whatsappFlowService guards', () => {
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
   });
 
+  it('processa simulador com barbershopId explicito sem depender de connectedNumber', async () => {
+    mockGetWhatsAppStatus.mockReturnValue({
+      connectedNumber: null,
+    });
+    mockIsWithinBusinessHours.mockReturnValue(false);
+
+    const result = await handleIncomingMessage('5511777777777', 'oi', {
+      simulationMode: true,
+      barbershopId: 'tenant-sim',
+      barbershopContextSource: 'payload',
+      now: new Date('2026-04-18T07:30:00-03:00'),
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        ignored: false,
+      })
+    );
+    expect(mockGetBarbershopBusinessSettings).toHaveBeenCalledWith('tenant-sim');
+
+    const tenantLookupCall = mockPoolQuery.mock.calls.find(
+      ([query]) =>
+        typeof query === 'string' &&
+        query.includes('regexp_replace(COALESCE(whatsapp')
+    );
+
+    expect(tenantLookupCall).toBeUndefined();
+  });
+
   it('returns ambiguous_phone for @lid payload when no trusted fallback can be resolved', async () => {
     mockGetWhatsAppStatus.mockReturnValue({
       connectedNumber: null,

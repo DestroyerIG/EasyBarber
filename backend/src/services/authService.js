@@ -121,6 +121,7 @@ const clearAuthCookies = (res) => {
 };
 
 const buildUserPayload = ({
+  barbershopId,
   email,
   role,
   barbershopName,
@@ -129,6 +130,7 @@ const buildUserPayload = ({
   subscriptionStatus,
   subscriptionCurrentPeriodEnd,
 }) => ({
+  barbershopId,
   email,
   role,
   barbershopName,
@@ -152,6 +154,7 @@ const buildRegisterResponse = ({
   verificationEmailSent,
   message,
   user: buildUserPayload({
+    barbershopId,
     email,
     role,
     barbershopName,
@@ -935,6 +938,7 @@ export const authService = {
         token: accessToken,
         refreshToken,
         user: buildUserPayload({
+          barbershopId: user.barbershop_id,
           email: user.email,
           role: normalizedRole,
           barbershopName: user.barbershop_name,
@@ -994,6 +998,7 @@ export const authService = {
         token: accessToken,
         refreshToken: newRefreshToken,
         user: buildUserPayload({
+          barbershopId: row.barbershop_id,
           email: row.email,
           role: normalizedRole,
           barbershopName: row.barbershop_name,
@@ -1200,6 +1205,7 @@ export const authService = {
 
     return {
       user: {
+        barbershopId: barbershopId || user.barbershop_id || null,
         email: user.email,
         role: normalizedRole,
         barbershopName: user.barbershop_name,

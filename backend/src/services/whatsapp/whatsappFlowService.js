@@ -262,7 +262,31 @@ const formatDateBR = (dateStr, options = {}) => {
 
 // ==================== RESOLUÇÃO DE BARBERSHOP ====================
 
-const resolveFlowBarbershopId = async () => {
+const normalizeFlowBarbershopId = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized || null;
+};
+
+const resolveFlowBarbershopId = async (options = {}) => {
+  const explicitBarbershopId = normalizeFlowBarbershopId(options?.barbershopId);
+
+  if (explicitBarbershopId) {
+    logger.info(
+      {
+        barbershopId: explicitBarbershopId,
+        source: options?.source || 'explicit',
+        simulationMode: Boolean(options?.simulationMode),
+      },
+      'Barbershop resolvido por contexto explicito no fluxo WhatsApp'
+    );
+
+    return explicitBarbershopId;
+  }
+
   const connectedNumber = resolveConnectedNumber();
 
   if (connectedNumber) {
@@ -1043,9 +1067,26 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       return { ok: false, ignored: true, reason: 'empty_text' };
     }
 
-    const barbershopId = await resolveFlowBarbershopId();
+    const explicitBarbershopId = normalizeFlowBarbershopId(options?.barbershopId);
+    const barbershopContextSource = explicitBarbershopId
+      ? String(options?.barbershopContextSource || 'explicit_option')
+      : null;
+
+    const barbershopId = await resolveFlowBarbershopId({
+      barbershopId: explicitBarbershopId,
+      source: barbershopContextSource,
+      simulationMode: Boolean(options?.simulationMode),
+    });
+
     if (!barbershopId) {
-      logger.warn({ ...flowDebugBase }, 'Mensagem ignorada: barbershop nao resolvido');
+      logger.warn(
+        {
+          ...flowDebugBase,
+          explicitBarbershopId,
+          barbershopContextSource,
+        },
+        'Mensagem ignorada: barbershop nao resolvido'
+      );
       return { ok: false, ignored: true, reason: 'barbershop_not_resolved' };
     }
 

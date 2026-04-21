@@ -27,6 +27,87 @@ import {
 const router = express.Router();
 const waProtected = [authMiddleware, requireTenantRoles, requireFeature('whatsapp_automation')];
 
+const normalizeSimulatorBarbershopId = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized || null;
+};
+
+const resolveSimulatorBarbershopContext = async ({ payloadBarbershopId, authBarbershopId }) => {
+  if (!payloadBarbershopId && !authBarbershopId) {
+    return {
+      ok: false,
+      statusCode: 400,
+      code: 'WHATSAPP_SIMULATOR_BARBERSHOP_REQUIRED',
+      message: 'Campo barbershopId e obrigatorio no simulador quando o contexto autenticado nao estiver disponivel',
+      reason: 'missing_barbershop_context',
+      source: null,
+    };
+  }
+
+  if (!authBarbershopId) {
+    return {
+      ok: false,
+      statusCode: 400,
+      code: 'WHATSAPP_SIMULATOR_AUTH_CONTEXT_MISSING',
+      message: 'Contexto autenticado sem barbershopId. Faca login novamente para usar o simulador.',
+      reason: 'missing_auth_barbershop_context',
+      source: null,
+    };
+  }
+
+  if (payloadBarbershopId && payloadBarbershopId !== authBarbershopId) {
+    return {
+      ok: false,
+      statusCode: 403,
+      code: 'WHATSAPP_SIMULATOR_BARBERSHOP_FORBIDDEN',
+      message: 'barbershopId do payload nao corresponde ao tenant autenticado',
+      reason: 'payload_auth_mismatch',
+      source: 'payload',
+    };
+  }
+
+  const resolvedBarbershopId = payloadBarbershopId || authBarbershopId;
+  const contextSource = payloadBarbershopId ? 'payload' : 'auth';
+
+  try {
+    const result = await pool.query(
+      'SELECT id FROM barbershops WHERE id = $1 LIMIT 1',
+      [resolvedBarbershopId]
+    );
+
+    if (!result.rows.length) {
+      return {
+        ok: false,
+        statusCode: 400,
+        code: 'WHATSAPP_SIMULATOR_INVALID_BARBERSHOP',
+        message: 'barbershopId informado para o simulador e invalido',
+        reason: 'barbershop_not_found',
+        source: contextSource,
+      };
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      statusCode: 500,
+      code: 'WHATSAPP_SIMULATOR_CONTEXT_VALIDATION_FAILED',
+      message: 'Falha ao validar o contexto da barbearia no simulador',
+      reason: 'barbershop_validation_query_failed',
+      source: contextSource,
+      error,
+    };
+  }
+
+  return {
+    ok: true,
+    barbershopId: resolvedBarbershopId,
+    source: contextSource,
+  };
+};
+
 const WEBHOOK_MESSAGE_DEDUPE = new Map();
 const WEBHOOK_DEDUPE_TTL_MS = 10 * 60 * 1000;
 const WEBHOOK_FALLBACK_DEDUPE_TTL_MS = 15 * 1000;
@@ -920,10 +1001,20 @@ router.post('/simulator/message', ...waProtected, async (req, res, next) => {
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     const fallbackPhone = '5511999999999';
     const phone = normalizeWhatsAppNumber(req.body?.phone) || fallbackPhone;
+    const payloadBarbershopId = normalizeSimulatorBarbershopId(req.body?.barbershopId);
+    const authBarbershopId = normalizeSimulatorBarbershopId(req.user?.barbershopId);
     const pushName =
       typeof req.body?.pushName === 'string' && req.body.pushName.trim()
         ? req.body.pushName.trim()
         : 'Simulador';
+
+    logger.info(
+      {
+        payloadBarbershopId,
+        authBarbershopId,
+      },
+      'Simulador WhatsApp: contexto recebido'
+    );
 
     if (!text) {
       return sendError(
@@ -933,6 +1024,42 @@ router.post('/simulator/message', ...waProtected, async (req, res, next) => {
         'Campo text e obrigatorio'
       );
     }
+
+    const context = await resolveSimulatorBarbershopContext({
+      payloadBarbershopId,
+      authBarbershopId,
+    });
+
+    if (!context.ok) {
+      const logPayload = {
+        payloadBarbershopId,
+        authBarbershopId,
+        reason: context.reason,
+        source: context.source,
+      };
+
+      if (context.statusCode >= 500) {
+        logger.error(
+          {
+            ...logPayload,
+            err: context.error,
+          },
+          'Simulador WhatsApp: falha ao validar contexto'
+        );
+      } else {
+        logger.warn(logPayload, 'Simulador WhatsApp: contexto invalido');
+      }
+
+      return sendError(res, context.statusCode, context.code, context.message);
+    }
+
+    logger.info(
+      {
+        barbershopId: context.barbershopId,
+        contextSource: context.source,
+      },
+      'Simulador WhatsApp: contexto resolvido'
+    );
 
     const messageId = `SIMULATOR_${Date.now()}`;
     const remoteJid = `${phone}@s.whatsapp.net`;
@@ -965,7 +1092,27 @@ router.post('/simulator/message', ...waProtected, async (req, res, next) => {
       messageId,
       simulationMode: true,
       responseCollector: botResponses,
+      barbershopId: context.barbershopId,
+      barbershopContextSource: context.source,
     });
+
+    if (result?.reason === 'barbershop_not_resolved') {
+      logger.warn(
+        {
+          barbershopId: context.barbershopId,
+          contextSource: context.source,
+          reason: result.reason,
+        },
+        'Simulador WhatsApp: fluxo retornou contexto nao resolvido'
+      );
+
+      return sendError(
+        res,
+        422,
+        'WHATSAPP_SIMULATOR_CONTEXT_UNRESOLVED',
+        'Nao foi possivel resolver o contexto da barbearia no simulador'
+      );
+    }
 
     const lastBotResponse = botResponses.length > 0 ? botResponses[botResponses.length - 1] : null;
 

@@ -79,6 +79,7 @@ export interface FinanceSummary {
 }
 
 export interface User {
+    barbershopId?: string | null;
     email: string;
     role: string;
     barbershopName: string;
