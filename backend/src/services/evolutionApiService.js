@@ -4,6 +4,27 @@ import { normalizePhoneForSend } from '../utils/whatsapp.js';
 const DEFAULT_TIMEOUT_MS = 10000;
 const DEFAULT_RETRY_ATTEMPTS = 1;
 const MAX_RETRY_ATTEMPTS = 3;
+const DEFAULT_EVOLUTION_WEBHOOK_EVENTS = ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'];
+
+const normalizeWebhookEvents = (value) => {
+  if (!Array.isArray(value)) return [];
+
+  return Array.from(
+    new Set(
+      value
+        .map((eventName) => String(eventName || '').trim().toUpperCase())
+        .filter(Boolean)
+    )
+  );
+};
+
+const parseWebhookEventsFromEnv = () => {
+  const raw = String(process.env.EVOLUTION_WEBHOOK_EVENTS || '').trim();
+  if (!raw) return DEFAULT_EVOLUTION_WEBHOOK_EVENTS;
+
+  const normalized = normalizeWebhookEvents(raw.split(','));
+  return normalized.length ? normalized : DEFAULT_EVOLUTION_WEBHOOK_EVENTS;
+};
 
 class EvolutionApiError extends Error {
   constructor(message, { status = null, details = null, code = 'EVOLUTION_API_ERROR' } = {}) {
@@ -580,6 +601,7 @@ export const healthCheck = async () => {
 
 export const createInstance = async () => {
   const { instanceName, webhookUrl } = getConfig();
+  const webhookEvents = parseWebhookEventsFromEnv();
 
   return requestWithFallback(
     [
@@ -591,9 +613,9 @@ export const createInstance = async () => {
           integration: 'WHATSAPP-BAILEYS',
           qrcode: true,
           webhook: webhookUrl || undefined,
-          webhook_by_events: false,
+          webhook_by_events: true,
           webhook_base64: false,
-          webhook_events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'],
+          webhook_events: webhookEvents,
         },
         expectedStatuses: [200, 201, 403, 409],
       },

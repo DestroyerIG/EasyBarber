@@ -68,7 +68,10 @@ jest.unstable_mockModule('../services/appointmentService.js', () => ({
   },
 }));
 
-const { handleIncomingMessage } = await import('../services/whatsapp/whatsappFlowService.js');
+const {
+  handleIncomingMessage,
+  handleWebhook,
+} = await import('../services/whatsapp/whatsappFlowService.js');
 
 describe('whatsappFlowService guards', () => {
   beforeEach(() => {
@@ -128,6 +131,39 @@ describe('whatsappFlowService guards', () => {
     );
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
     expect(mockPoolQuery).not.toHaveBeenCalled();
+  });
+
+  it('ignora evento messages-set no webhook handler (nao necessario para o fluxo principal)', async () => {
+    const req = {
+      body: {
+        event: 'messages.set',
+        data: {
+          messages: Array.from({ length: 3 }, (_, i) => ({
+            key: {
+              id: `set-${i}`,
+              remoteJid: '5511777777777@s.whatsapp.net',
+              fromMe: false,
+            },
+          })),
+        },
+      },
+    };
+
+    const res = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn(),
+    };
+
+    await handleWebhook(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        message: 'Evento ignorado: nao e mensagem de entrada.',
+      })
+    );
+    expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
   });
 
   it('nao processa quando tenant nao pode ser resolvido sem fallback inseguro', async () => {

@@ -142,6 +142,65 @@ describe('whatsapp webhook phone extraction', () => {
     );
   });
 
+  it('resolves @lid author from extendedTextMessage.contextInfo.participant when sender is instance', () => {
+    const payload = {
+      event: 'messages.upsert',
+      sender: '558396311811@s.whatsapp.net',
+      data: {
+        key: {
+          remoteJid: '236197968359561@lid',
+          fromMe: false,
+        },
+        message: {
+          extendedTextMessage: {
+            text: 'Quero agendar',
+            contextInfo: {
+              participant: '5583987654321@s.whatsapp.net',
+            },
+          },
+        },
+      },
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload, {
+      connectedNumbers: ['558396311811'],
+    });
+
+    expect(extraction.phone).toBe('5583987654321');
+    expect(extraction.sourcePath).toBe('data.message.extendedTextMessage.contextInfo.participant');
+    expect(extraction.candidateType).toBe('participant_jid');
+    expect(extraction.rejections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourcePath: 'sender', reason: 'instance_number' }),
+      ])
+    );
+  });
+
+  it('resolves @lid author from messageContextInfo.participant in upsert payloads', () => {
+    const payload = {
+      event: 'messages-upsert',
+      key: {
+        remoteJid: '236197968359561@lid',
+        fromMe: false,
+      },
+      message: {
+        conversation: 'Oi',
+        messageContextInfo: {
+          participant: '5583970011223@s.whatsapp.net',
+        },
+      },
+      sender: '558396311811@s.whatsapp.net',
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload, {
+      connectedNumbers: ['558396311811'],
+    });
+
+    expect(extraction.phone).toBe('5583970011223');
+    expect(extraction.sourcePath).toBe('message.messageContextInfo.participant');
+    expect(extraction.candidateType).toBe('participant_jid');
+  });
+
   it('resolves direct remoteJid as real author even when sender diverges', () => {
     const payload = {
       key: {

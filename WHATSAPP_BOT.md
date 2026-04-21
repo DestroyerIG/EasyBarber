@@ -30,8 +30,16 @@ EVOLUTION_API_KEY=sua_chave
 EVOLUTION_INSTANCE_NAME=easybarber
 EVOLUTION_WEBHOOK_URL=https://sua-api.com/api/v1/whatsapp/webhook
 EVOLUTION_API_TIMEOUT_MS=10000
+EVOLUTION_WEBHOOK_EVENTS=MESSAGES_UPSERT,CONNECTION_UPDATE
 WHATSAPP_SESSION_TIMEOUT_MS=1800000
 ```
+
+Recomendacao de eventos (producao):
+
+- Ativar somente `MESSAGES_UPSERT` e `CONNECTION_UPDATE`.
+- Manter `webhook_by_events=true`.
+- Manter `webhook_base64=false`.
+- Nao habilitar `MESSAGES_SET` (evento pesado, desnecessario para o fluxo principal do bot e causa 413 em payloads grandes).
 
 ## 3. Fluxo de Conexão
 
@@ -164,6 +172,12 @@ Na configuração atual:
 - Eventos com identificadores bloqueados (@lid, @g.us, @broadcast, @newsletter) sao ignorados por seguranca.
 - Se o destino extraido coincidir com o numero da instancia conectada, o fluxo retorna self_target e nao envia mensagem.
 - Em payload ambiguo, o fluxo retorna ambiguous_phone e apenas registra logs para diagnostico.
+
+### Erro 413 em webhook
+
+- Causa mais comum: Evolution enviando eventos pesados como `MESSAGES_SET`.
+- Ajuste a instancia para enviar apenas `MESSAGES_UPSERT` e `CONNECTION_UPDATE`.
+- Verifique se `webhook_by_events=true` e `webhook_base64=false`.
 
 ## 11. Segurança Operacional
 

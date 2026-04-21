@@ -295,6 +295,78 @@ const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
     getValue: (payload) => payload?.messages?.[0]?.key?.participant,
   },
   {
+    sourcePath: 'message.extendedTextMessage.contextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.message?.extendedTextMessage?.contextInfo?.participant,
+  },
+  {
+    sourcePath: 'data.message.extendedTextMessage.contextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.message?.extendedTextMessage?.contextInfo?.participant,
+  },
+  {
+    sourcePath: 'data.messages[0].message.extendedTextMessage.contextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.messages?.[0]?.message?.extendedTextMessage?.contextInfo?.participant,
+  },
+  {
+    sourcePath: 'messages[0].message.extendedTextMessage.contextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.messages?.[0]?.message?.extendedTextMessage?.contextInfo?.participant,
+  },
+  {
+    sourcePath: 'message.messageContextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.message?.messageContextInfo?.participant,
+  },
+  {
+    sourcePath: 'data.message.messageContextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.message?.messageContextInfo?.participant,
+  },
+  {
+    sourcePath: 'data.messages[0].message.messageContextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.messages?.[0]?.message?.messageContextInfo?.participant,
+  },
+  {
+    sourcePath: 'messages[0].message.messageContextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.messages?.[0]?.message?.messageContextInfo?.participant,
+  },
+  {
+    sourcePath: 'message.extendedTextMessage.contextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.message?.extendedTextMessage?.contextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'data.message.extendedTextMessage.contextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.message?.extendedTextMessage?.contextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'data.messages[0].message.extendedTextMessage.contextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.messages?.[0]?.message?.extendedTextMessage?.contextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'messages[0].message.extendedTextMessage.contextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.messages?.[0]?.message?.extendedTextMessage?.contextInfo?.participantPn,
+  },
+  {
     sourcePath: 'key.remoteJid',
     candidateType: 'direct_jid',
     allowNumericOnly: false,
@@ -992,7 +1064,12 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
   const participant = extractWebhookParticipantCandidate(payload);
   const pushName = extractWebhookPushNameCandidate(payload);
   const incomingText = extractIncomingTextCandidate(payload, options);
-  const allowLidSenderFallback = false;
+  const allowLidSenderFallback =
+    conversationKind === 'lid' &&
+    LID_SENDER_FALLBACK_EVENTS.has(eventName) &&
+    instanceNumbersSet.size > 0 &&
+    !fromMe &&
+    Boolean(incomingText);
   const candidates = resolveWebhookPhoneExtractionCandidates(payload);
 
   const serializeCandidates = () =>
@@ -1166,10 +1243,18 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
     conversationKind === 'lid' && remoteJidOriginal
       ? getPhoneFromLidCache(remoteJidOriginal)
       : null;
-  const hasExplicitAuthorSignal = matchedCandidates.some((candidate) => Boolean(candidate.phone));
+  const hasAnyExplicitAuthorSignal = matchedCandidates.some((candidate) => Boolean(candidate.phone));
+  const hasExplicitAuthorSignal = matchedCandidates.some(
+    (candidate) =>
+      Boolean(candidate.phone) &&
+      ![
+        'instance_number',
+        'sender_matches_connected_instance',
+      ].includes(candidate.rejectedReason)
+  );
 
   if (!bestCandidate) {
-    if (cachedPhone && !instanceNumbersSet.has(cachedPhone) && !hasExplicitAuthorSignal) {
+    if (cachedPhone && !instanceNumbersSet.has(cachedPhone) && !hasAnyExplicitAuthorSignal) {
       return {
         authorPhone: cachedPhone,
         sourcePath: 'lid_cache',
@@ -1273,7 +1358,9 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
             candidate.score > senderFallbackCandidate.score
         )
       : false;
-    const canPromoteSenderFallback = conversationKind !== 'lid';
+    const canPromoteSenderFallback =
+      conversationKind !== 'lid' ||
+      allowLidSenderFallback;
     const shouldPromoteSenderFallback =
       !fromMe &&
       Boolean(incomingText) &&
