@@ -43,6 +43,7 @@ import {
   generateAvailableTimeSlots,
   formatBusinessHoursRange,
 } from '../barbershopBusinessSettingsService.js';
+import { appointmentService } from '../appointmentService.js';
 
 // ==================== HELPERS INTERNOS ====================
 
@@ -286,15 +287,15 @@ const resolveFlowBarbershopId = async () => {
   const configuredId = process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID?.trim() || null;
   if (configuredId) return configuredId;
 
-  try {
-    const result = await pool.query(
-      `SELECT id FROM barbershops WHERE active=true ORDER BY id ASC LIMIT 1`
-    );
-    return result.rows[0]?.id || null;
-  } catch (error) {
-    logger.warn({ err: error }, 'Falha ao resolver barbershop fallback');
-    return null;
-  }
+  logger.warn(
+    {
+      connectedNumber,
+      hasDefaultBarbershopId: Boolean(configuredId),
+    },
+    'Falha ao resolver barbershop de forma segura; fallback automatico desativado'
+  );
+
+  return null;
 };
 
 // ==================== CONSTRUÇÃO DO MENU ====================
@@ -764,50 +765,95 @@ const handleChooseTimeStep = async (phone, text, barbershopId, sessionData, conf
     return { ok: true };
   }
 
-  const appointmentStatus = businessSettings.autoConfirmAppointments ? 'confirmado' : 'pendente';
-
-  const newAppointment = await pool.query(
-    `INSERT INTO appointments (barbershop_id, client_id, barber_id, service_id, date, time, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, status`,
-    [barbershopId, sessionData.clientId, sessionData.barberId, sessionData.serviceId, selectedDate, selectedTime + ':00', appointmentStatus]
-  );
+  const appointmentPayload = {
+    clientId: sessionData.clientId,
+    barberId: sessionData.barberId,
+    serviceId: sessionData.serviceId,
+    date: selectedDate,
+    time: selectedTime,
+  };
 
   logger.info(
     {
-      appointmentId: newAppointment.rows[0].id,
       phone,
       barbershopId,
-      appointmentStatus,
       autoConfirmAppointments: businessSettings.autoConfirmAppointments,
     },
-    'Agendamento criado via WhatsApp bot'
+    'Iniciando criacao de agendamento via WhatsApp bot'
+  );
+
+  logger.debug(
+    {
+      phone,
+      barbershopId,
+      appointmentPayload,
+    },
+    'Payload consolidado para criacao de agendamento via WhatsApp bot'
+  );
+
+  let createdAppointment;
+  try {
+    createdAppointment = await appointmentService.create(barbershopId, appointmentPayload);
+  } catch (error) {
+    logger.error(
+      {
+        err: error,
+        phone,
+        barbershopId,
+        appointmentPayload,
+      },
+      'Falha ao persistir agendamento via WhatsApp bot'
+    );
+
+    await sendWhatsAppMessage(
+      phone,
+      '⚠️ Nao consegui confirmar seu agendamento agora. Por favor, tente novamente em instantes.',
+      sendContext
+    );
+
+    return { ok: true };
+  }
+
+  logger.info(
+    {
+      appointmentId: createdAppointment.id,
+      appointmentStatus: createdAppointment.status,
+      phone,
+      barbershopId,
+      clientId: appointmentPayload.clientId,
+      barberId: appointmentPayload.barberId,
+      serviceId: appointmentPayload.serviceId,
+    },
+    'Agendamento persistido via WhatsApp bot'
   );
 
   // FIX Bug 5
   const dateFormatted = formatDateBR(selectedDate, { day: '2-digit', month: '2-digit', year: 'numeric' });
 
-  const confirmationMsg = businessSettings.autoConfirmAppointments
-    ? config.confirmation_message
-      .replace('{servico}', sessionData.serviceName || '')
-      .replace('{barbeiro}', sessionData.barberName || '')
-      .replace('{data}', dateFormatted)
-      .replace('{horario}', selectedTime)
-      .replace('{valor}', Number(sessionData.servicePrice).toFixed(2))
-    : [
-      '✅ Recebemos sua solicitacao de agendamento! 💈',
-      '',
-      `📋 Servico: ${sessionData.serviceName || ''}`,
-      `👨‍🦱 Barbeiro: ${sessionData.barberName || ''}`,
-      `📅 Data: ${dateFormatted}`,
-      `⏰ Horario: ${selectedTime}`,
-      `💰 Valor: R$ ${Number(sessionData.servicePrice).toFixed(2)}`,
-      '',
-      '🕒 Status: aguardando confirmacao da equipe.',
-    ].join('\n');
+  const confirmationMsg = config.confirmation_message
+    .replace('{servico}', sessionData.serviceName || '')
+    .replace('{barbeiro}', sessionData.barberName || '')
+    .replace('{data}', dateFormatted)
+    .replace('{horario}', selectedTime)
+    .replace('{valor}', Number(sessionData.servicePrice).toFixed(2));
 
-  await sendWhatsAppMessage(phone, confirmationMsg, sendContext);
-  await deleteSession(phone, barbershopId);
-  return { ok: true };
+  const confirmationSent = await sendWhatsAppMessage(phone, confirmationMsg, sendContext);
+
+  logger.info(
+    {
+      appointmentId: createdAppointment.id,
+      phone,
+      barbershopId,
+      confirmationSent,
+    },
+    'Resultado do envio de confirmacao de agendamento via WhatsApp bot'
+  );
+
+  if (confirmationSent) {
+    await deleteSession(phone, barbershopId);
+  }
+
+  return { ok: confirmationSent };
 };
 
 // ==================== HANDLER PRINCIPAL ====================

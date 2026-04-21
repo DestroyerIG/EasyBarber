@@ -14,6 +14,7 @@ const mockGetBarbershopBusinessSettings = jest.fn();
 const mockIsWithinBusinessHours = jest.fn();
 const mockGenerateAvailableTimeSlots = jest.fn();
 const mockFormatBusinessHoursRange = jest.fn();
+const mockAppointmentServiceCreate = jest.fn();
 
 jest.unstable_mockModule('../config/database.js', () => ({
   default: {
@@ -61,13 +62,24 @@ jest.unstable_mockModule('../services/barbershopBusinessSettingsService.js', () 
   formatBusinessHoursRange: mockFormatBusinessHoursRange,
 }));
 
+jest.unstable_mockModule('../services/appointmentService.js', () => ({
+  appointmentService: {
+    create: mockAppointmentServiceCreate,
+  },
+}));
+
 const { handleIncomingMessage } = await import('../services/whatsapp/whatsappFlowService.js');
 
 describe('whatsappFlowService guards', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    delete process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID;
     mockPoolQuery.mockResolvedValue({ rows: [] });
     mockSendWhatsAppMessage.mockResolvedValue(true);
+    mockAppointmentServiceCreate.mockResolvedValue({
+      id: 'apt-1',
+      status: 'confirmado',
+    });
     mockGetWhatsAppStatus.mockReturnValue({
       connectedNumber: '5511888888888',
     });
@@ -116,6 +128,23 @@ describe('whatsappFlowService guards', () => {
     );
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
     expect(mockPoolQuery).not.toHaveBeenCalled();
+  });
+
+  it('nao processa quando tenant nao pode ser resolvido sem fallback inseguro', async () => {
+    mockPoolQuery.mockResolvedValueOnce({ rows: [] });
+
+    const result = await handleIncomingMessage('5511777777777', 'oi', {
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        ignored: true,
+        reason: 'barbershop_not_resolved',
+      })
+    );
+    expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
   });
 
   it('returns ambiguous_phone for @lid payload when no trusted fallback can be resolved', async () => {
@@ -285,11 +314,10 @@ describe('whatsappFlowService guards', () => {
     expect(sentMessage).toContain('menu');
   });
 
-  it('marca agendamento como pendente quando auto confirmacao estiver desativada', async () => {
+  it('persiste agendamento via camada central com payload compativel quando auto confirmacao estiver desativada', async () => {
     mockPoolQuery
       .mockResolvedValueOnce({ rows: [{ id: 'tenant-1' }] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ id: 'apt-1', status: 'pendente' }] });
+      .mockResolvedValueOnce({ rows: [] });
 
     mockGetSession.mockResolvedValue({
       step: 'choose_time',
@@ -319,12 +347,58 @@ describe('whatsappFlowService guards', () => {
     });
 
     expect(result).toEqual(expect.objectContaining({ ok: true, ignored: false }));
-
-    const insertCall = mockPoolQuery.mock.calls[2];
-    expect(insertCall[1][6]).toBe('pendente');
+    expect(mockAppointmentServiceCreate).toHaveBeenCalledWith('tenant-1', {
+      clientId: 'client-1',
+      barberId: 'barber-1',
+      serviceId: 'service-1',
+      date: '2026-04-20',
+      time: '10:00',
+    });
+    expect(mockPoolQuery).toHaveBeenCalledTimes(2);
+    const directInsertCall = mockPoolQuery.mock.calls.find(
+      ([query]) => typeof query === 'string' && query.includes('INSERT INTO appointments')
+    );
+    expect(directInsertCall).toBeUndefined();
+    expect(mockDeleteSession).toHaveBeenCalledWith('5511777777777', 'tenant-1');
 
     const [, sentMessage] = mockSendWhatsAppMessage.mock.calls[0];
-    expect(sentMessage).toContain('aguardando confirmacao da equipe');
+    expect(sentMessage).toContain('Agendamento confirmado');
+    expect(sentMessage).not.toContain('aguardando confirmacao da equipe');
+  });
+
+  it('nao confirma sucesso quando a persistencia do agendamento falha', async () => {
+    mockPoolQuery
+      .mockResolvedValueOnce({ rows: [{ id: 'tenant-1' }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    mockGetSession.mockResolvedValue({
+      step: 'choose_time',
+      data: {
+        availableSlots: ['10:00'],
+        selectedDate: '2026-04-20',
+        barberId: 'barber-1',
+        clientId: 'client-1',
+        serviceId: 'service-1',
+        serviceName: 'Corte',
+        barberName: 'Joao',
+        servicePrice: 55,
+      },
+    });
+
+    mockAppointmentServiceCreate.mockRejectedValue(new Error('db write failed'));
+
+    const result = await handleIncomingMessage('5511777777777', '1', {
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: true, ignored: false }));
+    expect(mockAppointmentServiceCreate).toHaveBeenCalledTimes(1);
+    expect(mockDeleteSession).not.toHaveBeenCalled();
+    expect(mockSendWhatsAppMessage).toHaveBeenCalledTimes(1);
+
+    const [, sentMessage] = mockSendWhatsAppMessage.mock.calls[0];
+    expect(sentMessage).toContain('Nao consegui confirmar seu agendamento agora');
+    expect(sentMessage).not.toContain('Agendamento confirmado');
   });
 
   it('informa encaixe quando nao houver slots e allowWalkins estiver ativado', async () => {
