@@ -680,6 +680,30 @@ describe('whatsappFlowService guards', () => {
     expect(sentMessage).toContain('menu');
   });
 
+  it('detecta saudacao com variacao de caixa e espacos e reinicia o fluxo de forma controlada', async () => {
+    mockPoolQuery
+      .mockResolvedValueOnce({ rows: [{ id: 'tenant-1' }] })
+      .mockResolvedValueOnce({ rows: [{ name: 'Barber Prime' }] });
+    mockIsWithinBusinessHours.mockReturnValue(true);
+    mockGetSession.mockResolvedValueOnce({
+      step: 'choose_service',
+      data: { serviceId: 'svc-1' },
+    });
+
+    const result = await handleIncomingMessage('5511777777777', '   OIII   ', {
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: true, ignored: false }));
+    expect(mockDeleteSession).toHaveBeenCalledWith('5511777777777', 'tenant-1');
+    expect(mockCreateSession).toHaveBeenCalledWith('5511777777777', 'tenant-1');
+    expect(mockSendWhatsAppMessage).toHaveBeenCalledWith(
+      '5511777777777',
+      expect.stringContaining('menu'),
+      expect.any(Object)
+    );
+  });
+
   it('persiste agendamento via camada central com payload compativel quando auto confirmacao estiver desativada', async () => {
     mockPoolQuery
       .mockResolvedValueOnce({ rows: [{ id: 'tenant-1' }] })

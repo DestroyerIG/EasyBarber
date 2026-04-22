@@ -20,6 +20,7 @@ import {
   extractWhatsAppRemoteJidFromWebhook,
   resolveSafeReplyDestination,
 } from '../../utils/whatsapp.js';
+import { evaluateGreetingMessage } from '../../utils/whatsappGreeting.js';
 import {
   getSession,
   isSessionExpired,
@@ -85,11 +86,6 @@ const INCOMING_MESSAGE_EVENTS = new Set([
   'message-received',
   'messagereceived',
 ]);
-
-const isGreeting = (text) => {
-  const n = normalizeText(text).toLowerCase();
-  return ['oi','ola','olá','menu','inicio','início','bom dia','boa tarde','boa noite'].includes(n);
-};
 
 const normalizeChoice = (text) => {
   const cleaned = normalizeText(text).toLowerCase();
@@ -1535,8 +1531,15 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       return { ok: sent, ignored: false, reason: sent ? null : 'send_failed' };
     }
 
-    if (isGreeting(normalizedText)) {
-      await deleteSession(normalizedPhone, barbershopId);
+    const greetingEvaluation = evaluateGreetingMessage(normalizedText);
+
+    if (greetingEvaluation.isGreeting) {
+      const existingSession = await getSession(normalizedPhone, barbershopId);
+
+      if (existingSession) {
+        await deleteSession(normalizedPhone, barbershopId);
+      }
+
       await createSession(normalizedPhone, barbershopId);
       const sent = await sendWhatsAppMessage(
         normalizedPhone,
@@ -1548,6 +1551,13 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
         {
           ...flowDebugBase,
           barbershopId,
+          phone: normalizedPhone,
+          originalText: greetingEvaluation.originalText,
+          normalizedText: greetingEvaluation.normalizedText,
+          greetingMatched: true,
+          greetingRule: greetingEvaluation.rule,
+          greetingCanonical: greetingEvaluation.canonicalGreeting,
+          hadActiveSession: Boolean(existingSession),
           decision: 'greeting_menu',
           sent,
         },
