@@ -634,8 +634,12 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
       ? context.remoteJidOriginal.trim()
       : null;
 
-  const { instanceName } = getEvolutionConfig();
-  const endpoint = `/message/sendText/${instanceName}`;
+  const config = getEvolutionConfig();
+  const contextInstanceName = typeof context?.instanceName === 'string'
+    ? context.instanceName.trim().toLowerCase()
+    : '';
+  const resolvedInstanceName = contextInstanceName || config.instanceName;
+  const endpoint = `/message/sendText/${resolvedInstanceName}`;
   const destination = normalizedPhone;
   const discardedRemoteJid = isInvalidJidContext(remoteJidOriginal);
   const connectedNumber = normalizeWhatsAppNumber(getWhatsAppStatus()?.connectedNumber);
@@ -740,6 +744,7 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
       phone: destination,
       text: normalizedMessage,
       remoteJidOriginal,
+      instanceName: resolvedInstanceName,
     });
 
     const payloadShapeUsed = sendResult?.meta?.payloadShape || null;
@@ -782,7 +787,7 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
         destinationSource: 'normalized_phone',
         discardedRemoteJid,
         endpoint,
-        instanceName,
+        instanceName: resolvedInstanceName,
         providerError,
         sessionStateError,
         status: error?.status || null,
@@ -797,7 +802,7 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
         {
           endpoint,
           phone: normalizedPhone || rawPhone || null,
-          instanceName,
+          instanceName: resolvedInstanceName,
           providerError,
           sessionStateError: true,
         },
@@ -809,7 +814,7 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
       await recoverWhatsAppSession({
         endpoint,
         phone: normalizedPhone || rawPhone || null,
-        instanceName,
+        instanceName: resolvedInstanceName,
         providerError,
       });
 

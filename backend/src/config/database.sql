@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS barbershops (
     owner_name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     whatsapp VARCHAR(20) NOT NULL,
+    whatsapp_instance_name VARCHAR(255),
     cpf_cnpj VARCHAR(20),
     plan VARCHAR(50) NOT NULL DEFAULT 'basico'
         CHECK (plan IN ('basico', 'profissional', 'premium')),
@@ -334,6 +335,9 @@ CREATE INDEX IF NOT EXISTS idx_users_email_verification_token_hash ON users(emai
 
 -- Stripe billing
 CREATE INDEX IF NOT EXISTS idx_barbershops_subscription_status ON barbershops(subscription_status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_barbershops_whatsapp_instance_name_norm
+    ON barbershops ((lower(btrim(whatsapp_instance_name))))
+    WHERE NULLIF(btrim(whatsapp_instance_name), '') IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_barbershops_stripe_customer ON barbershops(stripe_customer_id);
 CREATE INDEX IF NOT EXISTS idx_subscription_events_created_at ON subscription_events(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_barbershops_provider ON barbershops(provider);

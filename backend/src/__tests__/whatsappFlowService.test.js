@@ -77,6 +77,7 @@ describe('whatsappFlowService guards', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     delete process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID;
+    delete process.env.WHATSAPP_INSTANCE_BARBERSHOP_MAP;
     mockPoolQuery.mockResolvedValue({ rows: [] });
     mockSendWhatsAppMessage.mockResolvedValue(true);
     mockAppointmentServiceCreate.mockResolvedValue({
@@ -181,6 +182,305 @@ describe('whatsappFlowService guards', () => {
       })
     );
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
+  });
+
+  it('resolve tenant via mapeamento da instancia quando connectedNumber estiver nulo', async () => {
+    mockPoolQuery.mockResolvedValueOnce({ rows: [] });
+    process.env.WHATSAPP_INSTANCE_BARBERSHOP_MAP = 'easybarber=tenant-map';
+    mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: null });
+    mockIsWithinBusinessHours.mockReturnValue(false);
+
+    const payload = {
+      event: 'messages-upsert',
+      instance: {
+        instanceName: 'easybarber',
+      },
+      key: {
+        remoteJid: '5511777777777@s.whatsapp.net',
+        fromMe: false,
+      },
+      message: {
+        conversation: 'oi',
+      },
+    };
+
+    const result = await handleIncomingMessage(payload, 'oi', {
+      eventName: 'messages-upsert',
+      now: new Date('2026-04-18T07:30:00-03:00'),
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        ignored: false,
+      })
+    );
+
+    const instanceDbLookupCall = mockPoolQuery.mock.calls.find(
+      ([query]) =>
+        typeof query === 'string' &&
+        query.includes('lower(btrim(whatsapp_instance_name))')
+    );
+
+    expect(instanceDbLookupCall).toBeDefined();
+    expect(mockGetBarbershopBusinessSettings).toHaveBeenCalledWith('tenant-map');
+
+    const tenantLookupCall = mockPoolQuery.mock.calls.find(
+      ([query]) =>
+        typeof query === 'string' &&
+        (
+          query.includes('regexp_replace(COALESCE(whatsapp') ||
+          query.includes('FROM whatsapp_sessions')
+        )
+    );
+
+    expect(tenantLookupCall).toBeUndefined();
+  });
+
+  it('resolve tenant via instanceName no banco como fonte primaria', async () => {
+    mockPoolQuery.mockResolvedValueOnce({
+      rows: [{ id: 'tenant-db', name: 'Barber DB', whatsapp_instance_name: 'easybarber' }],
+    });
+    mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: null });
+    mockIsWithinBusinessHours.mockReturnValue(false);
+
+    const payload = {
+      event: 'messages-upsert',
+      instanceName: 'easybarber',
+      key: {
+        remoteJid: '5511777777777@s.whatsapp.net',
+        fromMe: false,
+      },
+      message: {
+        conversation: 'oi',
+      },
+    };
+
+    const result = await handleIncomingMessage(payload, 'oi', {
+      eventName: 'messages-upsert',
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        ignored: false,
+      })
+    );
+    expect(mockGetBarbershopBusinessSettings).toHaveBeenCalledWith('tenant-db');
+
+    const instanceDbLookupCall = mockPoolQuery.mock.calls.find(
+      ([query]) =>
+        typeof query === 'string' &&
+        query.includes('lower(btrim(whatsapp_instance_name))')
+    );
+
+    expect(instanceDbLookupCall).toBeDefined();
+  });
+
+  it('resolve corretamente tenants distintos para instancias diferentes', async () => {
+    mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: null });
+    mockIsWithinBusinessHours.mockReturnValue(false);
+
+    mockPoolQuery.mockImplementation(async (query, params = []) => {
+      if (typeof query === 'string' && query.includes('lower(btrim(whatsapp_instance_name))')) {
+        if (params[0] === 'inst-a') {
+          return { rows: [{ id: 'tenant-a', name: 'Tenant A', whatsapp_instance_name: 'inst-a' }] };
+        }
+
+        if (params[0] === 'inst-b') {
+          return { rows: [{ id: 'tenant-b', name: 'Tenant B', whatsapp_instance_name: 'inst-b' }] };
+        }
+
+        return { rows: [] };
+      }
+
+      return { rows: [] };
+    });
+
+    const payloadA = {
+      event: 'messages-upsert',
+      instanceName: 'inst-a',
+      key: {
+        remoteJid: '5511777777777@s.whatsapp.net',
+        fromMe: false,
+      },
+      message: {
+        conversation: 'oi',
+      },
+    };
+
+    const payloadB = {
+      event: 'messages-upsert',
+      instanceName: 'inst-b',
+      key: {
+        remoteJid: '5511888888888@s.whatsapp.net',
+        fromMe: false,
+      },
+      message: {
+        conversation: 'oi',
+      },
+    };
+
+    const resultA = await handleIncomingMessage(payloadA, 'oi', {
+      eventName: 'messages-upsert',
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    const resultB = await handleIncomingMessage(payloadB, 'oi', {
+      eventName: 'messages-upsert',
+      now: new Date('2026-04-18T10:01:00-03:00'),
+    });
+
+    expect(resultA).toEqual(expect.objectContaining({ ok: true, ignored: false }));
+    expect(resultB).toEqual(expect.objectContaining({ ok: true, ignored: false }));
+    expect(mockGetBarbershopBusinessSettings).toHaveBeenNthCalledWith(1, 'tenant-a');
+    expect(mockGetBarbershopBusinessSettings).toHaveBeenNthCalledWith(2, 'tenant-b');
+  });
+
+  it('nao mistura tenant por contexto de sessao quando instanceName foi resolvido no banco', async () => {
+    mockPoolQuery.mockResolvedValueOnce({
+      rows: [{ id: 'tenant-db', name: 'Barber DB', whatsapp_instance_name: 'easybarber' }],
+    });
+    mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: null });
+    mockIsWithinBusinessHours.mockReturnValue(false);
+
+    const payload = {
+      event: 'messages-upsert',
+      instanceName: 'easybarber',
+      key: {
+        remoteJid: '5511777777777@s.whatsapp.net',
+        fromMe: false,
+      },
+      message: {
+        conversation: 'oi',
+      },
+    };
+
+    const result = await handleIncomingMessage(payload, 'oi', {
+      eventName: 'messages-upsert',
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: true, ignored: false }));
+
+    const sessionLookupCall = mockPoolQuery.mock.calls.find(
+      ([query]) => typeof query === 'string' && query.includes('FROM whatsapp_sessions')
+    );
+
+    expect(sessionLookupCall).toBeUndefined();
+  });
+
+  it('usa tenant resolvido por instanceName no fluxo de agendamento', async () => {
+    mockPoolQuery.mockResolvedValueOnce({
+      rows: [{ id: 'tenant-db', name: 'Tenant DB', whatsapp_instance_name: 'inst-agenda' }],
+    });
+
+    mockGetSession.mockResolvedValue({
+      step: 'choose_time',
+      data: {
+        availableSlots: ['10:00'],
+        selectedDate: '2026-04-20',
+        barberId: 'barber-1',
+        clientId: 'client-1',
+        serviceId: 'service-1',
+        serviceName: 'Corte',
+        barberName: 'Joao',
+        servicePrice: 55,
+      },
+    });
+
+    mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: null });
+
+    const payload = {
+      event: 'messages-upsert',
+      instanceName: 'inst-agenda',
+      key: {
+        remoteJid: '5511777777777@s.whatsapp.net',
+        fromMe: false,
+      },
+      message: {
+        conversation: '1',
+      },
+    };
+
+    const result = await handleIncomingMessage(payload, '1', {
+      eventName: 'messages-upsert',
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: true, ignored: false }));
+    expect(mockAppointmentServiceCreate).toHaveBeenCalledWith('tenant-db', {
+      clientId: 'client-1',
+      barberId: 'barber-1',
+      serviceId: 'service-1',
+      date: '2026-04-20',
+      time: '10:00',
+    });
+  });
+
+  it('falha fechado quando instanceName existe mas nao tem mapeamento no banco nem no legado', async () => {
+    mockPoolQuery.mockResolvedValueOnce({ rows: [] });
+    mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: null });
+
+    const payload = {
+      event: 'messages-upsert',
+      instanceName: 'tenant-inexistente',
+      key: {
+        remoteJid: '5511777777777@s.whatsapp.net',
+        fromMe: false,
+      },
+      message: {
+        conversation: 'oi',
+      },
+    };
+
+    const result = await handleIncomingMessage(payload, 'oi', {
+      eventName: 'messages-upsert',
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        ignored: true,
+        reason: 'barbershop_not_resolved',
+      })
+    );
+
+    const knownNumberLookupCall = mockPoolQuery.mock.calls.find(
+      ([query]) =>
+        typeof query === 'string' &&
+        query.includes('regexp_replace(COALESCE(whatsapp')
+    );
+
+    expect(knownNumberLookupCall).toBeUndefined();
+  });
+
+  it('resolve tenant pelo contexto de sessao quando numero conectado estiver indisponivel', async () => {
+    mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: null });
+    mockIsWithinBusinessHours.mockReturnValue(false);
+    mockPoolQuery.mockResolvedValueOnce({
+      rows: [{ barbershop_id: 'tenant-session' }],
+    });
+
+    const result = await handleIncomingMessage('5511777777777', 'oi', {
+      now: new Date('2026-04-18T07:30:00-03:00'),
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        ignored: false,
+      })
+    );
+    expect(mockGetBarbershopBusinessSettings).toHaveBeenCalledWith('tenant-session');
+
+    const sessionLookupCall = mockPoolQuery.mock.calls.find(
+      ([query]) => typeof query === 'string' && query.includes('FROM whatsapp_sessions')
+    );
+
+    expect(sessionLookupCall).toBeDefined();
   });
 
   it('processa simulador com barbershopId explicito sem depender de connectedNumber', async () => {

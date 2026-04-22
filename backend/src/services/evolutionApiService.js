@@ -5,6 +5,18 @@ const DEFAULT_TIMEOUT_MS = 10000;
 const DEFAULT_RETRY_ATTEMPTS = 1;
 const MAX_RETRY_ATTEMPTS = 3;
 const DEFAULT_EVOLUTION_WEBHOOK_EVENTS = ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'];
+const ALLOWED_EVOLUTION_WEBHOOK_EVENTS = new Set(DEFAULT_EVOLUTION_WEBHOOK_EVENTS);
+const BLOCKED_HEAVY_WEBHOOK_EVENTS = new Set([
+  'MESSAGES_SET',
+  'MESSAGESSET',
+]);
+
+const normalizeWebhookEventToken = (value) =>
+  String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[.\-\s]+/g, '_')
+    .replace(/_+/g, '_');
 
 const normalizeWebhookEvents = (value) => {
   if (!Array.isArray(value)) return [];
@@ -12,18 +24,51 @@ const normalizeWebhookEvents = (value) => {
   return Array.from(
     new Set(
       value
-        .map((eventName) => String(eventName || '').trim().toUpperCase())
+        .map((eventName) => normalizeWebhookEventToken(eventName))
         .filter(Boolean)
     )
   );
+};
+
+const sanitizeWebhookEvents = (value) => {
+  const normalized = normalizeWebhookEvents(value);
+  const allowed = [];
+  const blocked = [];
+  const unsupported = [];
+
+  for (const eventName of normalized) {
+    if (BLOCKED_HEAVY_WEBHOOK_EVENTS.has(eventName)) {
+      blocked.push(eventName);
+      continue;
+    }
+
+    if (ALLOWED_EVOLUTION_WEBHOOK_EVENTS.has(eventName)) {
+      allowed.push(eventName);
+      continue;
+    }
+
+    unsupported.push(eventName);
+  }
+
+  if (blocked.length || unsupported.length) {
+    logger.warn(
+      {
+        blockedEvents: blocked,
+        unsupportedEvents: unsupported,
+        allowedEvents: allowed,
+      },
+      'Eventos de webhook da Evolution filtrados para configuracao minima segura'
+    );
+  }
+
+  return allowed.length ? allowed : DEFAULT_EVOLUTION_WEBHOOK_EVENTS;
 };
 
 const parseWebhookEventsFromEnv = () => {
   const raw = String(process.env.EVOLUTION_WEBHOOK_EVENTS || '').trim();
   if (!raw) return DEFAULT_EVOLUTION_WEBHOOK_EVENTS;
 
-  const normalized = normalizeWebhookEvents(raw.split(','));
-  return normalized.length ? normalized : DEFAULT_EVOLUTION_WEBHOOK_EVENTS;
+  return sanitizeWebhookEvents(raw.split(','));
 };
 
 class EvolutionApiError extends Error {
@@ -752,8 +797,11 @@ export const logoutInstance = async () => {
   );
 };
 
-export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null }) => {
-  const { instanceName } = getConfig();
+export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null, instanceName = null }) => {
+  const config = getConfig();
+  const resolvedInstanceName = typeof instanceName === 'string' && instanceName.trim()
+    ? instanceName.trim().toLowerCase()
+    : config.instanceName;
   const normalizedPhone = normalizePhoneForSend(phone);
   const normalizedText = String(text || '').trim();
 
@@ -772,7 +820,7 @@ export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null })
   const candidates = [
     {
       method: 'POST',
-      path: `/message/sendText/${instanceName}`,
+      path: `/message/sendText/${resolvedInstanceName}`,
       body: {
         number: normalizedPhone,
         textMessage: {
@@ -782,9 +830,9 @@ export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null })
     },
     {
       method: 'POST',
-      path: `/message/sendText/${instanceName}`,
+      path: `/message/sendText/${resolvedInstanceName}`,
       body: {
-        instanceName,
+        instanceName: resolvedInstanceName,
         number: normalizedPhone,
         textMessage: {
           text: normalizedText,
@@ -809,7 +857,7 @@ export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null })
       phone,
       remoteJidOriginal,
       resolvedDestination: normalizedPhone,
-      endpoint: `/message/sendText/${instanceName}`,
+      endpoint: `/message/sendText/${resolvedInstanceName}`,
       payloadShapes: compatibleCandidates.map((candidate) => describePayloadShape(candidate?.body)),
     },
     'Enviando mensagem de texto para Evolution API'

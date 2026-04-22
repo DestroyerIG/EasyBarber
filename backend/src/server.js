@@ -83,6 +83,15 @@ const PORT = process.env.PORT || 5000;
 const API_V1 = '/api/v1';
 const API_JSON_BODY_LIMIT = process.env.API_JSON_BODY_LIMIT || '1mb';
 const WHATSAPP_WEBHOOK_BODY_LIMIT = process.env.WHATSAPP_WEBHOOK_BODY_LIMIT || '6mb';
+const BLOCKED_WHATSAPP_WEBHOOK_EVENTS = new Set(['messages-set', 'messageset']);
+
+const normalizeWebhookEventName = (value) =>
+  String(value || '')
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .toLowerCase()
+    .replace(/[._\s]+/g, '-')
+    .replace(/-+/g, '-');
 
 // Segurança básica
 app.use(helmet());
@@ -140,6 +149,34 @@ app.post(
   express.raw({ type: 'application/json' }),
   stripeWebhook
 );
+
+app.post(`${API_V1}/whatsapp/webhook/:event`, (req, res, next) => {
+  const eventName = normalizeWebhookEventName(req.params.event || '');
+
+  if (!BLOCKED_WHATSAPP_WEBHOOK_EVENTS.has(eventName)) {
+    return next();
+  }
+
+  logger.info(
+    {
+      event: eventName,
+      route: req.originalUrl,
+      ignoredBeforeParser: true,
+    },
+    'Webhook WhatsApp pesado ignorado antes do parser'
+  );
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      received: true,
+      processed: false,
+      ignored: true,
+      reason: 'blocked_event',
+      event: eventName,
+    },
+  });
+});
 
 // Webhook da Evolution pode incluir payloads maiores (ex.: eventos com anexos/captions).
 app.use(`${API_V1}/whatsapp/webhook`, express.json({ limit: WHATSAPP_WEBHOOK_BODY_LIMIT }));

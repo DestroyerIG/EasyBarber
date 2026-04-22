@@ -17,6 +17,15 @@ const normalizeOptionalText = (value) => {
   return value.trim();
 };
 
+const normalizeOptionalInstanceName = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized || null;
+};
+
 export const barbershopSettingsService = {
   async getSettings(barbershopId) {
     const settings = await barbershopSettingsRepository.findByBarbershopId(barbershopId);
@@ -43,6 +52,7 @@ export const barbershopSettingsService = {
 
     const payload = {
       shopName: data.shopName.trim(),
+      whatsappInstanceName: normalizeOptionalInstanceName(data.whatsappInstanceName),
       contactPhone: normalizeOptionalText(data.contactPhone),
       address: normalizeOptionalText(data.address),
       openingTime: data.openingTime,
@@ -56,7 +66,24 @@ export const barbershopSettingsService = {
       customWebhookUrl: normalizeOptionalText(data.customWebhookUrl) || null,
     };
 
-    const settings = await barbershopSettingsRepository.upsert(barbershopId, payload);
+    let settings;
+
+    try {
+      settings = await barbershopSettingsRepository.upsert(barbershopId, payload);
+    } catch (error) {
+      const uniqueViolation = error?.code === '23505';
+      const conflictingConstraint = String(error?.constraint || '').trim();
+
+      if (uniqueViolation && conflictingConstraint === 'uq_barbershops_whatsapp_instance_name_norm') {
+        throw new ValidationError(
+          'Instancia do WhatsApp ja vinculada',
+          ['Esta instancia ja esta em uso por outra barbearia. Escolha outro nome de instancia.']
+        );
+      }
+
+      throw error;
+    }
+
     if (!settings) {
       throw new NotFoundError('Barbearia');
     }

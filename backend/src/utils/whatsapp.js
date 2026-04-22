@@ -14,6 +14,18 @@ const INCOMING_AUTHOR_SENDER_FALLBACK_SOURCE_PATHS = new Set([
   'message.sender',
   'data.messages[0].sender',
   'messages[0].sender',
+  'key.sender',
+  'data.key.sender',
+  'message.key.sender',
+  'data.messages[0].key.sender',
+  'messages[0].key.sender',
+]);
+const INCOMING_AUTHOR_LID_FROM_FALLBACK_SOURCE_PATHS = new Set([
+  'from',
+  'data.from',
+  'message.from',
+  'data.messages[0].from',
+  'messages[0].from',
 ]);
 const LID_SENDER_FALLBACK_EVENTS = new Set([
   'messages-upsert',
@@ -157,6 +169,36 @@ const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
     getValue: (payload) => payload?.messages?.[0]?.sender,
   },
   {
+    sourcePath: 'key.sender',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.key?.sender,
+  },
+  {
+    sourcePath: 'data.key.sender',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.key?.sender,
+  },
+  {
+    sourcePath: 'message.key.sender',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.message?.key?.sender,
+  },
+  {
+    sourcePath: 'data.messages[0].key.sender',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.messages?.[0]?.key?.sender,
+  },
+  {
+    sourcePath: 'messages[0].key.sender',
+    candidateType: 'sender_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.messages?.[0]?.key?.sender,
+  },
+  {
     sourcePath: 'from',
     candidateType: 'sender_jid',
     allowNumericOnly: false,
@@ -215,6 +257,36 @@ const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
     candidateType: 'numeric_fallback',
     allowNumericOnly: true,
     getValue: (payload) => payload?.messages?.[0]?.senderPn,
+  },
+  {
+    sourcePath: 'key.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.key?.senderPn,
+  },
+  {
+    sourcePath: 'data.key.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.key?.senderPn,
+  },
+  {
+    sourcePath: 'message.key.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.message?.key?.senderPn,
+  },
+  {
+    sourcePath: 'data.messages[0].key.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.messages?.[0]?.key?.senderPn,
+  },
+  {
+    sourcePath: 'messages[0].key.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.messages?.[0]?.key?.senderPn,
   },
   {
     sourcePath: 'key.participantPn',
@@ -365,6 +437,30 @@ const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
     candidateType: 'numeric_fallback',
     allowNumericOnly: true,
     getValue: (payload) => payload?.messages?.[0]?.message?.extendedTextMessage?.contextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'message.messageContextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.message?.messageContextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'data.message.messageContextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.message?.messageContextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'data.messages[0].message.messageContextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.messages?.[0]?.message?.messageContextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'messages[0].message.messageContextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.messages?.[0]?.message?.messageContextInfo?.participantPn,
   },
   {
     sourcePath: 'key.remoteJid',
@@ -1198,7 +1294,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
     // Regra crítica:
     // em @lid nunca confiar em sender como autor,
     // porque no seu payload ele pode vir com o número da instância.
-    if (isLidConversation && isSenderLikeCandidate && !allowLidSenderFallback) {
+    if (isLidConversation && isSenderLikeCandidate && isSenderFallbackPath && !allowLidSenderFallback) {
       adjustedScore = 0;
       adjustedConfidence = 'none';
       rejectedReason = 'lid_sender_untrusted';
@@ -1239,6 +1335,14 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
           candidate.phone === normalizedSenderPhone
       ) || null
     : null;
+  const lidFromFallbackCandidate =
+    conversationKind === 'lid' && normalizedSenderPhone
+      ? rankedCandidates.find(
+          (candidate) =>
+            INCOMING_AUTHOR_LID_FROM_FALLBACK_SOURCE_PATHS.has(candidate.sourcePath) &&
+            candidate.phone !== normalizedSenderPhone
+        ) || null
+      : null;
   const cachedPhone =
     conversationKind === 'lid' && remoteJidOriginal
       ? getPhoneFromLidCache(remoteJidOriginal)
@@ -1358,9 +1462,24 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
             candidate.score > senderFallbackCandidate.score
         )
       : false;
+    const hasBetterCandidateThanLidFrom = lidFromFallbackCandidate
+      ? rankedCandidates.some(
+          (candidate) =>
+            candidate.phone !== lidFromFallbackCandidate.phone &&
+            candidate.score > lidFromFallbackCandidate.score
+        )
+      : false;
     const canPromoteSenderFallback =
       conversationKind !== 'lid' ||
       allowLidSenderFallback;
+    const shouldPromoteLidFromFallback =
+      conversationKind === 'lid' &&
+      LID_SENDER_FALLBACK_EVENTS.has(eventName) &&
+      !fromMe &&
+      Boolean(incomingText) &&
+      lidFromFallbackCandidate &&
+      !hasBetterCandidateThanLidFrom &&
+      !instanceNumbersSet.has(lidFromFallbackCandidate.phone);
     const shouldPromoteSenderFallback =
       !fromMe &&
       Boolean(incomingText) &&
@@ -1368,6 +1487,32 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       !hasBetterCandidateThanSender &&
       canPromoteSenderFallback &&
       !instanceNumbersSet.has(senderFallbackCandidate.phone);
+
+    if (shouldPromoteLidFromFallback) {
+      maybeCacheLidFromSafeCandidate({
+        remoteJidOriginal,
+        conversationKind,
+        candidate: lidFromFallbackCandidate,
+      });
+
+      return {
+        authorPhone: lidFromFallbackCandidate.phone,
+        sourcePath: lidFromFallbackCandidate.sourcePath,
+        candidateType: lidFromFallbackCandidate.candidateType,
+        confidence:
+          lidFromFallbackCandidate.confidence === 'none'
+            ? 'low'
+            : lidFromFallbackCandidate.confidence,
+        remoteJidOriginal,
+        sender,
+        participant,
+        pushName,
+        fromMe,
+        instanceNumbers,
+        rejections,
+        candidates: serializeCandidates(),
+      };
+    }
 
     if (shouldPromoteSenderFallback) {
       maybeCacheLidFromSafeCandidate({

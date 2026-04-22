@@ -16,6 +16,7 @@ interface SettingsModuleProps {
 
 interface SettingsState {
   shopName: string;
+  whatsappInstanceName: string;
   contactPhone: string;
   address: string;
   openingTime: string;
@@ -31,6 +32,7 @@ interface SettingsState {
 
 const buildDefaultSettings = (barbershopName: string): SettingsState => ({
   shopName: barbershopName || 'Minha Barbearia',
+  whatsappInstanceName: '',
   contactPhone: '',
   address: '',
   openingTime: '09:00',
@@ -367,6 +369,22 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
               className="h-4 w-4 accent-primary"
             />
           </label>
+
+          <div>
+            <label htmlFor="whatsappInstanceName" className="block text-sm text-gray-400 mb-2">
+              Nome da instancia WhatsApp (Evolution)
+            </label>
+            <input
+              id="whatsappInstanceName"
+              className="input"
+              value={settings.whatsappInstanceName}
+              onChange={event => updateField('whatsappInstanceName', event.target.value)}
+              placeholder="ex: easybarber-centro"
+            />
+            <p className="text-xs text-gray-500 mt-2">
+              Esse valor vincula os webhooks da Evolution ao tenant correto desta barbearia.
+            </p>
+          </div>
 
           <div>
             <label htmlFor="customWebhookUrl" className="block text-sm text-gray-400 mb-2">

@@ -142,6 +142,62 @@ describe('whatsapp webhook phone extraction', () => {
     );
   });
 
+  it('promotes from as safe fallback in @lid upsert when sender diverges and participant is absent', () => {
+    const payload = {
+      event: 'messages-upsert',
+      sender: '558396311811@s.whatsapp.net',
+      from: '5583988887777@s.whatsapp.net',
+      data: {
+        key: {
+          remoteJid: '236197968359561@lid',
+          fromMe: false,
+        },
+        message: {
+          conversation: 'Quero agendar',
+        },
+      },
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
+
+    expect(extraction.phone).toBe('5583988887777');
+    expect(extraction.sourcePath).toBe('from');
+    expect(extraction.candidateType).toBe('sender_jid');
+    expect(extraction.confidence).toBe('low');
+    expect(extraction.rejections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourcePath: 'sender', reason: 'lid_sender_untrusted' }),
+      ])
+    );
+  });
+
+  it('does not promote from fallback in @lid when from equals sender', () => {
+    const payload = {
+      event: 'messages-upsert',
+      sender: '558396311811@s.whatsapp.net',
+      from: '558396311811@s.whatsapp.net',
+      data: {
+        key: {
+          remoteJid: '236197968359561@lid',
+          fromMe: false,
+        },
+        message: {
+          conversation: 'Quero agendar',
+        },
+      },
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
+
+    expect(extraction.phone).toBeNull();
+    expect(extraction.sourcePath).toBeNull();
+    expect(extraction.rejections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ reason: 'low_confidence_author' }),
+      ])
+    );
+  });
+
   it('resolves @lid author from extendedTextMessage.contextInfo.participant when sender is instance', () => {
     const payload = {
       event: 'messages.upsert',

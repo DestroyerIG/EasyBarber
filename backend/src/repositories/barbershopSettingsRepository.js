@@ -2,6 +2,7 @@ import { BaseRepository } from './BaseRepository.js';
 
 const mapRowToSettings = (row) => ({
   shopName: row.shop_name,
+  whatsappInstanceName: row.whatsapp_instance_name,
   contactPhone: row.contact_phone,
   address: row.address,
   openingTime: row.opening_time,
@@ -37,6 +38,7 @@ class BarbershopSettingsRepository extends BaseRepository {
     const result = await executor.query(
       `SELECT
          b.name AS shop_name,
+         COALESCE(NULLIF(b.whatsapp_instance_name, ''), '') AS whatsapp_instance_name,
          COALESCE(s.contact_phone, '') AS contact_phone,
          COALESCE(s.address, '') AS address,
          COALESCE(to_char(s.opening_time, 'HH24:MI'), '09:00') AS opening_time,
@@ -126,10 +128,11 @@ class BarbershopSettingsRepository extends BaseRepository {
 
       const barbershopResult = await client.query(
         `UPDATE barbershops
-         SET name = $2
+         SET name = $2,
+             whatsapp_instance_name = NULLIF(lower(btrim($3)), '')
          WHERE id = $1 AND active = true
          RETURNING id`,
-        [barbershopId, payload.shopName]
+        [barbershopId, payload.shopName, payload.whatsappInstanceName]
       );
 
       if (barbershopResult.rowCount === 0) {
@@ -190,6 +193,40 @@ class BarbershopSettingsRepository extends BaseRepository {
     } finally {
       client.release();
     }
+  }
+
+  async findByWhatsAppInstanceName(instanceName, executor = this.pool) {
+    if (typeof instanceName !== 'string') {
+      return null;
+    }
+
+    const normalizedInstanceName = instanceName.trim().toLowerCase();
+
+    if (!normalizedInstanceName) {
+      return null;
+    }
+
+    const result = await executor.query(
+      `SELECT id,
+              name,
+              whatsapp_instance_name
+         FROM barbershops
+        WHERE active = true
+          AND NULLIF(btrim(whatsapp_instance_name), '') IS NOT NULL
+          AND lower(btrim(whatsapp_instance_name)) = $1
+        LIMIT 1`,
+      [normalizedInstanceName]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return {
+      id: result.rows[0].id,
+      name: result.rows[0].name,
+      whatsappInstanceName: result.rows[0].whatsapp_instance_name,
+    };
   }
 }
 

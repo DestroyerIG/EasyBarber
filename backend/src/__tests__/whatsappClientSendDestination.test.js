@@ -126,6 +126,7 @@ describe('whatsappClient destination resolution', () => {
   it('sends when phone is valid and context is compatible', async () => {
     const sent = await sendWhatsAppText('558396311811', 'Oi', {
       remoteJidOriginal: '558396311811@s.whatsapp.net',
+      instanceName: 'tenant-alpha',
     });
 
     expect(sent).toBe(true);
@@ -133,6 +134,7 @@ describe('whatsappClient destination resolution', () => {
       expect.objectContaining({
         phone: '558396311811',
         text: 'Oi',
+        instanceName: 'tenant-alpha',
       })
     );
   });

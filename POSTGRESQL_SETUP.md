@@ -22,6 +22,10 @@ Arquivos SQL atuais:
 - backend/src/config/migration_v9.sql
 - backend/src/config/migration_v10.sql
 - backend/src/config/migration_v11.sql
+- backend/src/config/migration_v12.sql
+- backend/src/config/migration_v13.sql
+- backend/src/config/migration_v14.sql
+- backend/src/config/migration_v15.sql
 
 ## 2. Pré-requisitos
 
@@ -95,6 +99,10 @@ Executar nesta ordem:
 8. migration_v9.sql
 9. migration_v10.sql
 10. migration_v11.sql
+11. migration_v12.sql
+12. migration_v13.sql
+13. migration_v14.sql
+14. migration_v15.sql
 
 Justificativa:
 
@@ -104,6 +112,7 @@ Justificativa:
 - migration_v9 adiciona colunas de verificação de e-mail de conta.
 - migration_v10 adiciona vínculo de identidade Supabase e pendências de cadastro.
 - migration_v11 adiciona colunas de billing híbrido Stripe (modo e método de pagamento).
+- migration_v12..v15 adicionam billing provider-agnostic, CPF/CNPJ e vínculo multi-tenant por instanceName do WhatsApp.
 
 ### Cenário B: Upgrade legado
 
@@ -140,6 +149,10 @@ psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v10.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v11.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v12.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v13.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v14.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v15.sql
 ```
 
 ### Windows PowerShell (a partir da raiz do projeto)
@@ -155,6 +168,10 @@ psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backe
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v9.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v10.sql
 psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v11.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v12.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v13.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v14.sql
+psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v15.sql
 ```
 
 ### Com URL de conexão

@@ -31,6 +31,8 @@ EVOLUTION_INSTANCE_NAME=easybarber
 EVOLUTION_WEBHOOK_URL=https://sua-api.com/api/v1/whatsapp/webhook
 EVOLUTION_API_TIMEOUT_MS=10000
 EVOLUTION_WEBHOOK_EVENTS=MESSAGES_UPSERT,CONNECTION_UPDATE
+# Mapeamento explicito instance -> barbershopId (fallback legado temporario)
+WHATSAPP_INSTANCE_BARBERSHOP_MAP={"easybarber":"<barbershop_uuid>"}
 WHATSAPP_SESSION_TIMEOUT_MS=1800000
 ```
 
@@ -40,6 +42,8 @@ Recomendacao de eventos (producao):
 - Manter `webhook_by_events=true`.
 - Manter `webhook_base64=false`.
 - Nao habilitar `MESSAGES_SET` (evento pesado, desnecessario para o fluxo principal do bot e causa 413 em payloads grandes).
+- Fonte de verdade para tenant por webhook: `barbershops.whatsapp_instance_name`.
+- `WHATSAPP_INSTANCE_BARBERSHOP_MAP` deve ser mantida apenas como fallback de transicao (deprecated).
 
 ## 3. Fluxo de Conexão
 
@@ -178,6 +182,7 @@ Na configuração atual:
 - Causa mais comum: Evolution enviando eventos pesados como `MESSAGES_SET`.
 - Ajuste a instancia para enviar apenas `MESSAGES_UPSERT` e `CONNECTION_UPDATE`.
 - Verifique se `webhook_by_events=true` e `webhook_base64=false`.
+- Se a instancia ja existia com eventos antigos, reinitialize/reconecte para reaplicar a configuracao de eventos.
 
 ## 11. Segurança Operacional
 

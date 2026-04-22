@@ -45,6 +45,7 @@ cd frontend && npm run dev
 - A API oficial está em /api/v1.
 - O backend exige JWT_SECRET e DATABASE_URL para iniciar.
 - O arquivo database.sql sozinho não cobre todas as colunas/tabelas exigidas pelo módulo de WhatsApp e deve ser complementado por migrations.
+- Execute as migrations ate a versao mais recente (atualmente migration_v15.sql), na ordem descrita em POSTGRESQL_SETUP.md.
 
 ## Mapa de Docs
 

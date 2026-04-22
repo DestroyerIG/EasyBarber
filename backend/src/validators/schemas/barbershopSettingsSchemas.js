@@ -3,6 +3,18 @@ import { isValidCpfCnpj, normalizeDocumentDigits } from '../../utils/cpfCnpj.js'
 
 export const updateBarbershopSettingsSchema = z.object({
   shopName: z.string().trim().min(2, 'Nome da barbearia deve ter pelo menos 2 caracteres').max(255),
+  whatsappInstanceName: z
+    .union([
+      z.literal(''),
+      z
+        .string()
+        .trim()
+        .max(255, 'Nome da instancia deve ter no maximo 255 caracteres')
+        .regex(/^[a-zA-Z0-9._-]+$/, 'Nome da instancia aceita apenas letras, numeros, ponto, hifen e underscore'),
+      z.null(),
+    ])
+    .optional()
+    .default(''),
   contactPhone: z.string().trim().max(30).optional().default(''),
   address: z.string().trim().max(255).optional().default(''),
   openingTime: z.string().regex(/^\d{2}:\d{2}$/, 'Horário de abertura deve estar no formato HH:MM'),

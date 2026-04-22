@@ -44,6 +44,7 @@ import {
   formatBusinessHoursRange,
 } from '../barbershopBusinessSettingsService.js';
 import { appointmentService } from '../appointmentService.js';
+import { barbershopSettingsRepository } from '../../repositories/barbershopSettingsRepository.js';
 
 // ==================== HELPERS INTERNOS ====================
 
@@ -222,6 +223,327 @@ const mergeKnownInstanceNumbers = (values = []) => {
   return Array.from(s);
 };
 
+const SESSION_LOOKUP_WINDOW_MS_DEFAULT = 30 * 60 * 1000;
+const INSTANCE_BARBERSHOP_MAP_ENV_KEY = 'WHATSAPP_INSTANCE_BARBERSHOP_MAP';
+
+const normalizeFlowInstanceName = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized || null;
+};
+
+const resolveWebhookInstanceNameCandidate = (value) => {
+  if (typeof value === 'string') {
+    return normalizeFlowInstanceName(value);
+  }
+
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const nestedCandidates = [
+    value.instanceName,
+    value.instance,
+    value.name,
+    value.instance_id,
+    value.instanceId,
+  ];
+
+  for (const candidate of nestedCandidates) {
+    const normalized = normalizeFlowInstanceName(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+};
+
+const WEBHOOK_INSTANCE_NAME_CANDIDATES = [
+  (payload) => payload?.instanceName,
+  (payload) => payload?.instance,
+  (payload) => payload?.instanceData,
+  (payload) => payload?.data?.instanceName,
+  (payload) => payload?.data?.instance,
+  (payload) => payload?.data?.instanceData,
+  (payload) => payload?.message?.instanceName,
+  (payload) => payload?.message?.instance,
+  (payload) => payload?.message?.instanceData,
+  (payload) => payload?.data?.messages?.[0]?.instanceName,
+  (payload) => payload?.data?.messages?.[0]?.instance,
+  (payload) => payload?.messages?.[0]?.instanceName,
+  (payload) => payload?.messages?.[0]?.instance,
+];
+
+const extractWebhookInstanceName = (payload = {}) => {
+  for (const resolver of WEBHOOK_INSTANCE_NAME_CANDIDATES) {
+    const resolved = resolveWebhookInstanceNameCandidate(resolver(payload));
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  return null;
+};
+
+let instanceBarbershopMapCacheRaw = null;
+let instanceBarbershopMapCache = new Map();
+
+const readInstanceBarbershopMapFromEnv = () => {
+  const raw = String(process.env[INSTANCE_BARBERSHOP_MAP_ENV_KEY] || '').trim();
+  const defaultInstanceName = normalizeFlowInstanceName(process.env.EVOLUTION_INSTANCE_NAME);
+  const defaultBarbershopId = normalizeFlowBarbershopId(process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID);
+  const cacheKey = `${raw}::${defaultInstanceName || ''}::${defaultBarbershopId || ''}`;
+
+  if (cacheKey === instanceBarbershopMapCacheRaw) {
+    return instanceBarbershopMapCache;
+  }
+
+  const resolved = new Map();
+
+  if (raw) {
+    if (raw.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(raw);
+
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          for (const [instanceName, barbershopId] of Object.entries(parsed)) {
+            const normalizedInstanceName = normalizeFlowInstanceName(instanceName);
+            const normalizedBarbershopId = normalizeFlowBarbershopId(barbershopId);
+
+            if (normalizedInstanceName && normalizedBarbershopId) {
+              resolved.set(normalizedInstanceName, normalizedBarbershopId);
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+            envKey: INSTANCE_BARBERSHOP_MAP_ENV_KEY,
+          },
+          'Falha ao interpretar mapa de instancia->barbershop (JSON)'
+        );
+      }
+    } else {
+      for (const entry of raw.split(/[\n,;]+/)) {
+        const token = entry.trim();
+        if (!token) {
+          continue;
+        }
+
+        const separator = token.includes('=') ? '=' : token.includes(':') ? ':' : null;
+
+        if (!separator) {
+          continue;
+        }
+
+        const [instanceName, barbershopId] = token.split(separator, 2);
+        const normalizedInstanceName = normalizeFlowInstanceName(instanceName);
+        const normalizedBarbershopId = normalizeFlowBarbershopId(barbershopId);
+
+        if (normalizedInstanceName && normalizedBarbershopId) {
+          resolved.set(normalizedInstanceName, normalizedBarbershopId);
+        }
+      }
+    }
+  }
+
+  if (defaultInstanceName && defaultBarbershopId && !resolved.has(defaultInstanceName)) {
+    resolved.set(defaultInstanceName, defaultBarbershopId);
+  }
+
+  instanceBarbershopMapCacheRaw = cacheKey;
+  instanceBarbershopMapCache = resolved;
+
+  return resolved;
+};
+
+const resolveBarbershopFromInstanceName = (instanceName) => {
+  const normalizedInstanceName = normalizeFlowInstanceName(instanceName);
+
+  if (!normalizedInstanceName) {
+    return null;
+  }
+
+  return readInstanceBarbershopMapFromEnv().get(normalizedInstanceName) || null;
+};
+
+const resolveBarbershopFromInstanceNameInDatabase = async (instanceName) => {
+  const normalizedInstanceName = normalizeFlowInstanceName(instanceName);
+
+  if (!normalizedInstanceName) {
+    return null;
+  }
+
+  try {
+    const barbershop = await barbershopSettingsRepository.findByWhatsAppInstanceName(normalizedInstanceName);
+
+    if (!barbershop?.id) {
+      return null;
+    }
+
+    return {
+      barbershopId: barbershop.id,
+      instanceName: normalizedInstanceName,
+      source: 'instance_db',
+    };
+  } catch (error) {
+    logger.warn(
+      {
+        err: error,
+        instanceName: normalizedInstanceName,
+      },
+      'Falha ao resolver barbershop por instanceName no banco'
+    );
+    return null;
+  }
+};
+
+const buildLookupNumbers = (values = []) => {
+  const normalized = new Set();
+
+  for (const value of values) {
+    const phone = normalizeWhatsAppNumber(value);
+    if (!phone) {
+      continue;
+    }
+
+    normalized.add(phone);
+
+    if (phone.startsWith('55')) {
+      const withoutCountry = phone.slice(2);
+      if (withoutCountry.length >= 10) {
+        normalized.add(withoutCountry);
+      }
+    } else if (phone.length >= 10) {
+      normalized.add(`55${phone}`);
+    }
+  }
+
+  return Array.from(normalized);
+};
+
+const resolveBarbershopFromKnownNumbers = async (values = []) => {
+  const lookupNumbers = buildLookupNumbers(values);
+
+  if (!lookupNumbers.length) {
+    return null;
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT id,
+              regexp_replace(COALESCE(whatsapp,''),'\\D','','g') AS whatsapp_digits
+         FROM barbershops
+        WHERE regexp_replace(COALESCE(whatsapp,''),'\\D','','g') = ANY($1::text[])
+        ORDER BY created_at ASC NULLS LAST, id ASC
+        LIMIT 3`,
+      [lookupNumbers]
+    );
+
+    if (!result.rows.length) {
+      return null;
+    }
+
+    if (result.rows.length > 1) {
+      logger.warn(
+        {
+          lookupNumbers,
+          matches: result.rows.map((row) => ({
+            barbershopId: row.id,
+            whatsappDigits: row.whatsapp_digits,
+          })),
+        },
+        'Resolucao de barbershop por numero da instancia ambigua; aguardando mapeamento explicito'
+      );
+      return null;
+    }
+
+    return {
+      barbershopId: result.rows[0].id,
+      matchedNumber: result.rows[0].whatsapp_digits || null,
+    };
+  } catch (error) {
+    logger.warn(
+      {
+        err: error,
+        lookupNumbers,
+      },
+      'Falha ao resolver barbershop por numeros conhecidos da instancia'
+    );
+    return null;
+  }
+};
+
+const resolveSessionLookupWindowMs = () => {
+  const parsed = Number.parseInt(
+    process.env.WHATSAPP_SESSION_TIMEOUT_MS || String(SESSION_LOOKUP_WINDOW_MS_DEFAULT),
+    10
+  );
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return SESSION_LOOKUP_WINDOW_MS_DEFAULT;
+  }
+
+  return Math.max(parsed, 5 * 60 * 1000);
+};
+
+const resolveBarbershopFromSessionContext = async (phone) => {
+  const normalizedPhone = normalizeWhatsAppNumber(phone);
+
+  if (!normalizedPhone) {
+    return null;
+  }
+
+  const lookupWindowMs = resolveSessionLookupWindowMs();
+
+  try {
+    const result = await pool.query(
+      `SELECT barbershop_id,
+              MAX(updated_at) AS last_updated_at
+         FROM whatsapp_sessions
+        WHERE phone = $1
+          AND updated_at >= NOW() - ($2::bigint * INTERVAL '1 millisecond')
+        GROUP BY barbershop_id
+        ORDER BY last_updated_at DESC
+        LIMIT 2`,
+      [normalizedPhone, lookupWindowMs]
+    );
+
+    if (!result.rows.length) {
+      return null;
+    }
+
+    if (result.rows.length > 1) {
+      logger.warn(
+        {
+          phone: normalizedPhone,
+          lookupWindowMs,
+          matches: result.rows.map((row) => row.barbershop_id),
+        },
+        'Contexto de sessao WhatsApp ambiguo para resolver barbershop'
+      );
+      return null;
+    }
+
+    return result.rows[0].barbershop_id || null;
+  } catch (error) {
+    logger.warn(
+      {
+        err: error,
+        phone: normalizedPhone,
+        lookupWindowMs,
+      },
+      'Falha ao resolver barbershop pelo contexto de sessao WhatsApp'
+    );
+    return null;
+  }
+};
+
 /**
  * FIX Bug 3 — null-safe: retorna null se status ainda não foi sincronizado.
  * Evita que a guard self_target rejeite mensagens de terceiros durante startup.
@@ -287,25 +609,81 @@ const resolveFlowBarbershopId = async (options = {}) => {
     return explicitBarbershopId;
   }
 
-  const connectedNumber = resolveConnectedNumber();
+  const instanceName = normalizeFlowInstanceName(options?.instanceName);
+  const barbershopFromInstanceDb = await resolveBarbershopFromInstanceNameInDatabase(instanceName);
 
-  if (connectedNumber) {
-    try {
-      const result = await pool.query(
-        `SELECT id FROM barbershops
-         WHERE regexp_replace(COALESCE(whatsapp,''),'\\D','','g')=$1
-            OR regexp_replace(COALESCE(whatsapp,''),'\\D','','g')=$2
-         ORDER BY created_at ASC NULLS LAST, id ASC LIMIT 2`,
-        [connectedNumber, connectedNumber.replace(/^55/, '')]
-      );
-      if (result.rows.length > 1) {
-        logger.warn({ connectedNumber, matches: result.rows.length },
-          'Multiplas barbearias encontradas; usando o primeiro match');
-      }
-      if (result.rows.length > 0) return result.rows[0].id;
-    } catch (error) {
-      logger.warn({ err: error, connectedNumber }, 'Falha ao resolver barbershop pelo numero conectado');
-    }
+  if (barbershopFromInstanceDb?.barbershopId) {
+    logger.info(
+      {
+        barbershopId: barbershopFromInstanceDb.barbershopId,
+        instanceName,
+        source: 'instance_db',
+      },
+      'Barbershop resolvido por mapeamento de instancia no banco'
+    );
+    return barbershopFromInstanceDb.barbershopId;
+  }
+
+  const barbershopFromInstanceMap = resolveBarbershopFromInstanceName(instanceName);
+
+  if (barbershopFromInstanceMap) {
+    logger.info(
+      {
+        barbershopId: barbershopFromInstanceMap,
+        instanceName,
+        source: 'instance_map_legacy_env',
+        deprecated: true,
+      },
+      'Barbershop resolvido por mapeamento legado de instancia (.env deprecated)'
+    );
+    return barbershopFromInstanceMap;
+  }
+
+  if (instanceName) {
+    logger.warn(
+      {
+        instanceName,
+        source: 'instance_db',
+        hasLegacyEnvMap: readInstanceBarbershopMapFromEnv().size > 0,
+      },
+      'Falha ao resolver barbershop por instanceName (fail closed)'
+    );
+    return null;
+  }
+
+  const connectedNumber = normalizeWhatsAppNumber(options?.connectedNumber) || resolveConnectedNumber();
+  const knownInstanceNumbers = mergeKnownInstanceNumbers([
+    connectedNumber,
+    ...(Array.isArray(options?.knownInstanceNumbers) ? options.knownInstanceNumbers : []),
+  ]);
+
+  const barbershopFromKnownNumbers = await resolveBarbershopFromKnownNumbers(knownInstanceNumbers);
+
+  if (barbershopFromKnownNumbers?.barbershopId) {
+    logger.info(
+      {
+        barbershopId: barbershopFromKnownNumbers.barbershopId,
+        matchedNumber: barbershopFromKnownNumbers.matchedNumber,
+        knownInstanceNumbers,
+        source: 'instance_numbers',
+      },
+      'Barbershop resolvido por numero conhecido da instancia'
+    );
+    return barbershopFromKnownNumbers.barbershopId;
+  }
+
+  const barbershopFromSession = await resolveBarbershopFromSessionContext(options?.phone);
+
+  if (barbershopFromSession) {
+    logger.info(
+      {
+        barbershopId: barbershopFromSession,
+        phone: normalizeWhatsAppNumber(options?.phone),
+        source: 'session_context',
+      },
+      'Barbershop resolvido por contexto de sessao ativa'
+    );
+    return barbershopFromSession;
   }
 
   const configuredId = process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID?.trim() || null;
@@ -313,8 +691,12 @@ const resolveFlowBarbershopId = async (options = {}) => {
 
   logger.warn(
     {
+      instanceName,
+      knownInstanceNumbers,
+      phone: normalizeWhatsAppNumber(options?.phone),
       connectedNumber,
       hasDefaultBarbershopId: Boolean(configuredId),
+      hasInstanceMapConfig: readInstanceBarbershopMapFromEnv().size > 0,
     },
     'Falha ao resolver barbershop de forma segura; fallback automatico desativado'
   );
@@ -886,6 +1268,7 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
   const isPayloadInput = phoneOrPayload && typeof phoneOrPayload === 'object' && !Array.isArray(phoneOrPayload);
   const preExtractedPhone = normalizeWhatsAppNumber(options?.preExtractedPhone);
   const preExtractedText = normalizeText(options?.preExtractedText);
+  const preExtractedInstanceName = normalizeFlowInstanceName(options?.preExtractedInstanceName);
   const connectedNumber = resolveConnectedNumber();
   const preExtractedInstanceNumbers = Array.isArray(options?.preExtractedInstanceNumbers)
     ? options.preExtractedInstanceNumbers : [];
@@ -900,6 +1283,7 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
       payloadSummary: null,
       phoneExtraction: null,
       knownInstanceNumbers: baseKnownInstanceNumbers,
+      instanceName: preExtractedInstanceName,
     };
   }
 
@@ -925,6 +1309,7 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
     payloadSummary: buildWebhookPayloadSummary(phoneOrPayload),
     phoneExtraction: extraction,
     knownInstanceNumbers,
+    instanceName: preExtractedInstanceName || extractWebhookInstanceName(phoneOrPayload),
   };
 };
 
@@ -939,6 +1324,7 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     payloadSummary,
     phoneExtraction,
     knownInstanceNumbers,
+    instanceName,
   } =
     resolveIncomingMessageInput(phoneOrPayload, text, options);
 
@@ -987,6 +1373,7 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
   const sendContext = {
     ...(remoteJidOriginal ? { remoteJidOriginal } : {}),
     ...(normalizedEventName ? { eventName: normalizedEventName } : {}),
+    ...(instanceName ? { instanceName } : {}),
     ...(options?.dedupeKey ? { dedupeKey: options.dedupeKey } : {}),
     ...(options?.messageId ? { messageId: options.messageId } : {}),
     ...(responseCollector ? { captureCollector: responseCollector } : {}),
@@ -1001,6 +1388,7 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     eventName: normalizedEventName,
     dedupeKey: sendContext.dedupeKey,
     messageId: sendContext.messageId,
+    instanceName: instanceName || null,
   };
 
   logger.debug(
@@ -1009,6 +1397,7 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       normalizedTextLength: normalizedText ? normalizedText.length : 0,
       knownInstanceNumbers,
       payloadSummary,
+      instanceName,
       authorResolution: phoneExtraction
         ? {
             phone: phoneExtraction.phone,
@@ -1076,6 +1465,10 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       barbershopId: explicitBarbershopId,
       source: barbershopContextSource,
       simulationMode: Boolean(options?.simulationMode),
+      connectedNumber,
+      knownInstanceNumbers,
+      phone: normalizedPhone,
+      instanceName,
     });
 
     if (!barbershopId) {
@@ -1084,6 +1477,8 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
           ...flowDebugBase,
           explicitBarbershopId,
           barbershopContextSource,
+          instanceName,
+          knownInstanceNumbers,
         },
         'Mensagem ignorada: barbershop nao resolvido'
       );
