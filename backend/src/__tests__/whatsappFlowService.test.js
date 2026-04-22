@@ -278,6 +278,113 @@ describe('whatsappFlowService guards', () => {
     expect(instanceDbLookupCall).toBeDefined();
   });
 
+  it('resolve tenant via owner quando instanceName nao vier no payload', async () => {
+    mockPoolQuery.mockResolvedValueOnce({
+      rows: [{ id: 'tenant-owner', name: 'Barber Owner', whatsapp_instance_name: 'owner-inst' }],
+    });
+    mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: null });
+    mockIsWithinBusinessHours.mockReturnValue(false);
+
+    const payload = {
+      event: 'messages-upsert',
+      owner: 'owner-inst',
+      key: {
+        remoteJid: '5511777777777@s.whatsapp.net',
+        fromMe: false,
+      },
+      message: {
+        conversation: 'oi',
+      },
+    };
+
+    const result = await handleIncomingMessage(payload, 'oi', {
+      eventName: 'messages-upsert',
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: true, ignored: false }));
+    expect(mockGetBarbershopBusinessSettings).toHaveBeenCalledWith('tenant-owner');
+  });
+
+  it('processa inbound real com JID normal, resolve tenant por instanceName e responde saudacao', async () => {
+    mockPoolQuery.mockResolvedValueOnce({
+      rows: [{ id: 'tenant-db', name: 'Barber DB', whatsapp_instance_name: 'easybarber' }],
+    });
+    mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: '5511888888888' });
+    mockIsWithinBusinessHours.mockReturnValue(true);
+
+    const payload = {
+      event: 'messages-upsert',
+      instanceName: 'easybarber',
+      key: {
+        remoteJid: '558399849151@s.whatsapp.net',
+        fromMe: false,
+      },
+      sender: '558396311811@s.whatsapp.net',
+      message: {
+        conversation: 'Oi',
+      },
+    };
+
+    const result = await handleIncomingMessage(payload, 'Oi', {
+      eventName: 'messages-upsert',
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: true, ignored: false }));
+    expect(mockGetBarbershopBusinessSettings).toHaveBeenCalledWith('tenant-db');
+    expect(mockCreateSession).toHaveBeenCalledWith('558399849151', 'tenant-db');
+    expect(mockSendWhatsAppMessage).toHaveBeenCalledWith(
+      '558399849151',
+      expect.any(String),
+      expect.objectContaining({
+        eventName: 'messages-upsert',
+        instanceName: 'easybarber',
+      })
+    );
+  });
+
+  it('aceita inbound real @lid com metadata confiavel mesmo sem participant no payload principal', async () => {
+    mockPoolQuery.mockResolvedValueOnce({
+      rows: [{ id: 'tenant-db', name: 'Barber DB', whatsapp_instance_name: 'easybarber' }],
+    });
+    mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: '558396311811' });
+    mockIsWithinBusinessHours.mockReturnValue(true);
+
+    const payload = {
+      event: 'messages-upsert',
+      instanceName: 'easybarber',
+      key: {
+        remoteJid: '236197968359561@lid',
+        fromMe: false,
+      },
+      sender: '558396311811@s.whatsapp.net',
+      message: {
+        conversation: 'Olá',
+      },
+      messageContextInfo: {
+        participantPn: '5583970011223',
+      },
+    };
+
+    const result = await handleIncomingMessage(payload, 'Olá', {
+      eventName: 'messages-upsert',
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: true, ignored: false }));
+    expect(mockCreateSession).toHaveBeenCalledWith('5583970011223', 'tenant-db');
+    expect(mockSendWhatsAppMessage).toHaveBeenCalledWith(
+      '5583970011223',
+      expect.any(String),
+      expect.objectContaining({
+        eventName: 'messages-upsert',
+        instanceName: 'easybarber',
+        allowLidDestination: true,
+      })
+    );
+  });
+
   it('resolve corretamente tenants distintos para instancias diferentes', async () => {
     mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: null });
     mockIsWithinBusinessHours.mockReturnValue(false);

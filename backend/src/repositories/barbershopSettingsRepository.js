@@ -102,6 +102,30 @@ class BarbershopSettingsRepository extends BaseRepository {
     return mapRowToProfile(result.rows[0]);
   }
 
+  async findWhatsAppInstanceContextByBarbershopId(barbershopId, executor = this.pool) {
+    const result = await executor.query(
+      `SELECT id,
+              name,
+              active,
+              whatsapp_instance_name
+         FROM barbershops
+        WHERE id = $1
+        LIMIT 1`,
+      [barbershopId]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return {
+      id: result.rows[0].id,
+      name: result.rows[0].name,
+      active: result.rows[0].active,
+      whatsappInstanceName: result.rows[0].whatsapp_instance_name || null,
+    };
+  }
+
   async updateProfile(barbershopId, payload, executor = this.pool) {
     const result = await executor.query(
       `UPDATE barbershops
@@ -227,6 +251,109 @@ class BarbershopSettingsRepository extends BaseRepository {
       name: result.rows[0].name,
       whatsappInstanceName: result.rows[0].whatsapp_instance_name,
     };
+  }
+
+  async ensureWhatsAppInstanceName(barbershopId, buildInstanceName) {
+    const client = await this.getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      const result = await client.query(
+        `SELECT id,
+                name,
+                active,
+                whatsapp_instance_name
+           FROM barbershops
+          WHERE id = $1
+          FOR UPDATE`,
+        [barbershopId]
+      );
+
+      if (!result.rows.length || result.rows[0].active !== true) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+
+      const current = result.rows[0];
+      const currentInstanceName = typeof current.whatsapp_instance_name === 'string'
+        ? current.whatsapp_instance_name.trim().toLowerCase()
+        : '';
+
+      if (currentInstanceName) {
+        await client.query('COMMIT');
+        return {
+          id: current.id,
+          name: current.name,
+          active: current.active,
+          whatsappInstanceName: currentInstanceName,
+          createdNow: false,
+        };
+      }
+
+      const nextInstanceName = buildInstanceName({
+        id: current.id,
+        name: current.name,
+      });
+
+      const updateResult = await client.query(
+        `UPDATE barbershops
+            SET whatsapp_instance_name = $2,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+          RETURNING id, name, active, whatsapp_instance_name`,
+        [barbershopId, nextInstanceName]
+      );
+
+      await client.query('COMMIT');
+
+      return {
+        id: updateResult.rows[0].id,
+        name: updateResult.rows[0].name,
+        active: updateResult.rows[0].active,
+        whatsappInstanceName: updateResult.rows[0].whatsapp_instance_name,
+        createdNow: true,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async findWhatsAppInstanceNameDiagnostics(instanceName, executor = this.pool) {
+    if (typeof instanceName !== 'string') {
+      return [];
+    }
+
+    const normalizedInstanceName = instanceName.trim().toLowerCase();
+
+    if (!normalizedInstanceName) {
+      return [];
+    }
+
+    const result = await executor.query(
+      `SELECT id,
+              name,
+              active,
+              whatsapp,
+              whatsapp_instance_name
+         FROM barbershops
+        WHERE NULLIF(btrim(whatsapp_instance_name), '') IS NOT NULL
+          AND lower(btrim(whatsapp_instance_name)) = $1
+        ORDER BY active DESC, created_at ASC NULLS LAST, id ASC
+        LIMIT 5`,
+      [normalizedInstanceName]
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      active: row.active,
+      whatsapp: row.whatsapp,
+      whatsappInstanceName: row.whatsapp_instance_name,
+    }));
   }
 }
 

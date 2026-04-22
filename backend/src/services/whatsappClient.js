@@ -20,6 +20,11 @@ import {
   normalizePhoneForSend,
   resolveSafeReplyDestination,
 } from '../utils/whatsapp.js';
+import {
+  ensureBarbershopWhatsAppInstanceName,
+  getBarbershopWhatsAppInstanceContext,
+  normalizeWhatsAppInstanceName,
+} from './whatsapp/whatsappInstanceService.js';
 
 const STATUS = {
   PROVIDER_UNAVAILABLE: 'provider_unavailable',
@@ -30,7 +35,7 @@ const STATUS = {
   ERROR: 'error',
 };
 
-const waState = {
+const buildDefaultState = () => ({
   status: STATUS.DISCONNECTED,
   qrCode: null,
   error: null,
@@ -38,9 +43,10 @@ const waState = {
   connectedName: null,
   provider: 'evolution',
   lastSyncAt: null,
-};
+});
 
-let sessionRecoveryPromise = null;
+const waStateByInstance = new Map();
+const sessionRecoveryPromises = new Map();
 
 const isEvolutionProvider = () =>
   (process.env.WHATSAPP_PROVIDER || 'evolution').toLowerCase() === 'evolution';
@@ -48,18 +54,64 @@ const isEvolutionProvider = () =>
 const getNested = (obj, path) =>
   path.reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj);
 
-const updateState = (patch) => {
-  Object.assign(waState, patch, { lastSyncAt: new Date().toISOString() });
+const resolveStateKey = (instanceName = null) =>
+  normalizeWhatsAppInstanceName(instanceName) || '__default__';
+
+const getOrCreateState = (instanceName = null) => {
+  const stateKey = resolveStateKey(instanceName);
+
+  if (!waStateByInstance.has(stateKey)) {
+    waStateByInstance.set(stateKey, buildDefaultState());
+  }
+
+  return waStateByInstance.get(stateKey);
 };
 
-const updateUnavailableState = (error) => {
+const updateState = (patch, { instanceName = null } = {}) => {
+  const state = getOrCreateState(instanceName);
+  Object.assign(state, patch, { lastSyncAt: new Date().toISOString() });
+};
+
+const snapshotState = (instanceName = null) => ({
+  ...getOrCreateState(instanceName),
+});
+
+const resolveClientInstanceContext = async ({ instanceName = null, barbershopId = null, createIfMissing = false } = {}) => {
+  const normalizedInstanceName = normalizeWhatsAppInstanceName(instanceName);
+
+  if (normalizedInstanceName) {
+    return {
+      barbershopId: barbershopId || null,
+      instanceName: normalizedInstanceName,
+    };
+  }
+
+  if (!barbershopId) {
+    const fallbackConfig = getEvolutionConfig();
+    return {
+      barbershopId: null,
+      instanceName: normalizeWhatsAppInstanceName(fallbackConfig.instanceName),
+    };
+  }
+
+  const context = createIfMissing
+    ? await ensureBarbershopWhatsAppInstanceName(barbershopId)
+    : await getBarbershopWhatsAppInstanceContext(barbershopId);
+
+  return {
+    barbershopId,
+    instanceName: normalizeWhatsAppInstanceName(context.whatsappInstanceName),
+  };
+};
+
+const updateUnavailableState = (error, { instanceName = null } = {}) => {
   updateState({
     status: STATUS.PROVIDER_UNAVAILABLE,
     qrCode: null,
     connectedNumber: null,
     connectedName: null,
     error: error?.message || 'Evolution API indisponivel',
-  });
+  }, { instanceName });
 };
 
 const buildStatusLookupUrls = (baseURL, instanceName) => [
@@ -67,24 +119,24 @@ const buildStatusLookupUrls = (baseURL, instanceName) => [
   `${baseURL}/instance/status/${instanceName}`,
 ];
 
-const buildInstanceNotFoundError = (details = null) => {
-  const { instanceName } = getEvolutionConfig();
+const buildInstanceNotFoundError = (details = null, { instanceName = null } = {}) => {
+  const { instanceName: resolvedInstanceName } = getEvolutionConfig({ instanceName });
 
-  return new EvolutionApiError(`A instancia '${instanceName}' nao existe na Evolution API`, {
+  return new EvolutionApiError(`A instancia '${resolvedInstanceName}' nao existe na Evolution API`, {
     status: 404,
     details,
     code: 'EVOLUTION_INSTANCE_NOT_FOUND',
   });
 };
 
-const updateInstanceNotFoundState = (error = null) => {
+const updateInstanceNotFoundState = (error = null, { instanceName = null } = {}) => {
   updateState({
     status: STATUS.INSTANCE_NOT_FOUND,
     qrCode: null,
     connectedNumber: null,
     connectedName: null,
-    error: error?.message || buildInstanceNotFoundError().message,
-  });
+    error: error?.message || buildInstanceNotFoundError(null, { instanceName }).message,
+  }, { instanceName });
 };
 
 const isLikelyRenderableImageBase64 = (value) => {
@@ -241,7 +293,9 @@ const normalizeStatus = (rawState, qrCode) => {
   return STATUS.DISCONNECTED;
 };
 
-const syncStateFromEvolution = async ({ includeQr = false } = {}) => {
+const syncStateFromEvolution = async ({ includeQr = false, instanceName = null } = {}) => {
+  const state = getOrCreateState(instanceName);
+
   if (!isEvolutionProvider()) {
     updateState({
       status: STATUS.ERROR,
@@ -249,63 +303,65 @@ const syncStateFromEvolution = async ({ includeQr = false } = {}) => {
       qrCode: null,
       connectedNumber: null,
       connectedName: null,
-    });
-    return waState;
+    }, { instanceName });
+    return snapshotState(instanceName);
   }
 
-  const { baseURL, instanceName } = getEvolutionConfig();
-  const statusLookupUrls = buildStatusLookupUrls(baseURL, instanceName);
+  const { baseURL, instanceName: resolvedInstanceName } = getEvolutionConfig({ instanceName });
+  const statusLookupUrls = buildStatusLookupUrls(baseURL, resolvedInstanceName);
 
   const health = await healthCheck();
   if (!health.ok) {
     logger.warn(
       {
         urlCalled: [`${baseURL}/instance/fetchInstances`, `${baseURL}/instance/list`],
-        instanceName,
+        instanceName: resolvedInstanceName,
         evolutionStatus: health?.error?.status || null,
       },
       'Falha ao validar disponibilidade da Evolution antes de sincronizar status'
     );
-    updateUnavailableState(health.error);
-    return waState;
+    updateUnavailableState(health.error, { instanceName: resolvedInstanceName });
+    return snapshotState(resolvedInstanceName);
   }
 
   let statusPayload = null;
 
   try {
-    statusPayload = await getInstanceStatus();
+    statusPayload = await getInstanceStatus({ instanceName: resolvedInstanceName });
   } catch (error) {
-    if (isInstanceNotFoundError(error)) {
+    if (isInstanceNotFoundError(error, { instanceName: resolvedInstanceName })) {
       logger.warn(
         {
           urlCalled: statusLookupUrls,
-          instanceName,
+          instanceName: resolvedInstanceName,
           evolutionStatus: error?.status || null,
         },
         'Instancia configurada nao existe na Evolution API'
       );
-      updateInstanceNotFoundState(error);
-      return waState;
+      updateInstanceNotFoundState(error, { instanceName: resolvedInstanceName });
+      return snapshotState(resolvedInstanceName);
     }
 
-    updateUnavailableState(error);
-    return waState;
+    updateUnavailableState(error, { instanceName: resolvedInstanceName });
+    return snapshotState(resolvedInstanceName);
   }
 
-  if (!statusPayload || isInstanceNotFoundError({ details: statusPayload })) {
+  if (!statusPayload || isInstanceNotFoundError({ details: statusPayload }, { instanceName: resolvedInstanceName })) {
     logger.warn(
       {
         urlCalled: statusLookupUrls,
-        instanceName,
+        instanceName: resolvedInstanceName,
         evolutionStatus: null,
       },
       'Evolution retornou payload sem instancia correspondente'
     );
-    updateInstanceNotFoundState(buildInstanceNotFoundError(statusPayload));
-    return waState;
+    updateInstanceNotFoundState(buildInstanceNotFoundError(statusPayload, { instanceName: resolvedInstanceName }), {
+      instanceName: resolvedInstanceName,
+    });
+    return snapshotState(resolvedInstanceName);
   }
 
-  const qrCode = includeQr ? extractQrCode(statusPayload) : waState.qrCode;
+  const qrCode = includeQr ? extractQrCode(statusPayload) : state.qrCode;
   const rawEvolutionState = extractConnectionState(statusPayload);
   const identity = extractIdentity(statusPayload);
   const status = normalizeStatus(rawEvolutionState, qrCode);
@@ -313,7 +369,7 @@ const syncStateFromEvolution = async ({ includeQr = false } = {}) => {
   logger.info(
     {
       urlCalled: statusLookupUrls,
-      instanceName,
+      instanceName: resolvedInstanceName,
       evolutionStatus: rawEvolutionState,
       normalizedStatus: status,
     },
@@ -326,9 +382,9 @@ const syncStateFromEvolution = async ({ includeQr = false } = {}) => {
     connectedNumber: status === STATUS.CONNECTED ? identity.number : null,
     connectedName: status === STATUS.CONNECTED ? identity.name : null,
     error: null,
-  });
+  }, { instanceName: resolvedInstanceName });
 
-  return waState;
+  return snapshotState(resolvedInstanceName);
 };
 
 export const initWhatsApp = async () => {
@@ -355,37 +411,45 @@ export const initWhatsApp = async () => {
 };
 
 export const getWhatsAppStatus = () => ({
-  status: waState.status,
-  qrCode: waState.qrCode,
-  error: waState.error,
-  connectedNumber: waState.connectedNumber,
-  connectedName: waState.connectedName,
-  provider: waState.provider,
+  ...snapshotState(getEvolutionConfig().instanceName),
+});
+
+export const getWhatsAppStatusByInstance = (instanceName = null) => ({
+  ...snapshotState(instanceName),
 });
 
 export const getWhatsAppClient = () => null;
 
-export const connectWhatsApp = async () => {
+export const connectWhatsApp = async (context = {}) => {
   try {
+    const instanceContext = await resolveClientInstanceContext({
+      instanceName: context?.instanceName,
+      barbershopId: context?.barbershopId,
+      createIfMissing: true,
+    });
+    const resolvedInstanceName = instanceContext.instanceName;
     const health = await healthCheck();
     if (!health.ok) {
-      updateUnavailableState(health.error);
+      updateUnavailableState(health.error, { instanceName: resolvedInstanceName });
       return false;
     }
 
-    await createInstance();
-    await connectInstance();
+    await createInstance({ instanceName: resolvedInstanceName });
+    await connectInstance({ instanceName: resolvedInstanceName });
 
     let qrPayload = null;
     try {
-      qrPayload = await getQrCode();
+      qrPayload = await getQrCode({ instanceName: resolvedInstanceName });
       logger.debug({ qrPayload }, 'Payload bruto de QR recebido apos connect');
     } catch (error) {
-      logger.warn({ err: error }, 'Nao foi possivel obter QR imediatamente apos connect');
+      logger.warn({ err: error, instanceName: resolvedInstanceName }, 'Nao foi possivel obter QR imediatamente apos connect');
     }
 
     const qrCode = extractQrCode(qrPayload);
-    const syncedState = await syncStateFromEvolution({ includeQr: !qrCode });
+    const syncedState = await syncStateFromEvolution({
+      includeQr: !qrCode,
+      instanceName: resolvedInstanceName,
+    });
 
     if (
       syncedState.status === STATUS.INSTANCE_NOT_FOUND ||
@@ -401,15 +465,15 @@ export const connectWhatsApp = async () => {
         connectedNumber: null,
         connectedName: null,
         error: null,
-      });
+      }, { instanceName: resolvedInstanceName });
     }
 
     return true;
   } catch (error) {
     logger.error({ err: error }, 'Erro ao conectar instancia Evolution');
 
-    if (isInstanceNotFoundError(error)) {
-      updateInstanceNotFoundState(error);
+    if (isInstanceNotFoundError(error, { instanceName: context?.instanceName })) {
+      updateInstanceNotFoundState(error, { instanceName: context?.instanceName });
     } else if (error instanceof EvolutionApiError && error.code === 'EVOLUTION_CONFIG_ERROR') {
       updateState({
         status: STATUS.ERROR,
@@ -417,25 +481,31 @@ export const connectWhatsApp = async () => {
         error: error.message,
         connectedName: null,
         connectedNumber: null,
-      });
+      }, { instanceName: context?.instanceName });
     } else {
-      updateUnavailableState(error);
+      updateUnavailableState(error, { instanceName: context?.instanceName });
     }
 
     return false;
   }
 };
 
-export const getWhatsAppQrCode = async () => {
+export const getWhatsAppQrCode = async (context = {}) => {
   try {
-    const payload = await getQrCode();
+    const instanceContext = await resolveClientInstanceContext({
+      instanceName: context?.instanceName,
+      barbershopId: context?.barbershopId,
+      createIfMissing: true,
+    });
+    const resolvedInstanceName = instanceContext.instanceName;
+    const payload = await getQrCode({ instanceName: resolvedInstanceName });
     logger.debug({ payload }, 'Payload bruto de QR recebido em getWhatsAppQrCode');
 
     const qrCode = extractQrCode(payload);
 
     if (!qrCode) {
-      await syncStateFromEvolution({ includeQr: true });
-      return getWhatsAppStatus().qrCode;
+      const syncedState = await syncStateFromEvolution({ includeQr: true, instanceName: resolvedInstanceName });
+      return syncedState.qrCode;
     }
 
     updateState({
@@ -444,20 +514,35 @@ export const getWhatsAppQrCode = async () => {
       connectedNumber: null,
       connectedName: null,
       error: null,
-    });
+    }, { instanceName: resolvedInstanceName });
 
     return qrCode;
   } catch (error) {
     logger.warn({ err: error }, 'Erro ao buscar QR Code na Evolution API');
-    await syncStateFromEvolution({ includeQr: true });
-    return getWhatsAppStatus().qrCode;
+    const resolvedInstanceName = normalizeWhatsAppInstanceName(context?.instanceName);
+    if (resolvedInstanceName) {
+      const syncedState = await syncStateFromEvolution({ includeQr: true, instanceName: resolvedInstanceName });
+      return syncedState.qrCode;
+    }
+    return snapshotState(resolvedInstanceName).qrCode;
   }
 };
 
-export const disconnectWhatsApp = async () => {
+export const disconnectWhatsApp = async (context = {}) => {
   try {
-    await logoutInstance();
-    const syncedState = await syncStateFromEvolution({ includeQr: false });
+    const instanceContext = await resolveClientInstanceContext({
+      instanceName: context?.instanceName,
+      barbershopId: context?.barbershopId,
+      createIfMissing: false,
+    });
+    const resolvedInstanceName = instanceContext.instanceName;
+
+    if (!resolvedInstanceName) {
+      return true;
+    }
+
+    await logoutInstance({ instanceName: resolvedInstanceName });
+    const syncedState = await syncStateFromEvolution({ includeQr: false, instanceName: resolvedInstanceName });
 
     if (syncedState.status === STATUS.INSTANCE_NOT_FOUND) {
       return true;
@@ -473,16 +558,16 @@ export const disconnectWhatsApp = async () => {
       connectedName: null,
       connectedNumber: null,
       error: null,
-    });
+    }, { instanceName: resolvedInstanceName });
 
     return true;
   } catch (error) {
     logger.error({ err: error }, 'Erro ao desconectar instancia Evolution');
 
-    if (isInstanceNotFoundError(error)) {
-      updateInstanceNotFoundState(error);
+    if (isInstanceNotFoundError(error, { instanceName: context?.instanceName })) {
+      updateInstanceNotFoundState(error, { instanceName: context?.instanceName });
     } else if (error instanceof EvolutionApiError) {
-      updateUnavailableState(error);
+      updateUnavailableState(error, { instanceName: context?.instanceName });
     }
 
     return false;
@@ -499,50 +584,52 @@ const markSessionStateAsBroken = (error, context = {}) => {
       context?.providerError ||
       error?.message ||
       'Sessao Evolution inconsistente. Necessario reconectar a instancia.',
-  });
+  }, { instanceName: context?.instanceName || null });
 };
 
 const runSessionRecoveryFlow = async (context = {}) => {
-  const { instanceName } = getEvolutionConfig();
+  const resolvedInstanceName = normalizeWhatsAppInstanceName(context?.instanceName)
+    || getEvolutionConfig().instanceName;
+  const recoveryKey = resolveStateKey(resolvedInstanceName);
 
-  if (sessionRecoveryPromise) {
+  if (sessionRecoveryPromises.has(recoveryKey)) {
     logger.info(
       {
-        instanceName,
+        instanceName: resolvedInstanceName,
         endpoint: context?.endpoint || null,
         phone: context?.phone || null,
       },
       'Recuperacao de sessao Evolution ja em andamento'
     );
-    return sessionRecoveryPromise;
+    return sessionRecoveryPromises.get(recoveryKey);
   }
 
-  sessionRecoveryPromise = (async () => {
+  const recoveryPromise = (async () => {
     const recoverySteps = [];
 
     try {
       try {
-        await logoutInstance();
+        await logoutInstance({ instanceName: resolvedInstanceName });
         recoverySteps.push('logout_instance');
       } catch (logoutError) {
         recoverySteps.push('logout_instance_failed');
         logger.warn(
           {
             err: logoutError,
-            instanceName,
+            instanceName: resolvedInstanceName,
           },
           'Falha ao deslogar instancia durante recuperacao de sessao'
         );
       }
 
-      await createInstance();
+      await createInstance({ instanceName: resolvedInstanceName });
       recoverySteps.push('create_instance');
 
-      await connectInstance();
+      await connectInstance({ instanceName: resolvedInstanceName });
       recoverySteps.push('connect_instance');
 
       try {
-        const qrPayload = await getQrCode();
+        const qrPayload = await getQrCode({ instanceName: resolvedInstanceName });
         const qrCode = extractQrCode(qrPayload);
 
         if (qrCode) {
@@ -552,7 +639,7 @@ const runSessionRecoveryFlow = async (context = {}) => {
             connectedNumber: null,
             connectedName: null,
             error: null,
-          });
+          }, { instanceName: resolvedInstanceName });
           recoverySteps.push('qr_code_ready');
         } else {
           recoverySteps.push('qr_code_unavailable');
@@ -562,18 +649,18 @@ const runSessionRecoveryFlow = async (context = {}) => {
         logger.warn(
           {
             err: qrError,
-            instanceName,
+            instanceName: resolvedInstanceName,
           },
           'Falha ao obter QR code durante recuperacao de sessao'
         );
       }
 
-      await syncStateFromEvolution({ includeQr: true });
+      await syncStateFromEvolution({ includeQr: true, instanceName: resolvedInstanceName });
       recoverySteps.push('sync_state');
 
       logger.info(
         {
-          instanceName,
+          instanceName: resolvedInstanceName,
           endpoint: context?.endpoint || null,
           phone: context?.phone || null,
           providerError: context?.providerError || null,
@@ -594,12 +681,12 @@ const runSessionRecoveryFlow = async (context = {}) => {
         connectedNumber: null,
         connectedName: null,
         error: recoveryError?.message || 'Falha na recuperacao da sessao Evolution',
-      });
+      }, { instanceName: resolvedInstanceName });
 
       logger.error(
         {
           err: recoveryError,
-          instanceName,
+          instanceName: resolvedInstanceName,
           endpoint: context?.endpoint || null,
           phone: context?.phone || null,
           providerError: context?.providerError || null,
@@ -616,10 +703,12 @@ const runSessionRecoveryFlow = async (context = {}) => {
       };
     }
   })().finally(() => {
-    sessionRecoveryPromise = null;
+    sessionRecoveryPromises.delete(recoveryKey);
   });
 
-  return sessionRecoveryPromise;
+  sessionRecoveryPromises.set(recoveryKey, recoveryPromise);
+
+  return recoveryPromise;
 };
 
 export const recoverWhatsAppSession = async (context = {}) => runSessionRecoveryFlow(context);
@@ -634,15 +723,16 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
       ? context.remoteJidOriginal.trim()
       : null;
 
-  const config = getEvolutionConfig();
-  const contextInstanceName = typeof context?.instanceName === 'string'
-    ? context.instanceName.trim().toLowerCase()
-    : '';
-  const resolvedInstanceName = contextInstanceName || config.instanceName;
+  const instanceContext = await resolveClientInstanceContext({
+    instanceName: context?.instanceName,
+    barbershopId: context?.barbershopId,
+    createIfMissing: Boolean(context?.barbershopId),
+  });
+  const resolvedInstanceName = instanceContext.instanceName;
   const endpoint = `/message/sendText/${resolvedInstanceName}`;
   const destination = normalizedPhone;
   const discardedRemoteJid = isInvalidJidContext(remoteJidOriginal);
-  const connectedNumber = normalizeWhatsAppNumber(getWhatsAppStatus()?.connectedNumber);
+  const connectedNumber = normalizeWhatsAppNumber(getWhatsAppStatusByInstance(resolvedInstanceName)?.connectedNumber);
   const knownInstanceNumbers = Array.isArray(context?.knownInstanceNumbers)
     ? context.knownInstanceNumbers
     : [];
@@ -750,13 +840,15 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
     const payloadShapeUsed = sendResult?.meta?.payloadShape || null;
     const endpointUsed = sendResult?.meta?.endpoint || endpoint;
 
-    if (waState.status !== STATUS.CONNECTED) {
-      await syncStateFromEvolution({ includeQr: false });
+    const currentState = getWhatsAppStatusByInstance(resolvedInstanceName);
+
+    if (currentState.status !== STATUS.CONNECTED) {
+      await syncStateFromEvolution({ includeQr: false, instanceName: resolvedInstanceName });
     } else {
       updateState({
         status: STATUS.CONNECTED,
         error: null,
-      });
+      }, { instanceName: resolvedInstanceName });
     }
 
     logger.info(
@@ -809,7 +901,10 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
         'Erro de sessao inconsistente detectado no provider Evolution'
       );
 
-      markSessionStateAsBroken(error, { providerError });
+      markSessionStateAsBroken(error, {
+        providerError,
+        instanceName: resolvedInstanceName,
+      });
 
       await recoverWhatsAppSession({
         endpoint,
@@ -822,42 +917,47 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
     }
 
     if (error instanceof EvolutionApiError) {
-      if (isInstanceNotFoundError(error)) {
-        updateInstanceNotFoundState(error);
+      if (isInstanceNotFoundError(error, { instanceName: resolvedInstanceName })) {
+        updateInstanceNotFoundState(error, { instanceName: resolvedInstanceName });
       } else if (
         error.code === 'EVOLUTION_NETWORK_ERROR' ||
         error.code === 'EVOLUTION_TIMEOUT' ||
         error.code === 'EVOLUTION_CONFIG_ERROR'
       ) {
-        updateUnavailableState(error);
+        updateUnavailableState(error, { instanceName: resolvedInstanceName });
       } else if (
         error.code === 'EVOLUTION_INVALID_PHONE' ||
         error.code === 'EVOLUTION_INVALID_MESSAGE'
       ) {
         updateState({
           error: error.message,
-        });
+        }, { instanceName: resolvedInstanceName });
       } else {
         updateState({
           error: error.message,
-        });
+        }, { instanceName: resolvedInstanceName });
       }
     } else {
       updateState({
         error: error?.message || 'Falha ao enviar mensagem',
-      });
+      }, { instanceName: resolvedInstanceName });
     }
 
     return false;
   }
 };
 
-export const logoutWhatsApp = async () => disconnectWhatsApp();
+export const logoutWhatsApp = async (context = {}) => disconnectWhatsApp(context);
 
-export const restartWhatsApp = async () => connectWhatsApp();
+export const restartWhatsApp = async (context = {}) => connectWhatsApp(context);
 
-export const initializeWhatsAppInstance = async () => {
-  const { baseURL, instanceName } = getEvolutionConfig();
+export const initializeWhatsAppInstance = async (context = {}) => {
+  const instanceContext = await resolveClientInstanceContext({
+    instanceName: context?.instanceName,
+    barbershopId: context?.barbershopId,
+    createIfMissing: true,
+  });
+  const { baseURL, instanceName } = getEvolutionConfig({ instanceName: instanceContext.instanceName });
 
   logger.info(
     {
@@ -867,11 +967,28 @@ export const initializeWhatsAppInstance = async () => {
     'Inicializando/recriando instancia Evolution'
   );
 
-  const ok = await connectWhatsApp();
+  const ok = await connectWhatsApp(instanceContext);
   return {
     ok,
-    status: getWhatsAppStatus(),
+    status: getWhatsAppStatusByInstance(instanceContext.instanceName),
   };
 };
 
-export const refreshWhatsAppStatus = async () => syncStateFromEvolution({ includeQr: false });
+export const refreshWhatsAppStatus = async (context = {}) => {
+  const instanceContext = await resolveClientInstanceContext({
+    instanceName: context?.instanceName,
+    barbershopId: context?.barbershopId,
+    createIfMissing: false,
+  });
+
+  if (!instanceContext.instanceName) {
+    return {
+      ...buildDefaultState(),
+    };
+  }
+
+  return syncStateFromEvolution({
+    includeQr: false,
+    instanceName: instanceContext.instanceName,
+  });
+};

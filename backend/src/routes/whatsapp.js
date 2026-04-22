@@ -3,6 +3,7 @@ import express from 'express';
 import { handleIncomingMessage, sendWhatsAppMessage } from '../services/whatsapp/index.js';
 import {
   getWhatsAppStatus,
+  getWhatsAppStatusByInstance,
   connectWhatsApp,
   disconnectWhatsApp,
   getWhatsAppQrCode,
@@ -12,6 +13,7 @@ import {
   restartWhatsApp,
   initializeWhatsAppInstance,
 } from '../services/whatsappClient.js';
+import { getBarbershopWhatsAppInstanceContext } from '../services/whatsapp/whatsappInstanceService.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { requireTenantRoles } from '../middleware/rbac.js';
 import { requireFeature } from '../middleware/subscriptionGuard.js';
@@ -26,6 +28,34 @@ import {
 
 const router = express.Router();
 const waProtected = [authMiddleware, requireTenantRoles, requireFeature('whatsapp_automation')];
+
+const buildDisconnectedStatusPayload = (instanceName = null) => ({
+  status: 'disconnected',
+  qrCode: null,
+  error: null,
+  connectedNumber: null,
+  connectedName: null,
+  provider: 'evolution',
+  ...(instanceName ? { instanceName } : {}),
+});
+
+const resolveAuthenticatedWhatsAppContext = async (req) => {
+  const barbershopId = req.user?.barbershopId || null;
+
+  if (!barbershopId) {
+    return {
+      barbershopId: null,
+      instanceName: null,
+    };
+  }
+
+  const context = await getBarbershopWhatsAppInstanceContext(barbershopId);
+
+  return {
+    barbershopId,
+    instanceName: context.whatsappInstanceName || null,
+  };
+};
 
 const normalizeSimulatorBarbershopId = (value) => {
   if (typeof value !== 'string') {
@@ -331,6 +361,23 @@ const buildPayloadLogSummary = (payload = {}) => ({
     payload?.data?.messages?.[0]?.key?.remoteJid ||
     payload?.messages?.[0]?.key?.remoteJid ||
     null,
+  instanceName:
+    payload?.instanceName ||
+    payload?.instance?.instanceName ||
+    payload?.owner ||
+    payload?.data?.instanceName ||
+    payload?.data?.instance?.instanceName ||
+    payload?.data?.owner ||
+    payload?.message?.instanceName ||
+    payload?.message?.instance?.instanceName ||
+    payload?.message?.owner ||
+    payload?.data?.messages?.[0]?.instanceName ||
+    payload?.data?.messages?.[0]?.instance?.instanceName ||
+    payload?.data?.messages?.[0]?.owner ||
+    payload?.messages?.[0]?.instanceName ||
+    payload?.messages?.[0]?.instance?.instanceName ||
+    payload?.messages?.[0]?.owner ||
+    null,
 });
 
 const logWebhookReceipt = ({ req, route, eventName = null, payload = {}, parseError = null, bodyType = null }) => {
@@ -424,6 +471,18 @@ const normalizeWebhookEventPayload = (payload = {}, forcedEvent = null) => {
     messageNode?.from ||
     null;
 
+  const resolvedInstanceName =
+    payload?.instanceName ||
+    payload?.instance?.instanceName ||
+    payload?.owner ||
+    dataNode?.instanceName ||
+    dataNode?.instance?.instanceName ||
+    dataNode?.owner ||
+    messageNode?.instanceName ||
+    messageNode?.instance?.instanceName ||
+    messageNode?.owner ||
+    null;
+
   return {
     ...payload,
     ...(dataNode || {}),
@@ -433,6 +492,7 @@ const normalizeWebhookEventPayload = (payload = {}, forcedEvent = null) => {
     // Restaurar sender e from após o spread para evitar contaminação
     sender: resolvedSender,
     from: resolvedFrom,
+    instanceName: resolvedInstanceName,
     event:
       forcedEvent ||
       payload?.event ||
@@ -491,6 +551,7 @@ const mapWebhookIncomingMessage = (payload) => {
   logger.debug(
     {
       event: eventName,
+      instanceName: normalizedPayload?.instanceName || null,
       keyRemoteJid: normalizedPayload?.key?.remoteJid || null,
       sender: normalizedPayload?.sender || null,
       participant: normalizedPayload?.participant || normalizedPayload?.key?.participant || null,
@@ -530,6 +591,7 @@ const mapWebhookIncomingMessage = (payload) => {
         authorCandidates: extraction.candidates,
         extractionRejections: extraction.rejections,
         instanceNumbers: extraction.instanceNumbers,
+        instanceName: normalizedPayload?.instanceName || null,
         payloadSummary: buildPayloadLogSummary(normalizedPayload),
       },
       'Webhook ignorado: messages-upsert sem telefone extraivel'
@@ -559,6 +621,7 @@ const mapWebhookIncomingMessage = (payload) => {
       confidence: extraction.confidence,
       resolutionRule: extraction.resolutionRule,
       remoteJidOriginal: extraction.remoteJidOriginal,
+      instanceName: normalizedPayload?.instanceName || null,
       sender: extraction.sender || normalizedPayload?.sender || null,
       participant: extraction.participant || normalizedPayload?.participant || null,
       fromMe: extraction.fromMe,
@@ -574,6 +637,7 @@ const mapWebhookIncomingMessage = (payload) => {
       confidence: extraction.confidence,
       resolutionRule: extraction.resolutionRule,
       remoteJidOriginal: extraction.remoteJidOriginal,
+      instanceName: normalizedPayload?.instanceName || null,
       sender: extraction.sender || normalizedPayload?.sender || null,
       participant: extraction.participant || normalizedPayload?.participant || null,
       fromMe: extraction.fromMe,
@@ -615,6 +679,7 @@ const buildWebhookDebugFields = (payload, extraction = null) => {
     authorCandidates: resolvedExtraction.candidates,
     extractionRejections: resolvedExtraction.rejections,
     instanceNumbers: resolvedExtraction.instanceNumbers,
+    instanceName: payload?.instanceName || null,
   };
 };
 
@@ -1151,8 +1216,17 @@ router.post('/simulator/message', ...waProtected, async (req, res, next) => {
 
 router.get('/status', ...waProtected, async (req, res, next) => {
   try {
-    await refreshWhatsAppStatus();
-    return sendSuccess(res, getWhatsAppStatus());
+    const tenantContext = await resolveAuthenticatedWhatsAppContext(req);
+
+    if (!tenantContext.instanceName) {
+      return sendSuccess(res, buildDisconnectedStatusPayload());
+    }
+
+    const status = await refreshWhatsAppStatus(tenantContext);
+    return sendSuccess(res, {
+      ...status,
+      instanceName: tenantContext.instanceName,
+    });
   } catch (error) {
     return next(error);
   }
@@ -1160,8 +1234,12 @@ router.get('/status', ...waProtected, async (req, res, next) => {
 
 router.post('/connect', ...waProtected, async (req, res, next) => {
   try {
-    const connected = await connectWhatsApp();
-    const status = getWhatsAppStatus();
+    const tenantContext = { barbershopId: req.user.barbershopId };
+    const connected = await connectWhatsApp(tenantContext);
+    const resolvedContext = await resolveAuthenticatedWhatsAppContext(req);
+    const status = resolvedContext.instanceName
+      ? getWhatsAppStatusByInstance(resolvedContext.instanceName)
+      : buildDisconnectedStatusPayload();
 
     if (!connected && (status.status === 'provider_unavailable' || status.status === 'unavailable')) {
       return sendError(
@@ -1181,7 +1259,10 @@ router.post('/connect', ...waProtected, async (req, res, next) => {
       );
     }
 
-    return sendSuccess(res, status);
+    return sendSuccess(res, {
+      ...status,
+      instanceName: resolvedContext.instanceName,
+    });
   } catch (error) {
     return next(error);
   }
@@ -1189,7 +1270,8 @@ router.post('/connect', ...waProtected, async (req, res, next) => {
 
 router.post('/initialize', ...waProtected, async (req, res, next) => {
   try {
-    const result = await initializeWhatsAppInstance();
+    const tenantContext = { barbershopId: req.user.barbershopId };
+    const result = await initializeWhatsAppInstance(tenantContext);
     const status = result?.status || getWhatsAppStatus();
 
     if (!result?.ok && (status.status === 'provider_unavailable' || status.status === 'unavailable')) {
@@ -1209,7 +1291,6 @@ router.post('/initialize', ...waProtected, async (req, res, next) => {
         status.error || 'Instancia configurada nao existe na Evolution API'
       );
     }
-
     return sendSuccess(res, status);
   } catch (error) {
     return next(error);
@@ -1218,12 +1299,14 @@ router.post('/initialize', ...waProtected, async (req, res, next) => {
 
 router.get('/qrcode', ...waProtected, async (req, res, next) => {
   try {
-    const status = getWhatsAppStatus();
+    const status = await refreshWhatsAppStatus({ barbershopId: req.user.barbershopId });
+    const resolvedContext = await resolveAuthenticatedWhatsAppContext(req);
 
     if (status.status === 'provider_unavailable' || status.status === 'unavailable') {
       return sendSuccess(res, {
         status: 'provider_unavailable',
         qrCode: null,
+        instanceName: resolvedContext.instanceName,
         message: status.error || 'Evolution API indisponivel',
       });
     }
@@ -1232,17 +1315,22 @@ router.get('/qrcode', ...waProtected, async (req, res, next) => {
       return sendSuccess(res, {
         status: 'instance_not_found',
         qrCode: null,
+        instanceName: resolvedContext.instanceName,
         message: status.error || 'Instancia configurada nao existe na Evolution API',
       });
     }
 
-    const qrCode = await getWhatsAppQrCode();
-    const refreshed = getWhatsAppStatus();
+    const qrCode = await getWhatsAppQrCode({ barbershopId: req.user.barbershopId });
+    const refreshedContext = await resolveAuthenticatedWhatsAppContext(req);
+    const refreshed = refreshedContext.instanceName
+      ? getWhatsAppStatusByInstance(refreshedContext.instanceName)
+      : buildDisconnectedStatusPayload();
 
     if (!qrCode) {
       return sendSuccess(res, {
         status: refreshed.status,
         qrCode: null,
+        instanceName: refreshedContext.instanceName,
         message:
           refreshed.status === 'connected'
             ? 'Instancia ja conectada'
@@ -1253,6 +1341,7 @@ router.get('/qrcode', ...waProtected, async (req, res, next) => {
     return sendSuccess(res, {
       status: refreshed.status,
       qrCode,
+      instanceName: refreshedContext.instanceName,
     });
   } catch (error) {
     return next(error);
@@ -1261,12 +1350,15 @@ router.get('/qrcode', ...waProtected, async (req, res, next) => {
 
 router.post('/disconnect', ...waProtected, async (req, res, next) => {
   try {
-    const success = await disconnectWhatsApp();
+    const success = await disconnectWhatsApp({ barbershopId: req.user.barbershopId });
+    const tenantContext = await resolveAuthenticatedWhatsAppContext(req);
 
     if (success) {
       return sendSuccess(res, {
         message: 'WhatsApp desconectado com sucesso',
-        status: getWhatsAppStatus(),
+        status: tenantContext.instanceName
+          ? getWhatsAppStatusByInstance(tenantContext.instanceName)
+          : buildDisconnectedStatusPayload(),
       });
     }
 
@@ -1307,10 +1399,14 @@ router.post('/send', ...waProtected, async (req, res, next) => {
 
     const sent = await sendWhatsAppText(normalizedPhone, normalizedMessage, {
       remoteJidOriginal: normalizedRemoteJidOriginal,
+      barbershopId: req.user.barbershopId,
     });
 
     if (!sent) {
-      const status = getWhatsAppStatus();
+      const tenantContext = await resolveAuthenticatedWhatsAppContext(req);
+      const status = tenantContext.instanceName
+        ? getWhatsAppStatusByInstance(tenantContext.instanceName)
+        : buildDisconnectedStatusPayload();
       return sendError(res, 502, 'WHATSAPP_SEND_FAILED', status.error || 'Falha ao enviar mensagem');
     }
 
@@ -1354,10 +1450,14 @@ router.post('/test-send', ...waProtected, async (req, res, next) => {
 
     const sent = await sendWhatsAppText(normalizedPhone, normalizedMessage, {
       remoteJidOriginal: normalizedRemoteJidOriginal,
+      barbershopId: req.user.barbershopId,
     });
 
     if (!sent) {
-      const status = getWhatsAppStatus();
+      const tenantContext = await resolveAuthenticatedWhatsAppContext(req);
+      const status = tenantContext.instanceName
+        ? getWhatsAppStatusByInstance(tenantContext.instanceName)
+        : buildDisconnectedStatusPayload();
       logger.warn(
         {
           route: '/api/v1/whatsapp/test-send',
@@ -1429,10 +1529,14 @@ router.post('/debug-send', ...waProtected, async (req, res, next) => {
     const sent = await sendWhatsAppMessage(normalizedPhone, normalizedMessage, {
       remoteJidOriginal: normalizedRemoteJidOriginal,
       eventName: 'debug-send',
+      barbershopId: req.user.barbershopId,
     });
 
     if (!sent) {
-      const status = getWhatsAppStatus();
+      const tenantContext = await resolveAuthenticatedWhatsAppContext(req);
+      const status = tenantContext.instanceName
+        ? getWhatsAppStatusByInstance(tenantContext.instanceName)
+        : buildDisconnectedStatusPayload();
 
       logger.warn(
         {
@@ -1468,12 +1572,14 @@ router.post('/debug-send', ...waProtected, async (req, res, next) => {
 
 router.get('/qr', ...waProtected, async (req, res, next) => {
   try {
-    const status = getWhatsAppStatus();
+    const status = await refreshWhatsAppStatus({ barbershopId: req.user.barbershopId });
+    const resolvedContext = await resolveAuthenticatedWhatsAppContext(req);
 
     if (status.status === 'provider_unavailable' || status.status === 'unavailable') {
       return sendSuccess(res, {
         status: 'provider_unavailable',
         qrCode: null,
+        instanceName: resolvedContext.instanceName,
         message: status.error || 'Evolution API indisponivel',
       });
     }
@@ -1482,16 +1588,21 @@ router.get('/qr', ...waProtected, async (req, res, next) => {
       return sendSuccess(res, {
         status: 'instance_not_found',
         qrCode: null,
+        instanceName: resolvedContext.instanceName,
         message: status.error || 'Instancia configurada nao existe na Evolution API',
       });
     }
 
-    const qrCode = await getWhatsAppQrCode();
-    const refreshed = getWhatsAppStatus();
+    const qrCode = await getWhatsAppQrCode({ barbershopId: req.user.barbershopId });
+    const refreshedContext = await resolveAuthenticatedWhatsAppContext(req);
+    const refreshed = refreshedContext.instanceName
+      ? getWhatsAppStatusByInstance(refreshedContext.instanceName)
+      : buildDisconnectedStatusPayload();
 
     return sendSuccess(res, {
       status: refreshed.status,
       qrCode: qrCode || null,
+      instanceName: refreshedContext.instanceName,
     });
   } catch (error) {
     return next(error);
@@ -1500,12 +1611,15 @@ router.get('/qr', ...waProtected, async (req, res, next) => {
 
 router.post('/logout', ...waProtected, async (req, res, next) => {
   try {
-    const success = await logoutWhatsApp();
+    const success = await logoutWhatsApp({ barbershopId: req.user.barbershopId });
+    const tenantContext = await resolveAuthenticatedWhatsAppContext(req);
 
     if (success) {
       return sendSuccess(res, {
         message: 'WhatsApp desconectado com sucesso',
-        status: getWhatsAppStatus(),
+        status: tenantContext.instanceName
+          ? getWhatsAppStatusByInstance(tenantContext.instanceName)
+          : buildDisconnectedStatusPayload(),
       });
     }
 
@@ -1517,8 +1631,14 @@ router.post('/logout', ...waProtected, async (req, res, next) => {
 
 router.post('/restart', ...waProtected, async (req, res, next) => {
   try {
-    await restartWhatsApp();
-    return sendSuccess(res, getWhatsAppStatus());
+    await restartWhatsApp({ barbershopId: req.user.barbershopId });
+    const tenantContext = await resolveAuthenticatedWhatsAppContext(req);
+    return sendSuccess(
+      res,
+      tenantContext.instanceName
+        ? getWhatsAppStatusByInstance(tenantContext.instanceName)
+        : buildDisconnectedStatusPayload()
+    );
   } catch (error) {
     return next(error);
   }

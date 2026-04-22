@@ -261,17 +261,22 @@ const resolveWebhookInstanceNameCandidate = (value) => {
 const WEBHOOK_INSTANCE_NAME_CANDIDATES = [
   (payload) => payload?.instanceName,
   (payload) => payload?.instance,
+  (payload) => payload?.owner,
   (payload) => payload?.instanceData,
   (payload) => payload?.data?.instanceName,
   (payload) => payload?.data?.instance,
+  (payload) => payload?.data?.owner,
   (payload) => payload?.data?.instanceData,
   (payload) => payload?.message?.instanceName,
   (payload) => payload?.message?.instance,
+  (payload) => payload?.message?.owner,
   (payload) => payload?.message?.instanceData,
   (payload) => payload?.data?.messages?.[0]?.instanceName,
   (payload) => payload?.data?.messages?.[0]?.instance,
+  (payload) => payload?.data?.messages?.[0]?.owner,
   (payload) => payload?.messages?.[0]?.instanceName,
   (payload) => payload?.messages?.[0]?.instance,
+  (payload) => payload?.messages?.[0]?.owner,
 ];
 
 const extractWebhookInstanceName = (payload = {}) => {
@@ -379,8 +384,38 @@ const resolveBarbershopFromInstanceNameInDatabase = async (instanceName) => {
     const barbershop = await barbershopSettingsRepository.findByWhatsAppInstanceName(normalizedInstanceName);
 
     if (!barbershop?.id) {
+      const diagnostics = await barbershopSettingsRepository.findWhatsAppInstanceNameDiagnostics(
+        normalizedInstanceName
+      );
+
+      logger.warn(
+        {
+          instanceName: normalizedInstanceName,
+          lookupFound: false,
+          lookupMatches: diagnostics.length,
+          activeMatches: diagnostics.filter((item) => item.active === true).length,
+          matches: diagnostics.map((item) => ({
+            barbershopId: item.id,
+            name: item.name,
+            active: item.active,
+            whatsapp: item.whatsapp || null,
+            whatsappInstanceName: item.whatsappInstanceName,
+          })),
+        },
+        'Lookup de instanceName no banco nao encontrou barbearia ativa vinculada'
+      );
       return null;
     }
+
+    logger.info(
+      {
+        instanceName: normalizedInstanceName,
+        lookupFound: true,
+        barbershopId: barbershop.id,
+        whatsappInstanceName: barbershop.whatsappInstanceName,
+      },
+      'Lookup de instanceName no banco resolveu barbearia'
+    );
 
     return {
       barbershopId: barbershop.id,
@@ -641,6 +676,8 @@ const resolveFlowBarbershopId = async (options = {}) => {
         instanceName,
         source: 'instance_db',
         hasLegacyEnvMap: readInstanceBarbershopMapFromEnv().size > 0,
+        legacyEnvFallbackTried: false,
+        finalBarbershopId: null,
       },
       'Falha ao resolver barbershop por instanceName (fail closed)'
     );

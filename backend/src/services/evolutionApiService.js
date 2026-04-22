@@ -81,11 +81,22 @@ class EvolutionApiError extends Error {
   }
 }
 
-const getConfig = () => {
+const normalizeInstanceName = (value) => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value.trim().toLowerCase();
+};
+
+const getConfig = (overrides = {}) => {
   const baseURL = (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
   const apiKey = process.env.EVOLUTION_API_KEY || '';
-  const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'easybarber';
-  const webhookUrl = process.env.EVOLUTION_WEBHOOK_URL || '';
+  const fallbackInstanceName = process.env.EVOLUTION_INSTANCE_NAME || 'easybarber';
+  const instanceName = normalizeInstanceName(overrides.instanceName) || normalizeInstanceName(fallbackInstanceName);
+  const webhookUrl = typeof overrides.webhookUrl === 'string'
+    ? overrides.webhookUrl.trim()
+    : (process.env.EVOLUTION_WEBHOOK_URL || '');
   const timeoutFromEnv = Number.parseInt(
     process.env.EVOLUTION_API_TIMEOUT_MS || String(DEFAULT_TIMEOUT_MS),
     10
@@ -113,8 +124,8 @@ const getConfig = () => {
   };
 };
 
-const ensureConfigured = () => {
-  const { baseURL, apiKey } = getConfig();
+const ensureConfigured = (overrides = {}) => {
+  const { baseURL, apiKey } = getConfig(overrides);
 
   if (!baseURL) {
     throw new EvolutionApiError('EVOLUTION_API_URL nao configurada', {
@@ -131,8 +142,8 @@ const ensureConfigured = () => {
 
 const normalizePath = (path) => (path.startsWith('/') ? path : `/${path}`);
 
-const buildHeaders = () => {
-  const { apiKey } = getConfig();
+const buildHeaders = (overrides = {}) => {
+  const { apiKey } = getConfig(overrides);
 
   return {
     'Content-Type': 'application/json',
@@ -255,7 +266,7 @@ export const getProviderErrorMessage = (error = null) => {
   return Array.from(new Set(chunks)).join(' | ');
 };
 
-export const isInstanceNotFoundError = (error = null) => {
+export const isInstanceNotFoundError = (error = null, options = {}) => {
   if (!error) {
     return false;
   }
@@ -269,7 +280,7 @@ export const isInstanceNotFoundError = (error = null) => {
     return true;
   }
 
-  const { instanceName } = getConfig();
+  const { instanceName } = getConfig(options);
   const providerError = getProviderErrorMessage(error);
   const detailMessage = extractErrorMessage(error?.details);
 
@@ -320,10 +331,16 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isRetriableStatus = (status) => [408, 429, 500, 502, 503, 504].includes(status);
 
-const request = async ({ method, path, body = undefined, expectedStatuses = [200, 201] }) => {
-  ensureConfigured();
+const request = async ({ method, path, body = undefined, expectedStatuses = [200, 201], instanceName = null }) => {
+  const requestConfig = getConfig({ instanceName });
+  ensureConfigured(requestConfig);
 
-  const { baseURL, timeoutMs, retryAttempts, instanceName } = getConfig();
+  const {
+    baseURL,
+    timeoutMs,
+    retryAttempts,
+    instanceName: resolvedInstanceName,
+  } = requestConfig;
   const url = `${baseURL}${normalizePath(path)}`;
   const maxAttempts = retryAttempts + 1;
   let lastError = null;
@@ -339,7 +356,7 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
           url,
           hasBody: body !== undefined,
           bodyKeys: body && typeof body === 'object' ? Object.keys(body) : [],
-          instanceName,
+          instanceName: resolvedInstanceName,
           attempt,
           maxAttempts,
         },
@@ -359,7 +376,7 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
         {
           method,
           url,
-          instanceName,
+          instanceName: resolvedInstanceName,
           status: response.status,
           attempt,
           maxAttempts,
@@ -380,7 +397,7 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
               status: response.status,
               method,
               url,
-              instanceName,
+              instanceName: resolvedInstanceName,
               attempt,
               maxAttempts,
             },
@@ -397,7 +414,7 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
             payload,
             url,
             method,
-            instanceName,
+            instanceName: resolvedInstanceName,
             attempt,
           },
           'Erro na Evolution API'
@@ -434,7 +451,7 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
             status: normalizedError.status,
             method,
             url,
-            instanceName,
+            instanceName: resolvedInstanceName,
             attempt,
             maxAttempts,
           },
@@ -614,8 +631,8 @@ const extractInstanceConnectionState = (payload) => {
   return match ? match.trim().toLowerCase() : null;
 };
 
-export const getEvolutionConfig = () => {
-  const { baseURL, instanceName, webhookUrl, timeoutMs, retryAttempts } = getConfig();
+export const getEvolutionConfig = (options = {}) => {
+  const { baseURL, instanceName, webhookUrl, timeoutMs, retryAttempts } = getConfig(options);
 
   return {
     baseURL,
@@ -644,8 +661,8 @@ export const healthCheck = async () => {
   }
 };
 
-export const createInstance = async () => {
-  const { instanceName, webhookUrl } = getConfig();
+export const createInstance = async ({ instanceName = null, webhookUrl = null } = {}) => {
+  const config = getConfig({ instanceName, webhookUrl });
   const webhookEvents = parseWebhookEventsFromEnv();
 
   return requestWithFallback(
@@ -654,51 +671,52 @@ export const createInstance = async () => {
         method: 'POST',
         path: '/instance/create',
         body: {
-          instanceName,
+          instanceName: config.instanceName,
           integration: 'WHATSAPP-BAILEYS',
           qrcode: true,
-          webhook: webhookUrl || undefined,
+          webhook: config.webhookUrl || undefined,
           webhook_by_events: true,
           webhook_base64: false,
           webhook_events: webhookEvents,
         },
         expectedStatuses: [200, 201, 403, 409],
+        instanceName: config.instanceName,
       },
     ],
     'createInstance'
   );
 };
 
-export const connectInstance = async () => {
-  const { instanceName } = getConfig();
+export const connectInstance = async ({ instanceName = null } = {}) => {
+  const { instanceName: resolvedInstanceName } = getConfig({ instanceName });
 
   return requestWithFallback(
     [
-      { method: 'POST', path: `/instance/connect/${instanceName}` },
-      { method: 'GET', path: `/instance/connect/${instanceName}` },
+      { method: 'POST', path: `/instance/connect/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
+      { method: 'GET', path: `/instance/connect/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
     ],
     'connectInstance'
   );
 };
 
-export const getInstanceStatus = async () => {
-  const { instanceName, baseURL } = getConfig();
+export const getInstanceStatus = async ({ instanceName = null } = {}) => {
+  const { instanceName: resolvedInstanceName, baseURL } = getConfig({ instanceName });
   const statusUrls = [
-    `${baseURL}/instance/connectionState/${instanceName}`,
-    `${baseURL}/instance/status/${instanceName}`,
+    `${baseURL}/instance/connectionState/${resolvedInstanceName}`,
+    `${baseURL}/instance/status/${resolvedInstanceName}`,
   ];
 
   try {
     const payload = await requestWithFallback(
       [
-        { method: 'GET', path: `/instance/connectionState/${instanceName}` },
-        { method: 'GET', path: `/instance/status/${instanceName}` },
+        { method: 'GET', path: `/instance/connectionState/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
+        { method: 'GET', path: `/instance/status/${resolvedInstanceName}` },
       ],
       'getInstanceStatus'
     );
 
-    if (isInstanceNotFoundError({ details: payload })) {
-      throw new EvolutionApiError(`Instancia '${instanceName}' nao existe na Evolution`, {
+    if (isInstanceNotFoundError({ details: payload }, { instanceName: resolvedInstanceName })) {
+      throw new EvolutionApiError(`Instancia '${resolvedInstanceName}' nao existe na Evolution`, {
         status: 404,
         details: payload,
         code: 'EVOLUTION_INSTANCE_NOT_FOUND',
@@ -708,7 +726,7 @@ export const getInstanceStatus = async () => {
     logger.info(
       {
         urlCalled: statusUrls,
-        instanceName,
+        instanceName: resolvedInstanceName,
         evolutionStatus: extractInstanceConnectionState(payload),
       },
       'Status da instancia consultado na Evolution API'
@@ -718,7 +736,7 @@ export const getInstanceStatus = async () => {
   } catch (error) {
     if (
       !(error instanceof EvolutionApiError) ||
-      (![404, 405].includes(error.status || 0) && !isInstanceNotFoundError(error))
+      (![404, 405].includes(error.status || 0) && !isInstanceNotFoundError(error, { instanceName: resolvedInstanceName }))
     ) {
       throw error;
     }
@@ -726,7 +744,7 @@ export const getInstanceStatus = async () => {
     logger.warn(
       {
         urlCalled: statusUrls,
-        instanceName,
+        instanceName: resolvedInstanceName,
         evolutionStatus: error?.status || null,
       },
       'Consulta direta de status da instancia falhou, tentando via lista de instancias'
@@ -741,7 +759,7 @@ export const getInstanceStatus = async () => {
     );
 
     const instances = unwrapInstancesList(payload);
-    const { instanceName: name } = getConfig();
+    const { instanceName: name } = getConfig({ instanceName: resolvedInstanceName });
 
     const current = instances.find((item) => {
       const n = item?.name || item?.instanceName || item?.instance?.instanceName;
@@ -769,36 +787,36 @@ export const getInstanceStatus = async () => {
   }
 };
 
-export const getQrCode = async () => {
-  const { instanceName } = getConfig();
+export const getQrCode = async ({ instanceName = null } = {}) => {
+  const { instanceName: resolvedInstanceName } = getConfig({ instanceName });
 
   return requestWithFallback(
     [
-      { method: 'GET', path: `/instance/qrcode/${instanceName}` },
-      { method: 'GET', path: `/instance/qr/${instanceName}` },
-      { method: 'GET', path: `/instance/connect/${instanceName}` },
-      { method: 'POST', path: `/instance/connect/${instanceName}` },
+      { method: 'GET', path: `/instance/qrcode/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
+      { method: 'GET', path: `/instance/qr/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
+      { method: 'GET', path: `/instance/connect/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
+      { method: 'POST', path: `/instance/connect/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
     ],
     'getQrCode'
   );
 };
 
-export const logoutInstance = async () => {
-  const { instanceName } = getConfig();
+export const logoutInstance = async ({ instanceName = null } = {}) => {
+  const { instanceName: resolvedInstanceName } = getConfig({ instanceName });
 
   return requestWithFallback(
     [
-      { method: 'DELETE', path: `/instance/logout/${instanceName}`, expectedStatuses: [200, 202, 204] },
-      { method: 'POST', path: `/instance/logout/${instanceName}`, expectedStatuses: [200, 202, 204] },
-      { method: 'DELETE', path: `/instance/disconnect/${instanceName}`, expectedStatuses: [200, 202, 204] },
-      { method: 'POST', path: `/instance/disconnect/${instanceName}`, expectedStatuses: [200, 202, 204] },
+      { method: 'DELETE', path: `/instance/logout/${resolvedInstanceName}`, expectedStatuses: [200, 202, 204], instanceName: resolvedInstanceName },
+      { method: 'POST', path: `/instance/logout/${resolvedInstanceName}`, expectedStatuses: [200, 202, 204], instanceName: resolvedInstanceName },
+      { method: 'DELETE', path: `/instance/disconnect/${resolvedInstanceName}`, expectedStatuses: [200, 202, 204], instanceName: resolvedInstanceName },
+      { method: 'POST', path: `/instance/disconnect/${resolvedInstanceName}`, expectedStatuses: [200, 202, 204], instanceName: resolvedInstanceName },
     ],
     'logoutInstance'
   );
 };
 
 export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null, instanceName = null }) => {
-  const config = getConfig();
+  const config = getConfig({ instanceName });
   const resolvedInstanceName = typeof instanceName === 'string' && instanceName.trim()
     ? instanceName.trim().toLowerCase()
     : config.instanceName;
@@ -879,7 +897,7 @@ export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null, i
     if (error && typeof error === 'object') {
       error.sessionStateError = sessionStateError;
       error.providerError = providerError;
-      error.instanceName = instanceName;
+      error.instanceName = resolvedInstanceName;
 
       if (sessionStateError && error instanceof EvolutionApiError) {
         error.code = 'EVOLUTION_SESSION_STATE_ERROR';
@@ -892,7 +910,7 @@ export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null, i
   return {
     payload: requestResult?.payload ?? null,
     meta: {
-      endpoint: requestResult?.candidate?.path || `/message/sendText/${instanceName}`,
+      endpoint: requestResult?.candidate?.path || `/message/sendText/${resolvedInstanceName}`,
       payloadShape: requestResult?.payloadShape || null,
       candidateIndex: typeof requestResult?.candidateIndex === 'number'
         ? requestResult.candidateIndex

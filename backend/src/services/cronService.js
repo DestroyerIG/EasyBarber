@@ -18,6 +18,7 @@ export const startReminderCron = () => {
       const appointments = await pool.query(
         `SELECT 
           a.id,
+          a.barbershop_id,
           a.date,
           a.time,
           c.phone,
@@ -53,7 +54,9 @@ export const startReminderCron = () => {
           .replace(/{barbeiro}/g, appointment.barber_name)
           .replace(/{horario}/g, appointment.time.substring(0, 5));
 
-        const sent = await sendWhatsAppMessage(appointment.phone, message);
+        const sent = await sendWhatsAppMessage(appointment.phone, message, {
+          barbershopId: appointment.barbershop_id,
+        });
 
         if (sent) {
           await pool.query(

@@ -22,6 +22,7 @@ describe('whatsappGreeting', () => {
     ['iae'],
     ['eai'],
     ['opa'],
+    ['fala'],
     ['tudo bem'],
     ['  OI  '],
     ['   BOA   TARDE  '],

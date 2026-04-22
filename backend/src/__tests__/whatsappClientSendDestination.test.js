@@ -11,6 +11,9 @@ const mockGetEvolutionConfig = jest.fn();
 const mockIsSessionStateError = jest.fn();
 const mockGetProviderErrorMessage = jest.fn();
 const mockIsInstanceNotFoundError = jest.fn();
+const mockEnsureBarbershopWhatsAppInstanceName = jest.fn();
+const mockGetBarbershopWhatsAppInstanceContext = jest.fn();
+const mockNormalizeWhatsAppInstanceName = jest.fn();
 
 class MockEvolutionApiError extends Error {
   constructor(message, { status = null, details = null, code = 'EVOLUTION_API_ERROR' } = {}) {
@@ -47,6 +50,12 @@ jest.unstable_mockModule('../utils/logger.js', () => ({
   },
 }));
 
+jest.unstable_mockModule('../services/whatsapp/whatsappInstanceService.js', () => ({
+  ensureBarbershopWhatsAppInstanceName: mockEnsureBarbershopWhatsAppInstanceName,
+  getBarbershopWhatsAppInstanceContext: mockGetBarbershopWhatsAppInstanceContext,
+  normalizeWhatsAppInstanceName: mockNormalizeWhatsAppInstanceName,
+}));
+
 const {
   sendWhatsAppText,
   refreshWhatsAppStatus,
@@ -77,6 +86,17 @@ describe('whatsappClient destination resolution', () => {
     mockIsSessionStateError.mockReturnValue(false);
     mockGetProviderErrorMessage.mockReturnValue('');
     mockIsInstanceNotFoundError.mockReturnValue(false);
+    mockEnsureBarbershopWhatsAppInstanceName.mockResolvedValue({
+      id: 'tenant-alpha',
+      whatsappInstanceName: 'tenant-alpha',
+    });
+    mockGetBarbershopWhatsAppInstanceContext.mockResolvedValue({
+      id: 'tenant-alpha',
+      whatsappInstanceName: 'tenant-alpha',
+    });
+    mockNormalizeWhatsAppInstanceName.mockImplementation((value) =>
+      typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : null
+    );
   });
 
   it('sets status as instance_not_found when Evolution reports missing instance', async () => {
@@ -130,6 +150,23 @@ describe('whatsappClient destination resolution', () => {
     });
 
     expect(sent).toBe(true);
+    expect(mockSendTextMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phone: '558396311811',
+        text: 'Oi',
+        instanceName: 'tenant-alpha',
+      })
+    );
+  });
+
+  it('resolves outbound instance by authenticated barbershop context', async () => {
+    const sent = await sendWhatsAppText('558396311811', 'Oi', {
+      remoteJidOriginal: '558396311811@s.whatsapp.net',
+      barbershopId: 'tenant-alpha',
+    });
+
+    expect(sent).toBe(true);
+    expect(mockEnsureBarbershopWhatsAppInstanceName).toHaveBeenCalledWith('tenant-alpha');
     expect(mockSendTextMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         phone: '558396311811',

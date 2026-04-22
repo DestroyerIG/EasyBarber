@@ -1,6 +1,7 @@
 import { barbershopSettingsRepository } from '../repositories/barbershopSettingsRepository.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { isValidCpfCnpj, normalizeDocumentDigits } from '../utils/cpfCnpj.js';
+import { normalizeWhatsAppInstanceName } from './whatsapp/whatsappInstanceService.js';
 
 const ALLOWED_SLOT_INTERVALS = new Set([15, 20, 30, 45, 60]);
 
@@ -18,12 +19,11 @@ const normalizeOptionalText = (value) => {
 };
 
 const normalizeOptionalInstanceName = (value) => {
-  if (typeof value !== 'string') {
+  if (value === null || value === undefined || value === '') {
     return null;
   }
 
-  const normalized = value.trim().toLowerCase();
-  return normalized || null;
+  return normalizeWhatsAppInstanceName(String(value));
 };
 
 export const barbershopSettingsService = {

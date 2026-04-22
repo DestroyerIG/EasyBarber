@@ -379,10 +379,11 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
               className="input"
               value={settings.whatsappInstanceName}
               onChange={event => updateField('whatsappInstanceName', event.target.value)}
-              placeholder="ex: easybarber-centro"
+              placeholder="Sera gerado automaticamente ao conectar"
+              readOnly
             />
             <p className="text-xs text-gray-500 mt-2">
-              Esse valor vincula os webhooks da Evolution ao tenant correto desta barbearia.
+              Esse identificador tecnico e gerado automaticamente e vincula os webhooks da Evolution ao tenant correto.
             </p>
           </div>
 
