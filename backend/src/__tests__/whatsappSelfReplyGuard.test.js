@@ -339,6 +339,52 @@ describe('whatsappSelfReplyGuard — bot nao deve responder a si proprio', () =>
     }
   });
 
+  it('nao trata sender da instancia como self-reply quando existe participantPn seguro no payload @lid', async () => {
+    const CUSTOMER_NUMBER = '5521977776666';
+
+    mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: 'tenant-1' }] });
+    mockPoolQuery.mockResolvedValueOnce({ rows: [{ name: 'Barber Prime' }] });
+
+    const payload = {
+      event: 'messages.upsert',
+      data: {
+        messages: [
+          {
+            key: {
+              remoteJid: '236197968359561@lid',
+              fromMe: false,
+              id: 'MSGID_LID_001',
+            },
+            message: {
+              conversation: 'Olá',
+            },
+            messageContextInfo: {
+              participantPn: CUSTOMER_NUMBER,
+            },
+          },
+        ],
+      },
+      sender: `${INSTANCE_NUMBER}@s.whatsapp.net`,
+      instanceName: 'easybarber',
+    };
+
+    const result = await handleIncomingMessage(payload, 'Olá', {
+      eventName: 'messages-upsert',
+      preExtractedInstanceNumbers: [INSTANCE_NUMBER],
+    });
+
+    expect(result).toMatchObject({ ok: true, ignored: false });
+    expect(mockSendWhatsAppMessage).toHaveBeenCalledWith(
+      CUSTOMER_NUMBER,
+      expect.any(String),
+      expect.any(Object)
+    );
+
+    for (const call of mockSendWhatsAppMessage.mock.calls) {
+      expect(call[0]).not.toBe(INSTANCE_NUMBER);
+    }
+  });
+
   // ============================================================
   // GRUPO 5: garantias finais contra loop
   // ============================================================

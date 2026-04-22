@@ -704,6 +704,77 @@ describe('whatsappFlowService guards', () => {
     );
   });
 
+  it('processa inbound @lid real com sender da instancia e participantPn flattenizado, disparando saudacao', async () => {
+    mockPoolQuery
+      .mockResolvedValueOnce({ rows: [{ id: 'tenant-1', name: 'Barber Prime', whatsapp_instance_name: 'easybarber' }] })
+      .mockResolvedValueOnce({ rows: [{ name: 'Barber Prime' }] });
+    mockIsWithinBusinessHours.mockReturnValue(true);
+
+    const payload = {
+      event: 'messages-upsert',
+      instanceName: 'easybarber',
+      key: {
+        remoteJid: '236197968359561@lid',
+        fromMe: false,
+      },
+      message: {
+        conversation: 'Olá',
+      },
+      messageContextInfo: {
+        participantPn: '5583970011223',
+      },
+      sender: '558396311811@s.whatsapp.net',
+    };
+
+    const result = await handleIncomingMessage(payload, 'Olá', {
+      eventName: 'messages-upsert',
+      preExtractedInstanceNumbers: ['558396311811'],
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: true, ignored: false }));
+    expect(mockCreateSession).toHaveBeenCalledWith('5583970011223', 'tenant-1');
+    expect(mockSendWhatsAppMessage).toHaveBeenCalledWith(
+      '5583970011223',
+      expect.stringContaining('menu'),
+      expect.objectContaining({
+        remoteJidOriginal: '236197968359561@lid',
+        eventName: 'messages-upsert',
+        instanceName: 'easybarber',
+      })
+    );
+  });
+
+  it.each([
+    'Oi',
+    'Olá',
+    'ola',
+    'bom dia',
+    'boa tarde',
+    'boa noite',
+    'iae',
+    'eai',
+    'opa',
+    'fala',
+    'tudo bem',
+  ])('dispara menu inicial para saudacao "%s"', async (greeting) => {
+    mockPoolQuery
+      .mockResolvedValueOnce({ rows: [{ id: 'tenant-1' }] })
+      .mockResolvedValueOnce({ rows: [{ name: 'Barber Prime' }] });
+    mockIsWithinBusinessHours.mockReturnValue(true);
+
+    const result = await handleIncomingMessage('5511777777777', greeting, {
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: true, ignored: false }));
+    expect(mockSendWhatsAppMessage).toHaveBeenCalledWith(
+      '5511777777777',
+      expect.stringContaining('menu'),
+      expect.any(Object)
+    );
+  });
+
   it('persiste agendamento via camada central com payload compativel quando auto confirmacao estiver desativada', async () => {
     mockPoolQuery
       .mockResolvedValueOnce({ rows: [{ id: 'tenant-1' }] })

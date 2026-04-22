@@ -257,6 +257,59 @@ describe('whatsapp webhook phone extraction', () => {
     expect(extraction.candidateType).toBe('participant_jid');
   });
 
+  it('resolves @lid author from flattened messageContextInfo.participantPn when payload arrives normalized', () => {
+    const payload = {
+      event: 'messages-upsert',
+      key: {
+        remoteJid: '236197968359561@lid',
+        fromMe: false,
+      },
+      message: {
+        conversation: 'Olá',
+      },
+      messageContextInfo: {
+        participantPn: '5583970011223',
+      },
+      sender: '558396311811@s.whatsapp.net',
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload, {
+      connectedNumbers: ['558396311811'],
+    });
+
+    expect(extraction.phone).toBe('5583970011223');
+    expect(extraction.sourcePath).toBe('messageContextInfo.participantPn');
+    expect(extraction.candidateType).toBe('numeric_fallback');
+    expect(extraction.confidence).toBe('high');
+    expect(extraction.resolutionRule).toBe('candidate_ranked_best');
+  });
+
+  it('resolves @lid author from flattened contextInfo.senderPn when sender is instance and metadata is external', () => {
+    const payload = {
+      event: 'messages-upsert',
+      key: {
+        remoteJid: '236197968359561@lid',
+        fromMe: false,
+      },
+      message: {
+        conversation: 'Olá',
+      },
+      contextInfo: {
+        senderPn: '5583970055667',
+      },
+      sender: '558396311811@s.whatsapp.net',
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload, {
+      connectedNumbers: ['558396311811'],
+    });
+
+    expect(extraction.phone).toBe('5583970055667');
+    expect(extraction.sourcePath).toBe('contextInfo.senderPn');
+    expect(extraction.candidateType).toBe('numeric_fallback');
+    expect(extraction.confidence).toBe('low');
+  });
+
   it('resolves direct remoteJid as real author even when sender diverges', () => {
     const payload = {
       key: {

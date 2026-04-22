@@ -1337,7 +1337,12 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
         }
       : null;
   const allowLidDestination = Boolean(
-    phoneExtraction?.sourcePath && phoneExtraction.sourcePath.includes('participant')
+    phoneExtraction?.sourcePath &&
+    (
+      phoneExtraction.sourcePath.includes('participant') ||
+      phoneExtraction.resolutionRule === 'lid_from_fallback_promoted' ||
+      phoneExtraction.resolutionRule === 'lid_cache'
+    )
   );
   const destinationSource = phoneExtraction?.sourcePath
     || (isPayloadInput ? 'payload_normalized_phone' : 'direct_input');
@@ -1355,6 +1360,7 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
             sourcePath: phoneExtraction.sourcePath,
             candidateType: phoneExtraction.candidateType,
             confidence: phoneExtraction.confidence,
+            resolutionRule: phoneExtraction.resolutionRule,
             fromMe: phoneExtraction.fromMe,
             remoteJidOriginal: phoneExtraction.remoteJidOriginal,
           }
@@ -1400,6 +1406,7 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
             sourcePath: phoneExtraction.sourcePath,
             candidateType: phoneExtraction.candidateType,
             confidence: phoneExtraction.confidence,
+            resolutionRule: phoneExtraction.resolutionRule,
             rejections: phoneExtraction.rejections,
             instanceNumbers: phoneExtraction.instanceNumbers,
           }

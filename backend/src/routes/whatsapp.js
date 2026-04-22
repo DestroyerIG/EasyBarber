@@ -488,6 +488,20 @@ const mapWebhookIncomingMessage = (payload) => {
 
   const text = extractWebhookText(normalizedPayload);
 
+  logger.debug(
+    {
+      event: eventName,
+      keyRemoteJid: normalizedPayload?.key?.remoteJid || null,
+      sender: normalizedPayload?.sender || null,
+      participant: normalizedPayload?.participant || normalizedPayload?.key?.participant || null,
+      from: normalizedPayload?.from || null,
+      fromMe,
+      hasText: Boolean(text),
+      textPreview: typeof text === 'string' ? text.slice(0, 80) : null,
+    },
+    'Webhook inbound resumido antes da resolucao do autor'
+  );
+
   const extraction = resolveIncomingAuthor(
     normalizedPayload,
     {
@@ -505,6 +519,7 @@ const mapWebhookIncomingMessage = (payload) => {
         authorPhone: null,
         sourcePath: extraction.sourcePath,
         confidence: extraction.confidence,
+        resolutionRule: extraction.resolutionRule,
         remoteJidOriginal: extraction.remoteJidOriginal,
         keyRemoteJid: normalizedPayload?.key?.remoteJid || null,
         messageKeyRemoteJid: normalizedPayload?.message?.key?.remoteJid || null,
@@ -542,6 +557,7 @@ const mapWebhookIncomingMessage = (payload) => {
       authorPhone: extraction.authorPhone,
       sourcePath: extraction.sourcePath,
       confidence: extraction.confidence,
+      resolutionRule: extraction.resolutionRule,
       remoteJidOriginal: extraction.remoteJidOriginal,
       sender: extraction.sender || normalizedPayload?.sender || null,
       participant: extraction.participant || normalizedPayload?.participant || null,
@@ -556,6 +572,7 @@ const mapWebhookIncomingMessage = (payload) => {
       authorPhone: extraction.authorPhone,
       sourcePath: extraction.sourcePath,
       confidence: extraction.confidence,
+      resolutionRule: extraction.resolutionRule,
       remoteJidOriginal: extraction.remoteJidOriginal,
       sender: extraction.sender || normalizedPayload?.sender || null,
       participant: extraction.participant || normalizedPayload?.participant || null,
@@ -593,6 +610,7 @@ const buildWebhookDebugFields = (payload, extraction = null) => {
     extractionSourcePath: resolvedExtraction.sourcePath,
     extractionCandidateType: resolvedExtraction.candidateType,
     extractionConfidence: resolvedExtraction.confidence,
+    extractionResolutionRule: resolvedExtraction.resolutionRule || null,
     remoteJidOriginal: resolvedExtraction.remoteJidOriginal,
     authorCandidates: resolvedExtraction.candidates,
     extractionRejections: resolvedExtraction.rejections,

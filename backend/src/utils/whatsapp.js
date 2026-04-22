@@ -27,6 +27,53 @@ const INCOMING_AUTHOR_LID_FROM_FALLBACK_SOURCE_PATHS = new Set([
   'data.messages[0].from',
   'messages[0].from',
 ]);
+const INCOMING_AUTHOR_LID_METADATA_SOURCE_PATHS = new Set([
+  'contextInfo.participant',
+  'data.contextInfo.participant',
+  'message.contextInfo.participant',
+  'messageContextInfo.participant',
+  'data.messageContextInfo.participant',
+  'message.messageContextInfo.participant',
+  'data.messages[0].messageContextInfo.participant',
+  'messages[0].messageContextInfo.participant',
+  'message.extendedTextMessage.contextInfo.participant',
+  'data.message.extendedTextMessage.contextInfo.participant',
+  'data.messages[0].message.extendedTextMessage.contextInfo.participant',
+  'messages[0].message.extendedTextMessage.contextInfo.participant',
+  'data.message.messageContextInfo.participant',
+  'data.messages[0].message.messageContextInfo.participant',
+  'messages[0].message.messageContextInfo.participant',
+  'contextInfo.participantPn',
+  'data.contextInfo.participantPn',
+  'message.contextInfo.participantPn',
+  'messageContextInfo.participantPn',
+  'data.messageContextInfo.participantPn',
+  'message.messageContextInfo.participantPn',
+  'data.messages[0].messageContextInfo.participantPn',
+  'messages[0].messageContextInfo.participantPn',
+  'message.extendedTextMessage.contextInfo.participantPn',
+  'data.message.extendedTextMessage.contextInfo.participantPn',
+  'data.messages[0].message.extendedTextMessage.contextInfo.participantPn',
+  'messages[0].message.extendedTextMessage.contextInfo.participantPn',
+  'data.message.messageContextInfo.participantPn',
+  'data.messages[0].message.messageContextInfo.participantPn',
+  'messages[0].message.messageContextInfo.participantPn',
+  'contextInfo.senderPn',
+  'data.contextInfo.senderPn',
+  'message.contextInfo.senderPn',
+  'messageContextInfo.senderPn',
+  'data.messageContextInfo.senderPn',
+  'message.messageContextInfo.senderPn',
+  'data.messages[0].messageContextInfo.senderPn',
+  'messages[0].messageContextInfo.senderPn',
+  'message.extendedTextMessage.contextInfo.senderPn',
+  'data.message.extendedTextMessage.contextInfo.senderPn',
+  'data.messages[0].message.extendedTextMessage.contextInfo.senderPn',
+  'messages[0].message.extendedTextMessage.contextInfo.senderPn',
+  'data.message.messageContextInfo.senderPn',
+  'data.messages[0].message.messageContextInfo.senderPn',
+  'messages[0].message.messageContextInfo.senderPn',
+]);
 const LID_SENDER_FALLBACK_EVENTS = new Set([
   'messages-upsert',
   'messagesupsert',
@@ -367,6 +414,54 @@ const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
     getValue: (payload) => payload?.messages?.[0]?.key?.participant,
   },
   {
+    sourcePath: 'contextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.contextInfo?.participant,
+  },
+  {
+    sourcePath: 'data.contextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.contextInfo?.participant,
+  },
+  {
+    sourcePath: 'message.contextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.message?.contextInfo?.participant,
+  },
+  {
+    sourcePath: 'messageContextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.messageContextInfo?.participant,
+  },
+  {
+    sourcePath: 'data.messageContextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.messageContextInfo?.participant,
+  },
+  {
+    sourcePath: 'message.messageContextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.message?.messageContextInfo?.participant,
+  },
+  {
+    sourcePath: 'data.messages[0].messageContextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.data?.messages?.[0]?.messageContextInfo?.participant,
+  },
+  {
+    sourcePath: 'messages[0].messageContextInfo.participant',
+    candidateType: 'participant_jid',
+    allowNumericOnly: false,
+    getValue: (payload) => payload?.messages?.[0]?.messageContextInfo?.participant,
+  },
+  {
     sourcePath: 'message.extendedTextMessage.contextInfo.participant',
     candidateType: 'participant_jid',
     allowNumericOnly: false,
@@ -415,6 +510,54 @@ const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
     getValue: (payload) => payload?.messages?.[0]?.message?.messageContextInfo?.participant,
   },
   {
+    sourcePath: 'contextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.contextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'data.contextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.contextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'message.contextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.message?.contextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'messageContextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.messageContextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'data.messageContextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.messageContextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'message.messageContextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.message?.messageContextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'data.messages[0].messageContextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.messages?.[0]?.messageContextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'messages[0].messageContextInfo.participantPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.messages?.[0]?.messageContextInfo?.participantPn,
+  },
+  {
     sourcePath: 'message.extendedTextMessage.contextInfo.participantPn',
     candidateType: 'numeric_fallback',
     allowNumericOnly: true,
@@ -461,6 +604,96 @@ const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
     candidateType: 'numeric_fallback',
     allowNumericOnly: true,
     getValue: (payload) => payload?.messages?.[0]?.message?.messageContextInfo?.participantPn,
+  },
+  {
+    sourcePath: 'contextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.contextInfo?.senderPn,
+  },
+  {
+    sourcePath: 'data.contextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.contextInfo?.senderPn,
+  },
+  {
+    sourcePath: 'message.contextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.message?.contextInfo?.senderPn,
+  },
+  {
+    sourcePath: 'messageContextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.messageContextInfo?.senderPn,
+  },
+  {
+    sourcePath: 'data.messageContextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.messageContextInfo?.senderPn,
+  },
+  {
+    sourcePath: 'message.messageContextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.message?.messageContextInfo?.senderPn,
+  },
+  {
+    sourcePath: 'data.messages[0].messageContextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.messages?.[0]?.messageContextInfo?.senderPn,
+  },
+  {
+    sourcePath: 'messages[0].messageContextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.messages?.[0]?.messageContextInfo?.senderPn,
+  },
+  {
+    sourcePath: 'message.extendedTextMessage.contextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.message?.extendedTextMessage?.contextInfo?.senderPn,
+  },
+  {
+    sourcePath: 'data.message.extendedTextMessage.contextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.message?.extendedTextMessage?.contextInfo?.senderPn,
+  },
+  {
+    sourcePath: 'data.messages[0].message.extendedTextMessage.contextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.messages?.[0]?.message?.extendedTextMessage?.contextInfo?.senderPn,
+  },
+  {
+    sourcePath: 'messages[0].message.extendedTextMessage.contextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.messages?.[0]?.message?.extendedTextMessage?.contextInfo?.senderPn,
+  },
+  {
+    sourcePath: 'data.message.messageContextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.message?.messageContextInfo?.senderPn,
+  },
+  {
+    sourcePath: 'data.messages[0].message.messageContextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.data?.messages?.[0]?.message?.messageContextInfo?.senderPn,
+  },
+  {
+    sourcePath: 'messages[0].message.messageContextInfo.senderPn',
+    candidateType: 'numeric_fallback',
+    allowNumericOnly: true,
+    getValue: (payload) => payload?.messages?.[0]?.message?.messageContextInfo?.senderPn,
   },
   {
     sourcePath: 'key.remoteJid',
@@ -744,13 +977,18 @@ export const resolveReplyDestination = ({ phone } = {}) => {
   return normalizedPhone;
 };
 
-const hasTrustedLidParticipantSource = (sourcePath = '') => {
+const hasTrustedLidAuthorSource = (sourcePath = '') => {
   if (typeof sourcePath !== 'string') return false;
 
   const normalized = sourcePath.trim();
   if (!normalized) return false;
 
-  return normalized.includes('participant');
+  return (
+    normalized.includes('participant') ||
+    INCOMING_AUTHOR_LID_FROM_FALLBACK_SOURCE_PATHS.has(normalized) ||
+    INCOMING_AUTHOR_LID_METADATA_SOURCE_PATHS.has(normalized) ||
+    normalized === 'lid_cache'
+  );
 };
 
 export const resolveSafeReplyDestination = ({
@@ -799,7 +1037,9 @@ export const resolveSafeReplyDestination = ({
 
   if (conversationKind === 'lid') {
     const sourcePath = extraction?.sourcePath || '';
-    const lidTrustedByExtraction = hasTrustedLidParticipantSource(sourcePath);
+    const lidTrustedByExtraction =
+      extraction?.confidence !== 'none' &&
+      hasTrustedLidAuthorSource(sourcePath);
     const lidTrustedByContext = allowLidDestination === true;
 
     if (!lidTrustedByExtraction && !lidTrustedByContext) {
@@ -1182,6 +1422,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       sourcePath: null,
       candidateType: null,
       confidence: 'none',
+      resolutionRule: null,
       remoteJidOriginal,
       sender,
       participant,
@@ -1201,6 +1442,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       sourcePath: null,
       candidateType: null,
       confidence: 'none',
+      resolutionRule: null,
       remoteJidOriginal,
       sender,
       participant,
@@ -1220,6 +1462,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       sourcePath: null,
       candidateType: null,
       confidence: 'none',
+      resolutionRule: null,
       remoteJidOriginal,
       sender,
       participant,
@@ -1364,6 +1607,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
         sourcePath: 'lid_cache',
         candidateType: 'lid_cached_phone',
         confidence: 'medium',
+        resolutionRule: 'lid_cache',
         remoteJidOriginal,
         sender,
         participant,
@@ -1396,6 +1640,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       sourcePath: null,
       candidateType: null,
       confidence: 'none',
+      resolutionRule: null,
       remoteJidOriginal,
       sender,
       participant,
@@ -1419,6 +1664,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       sourcePath: null,
       candidateType: null,
       confidence: 'none',
+      resolutionRule: null,
       remoteJidOriginal,
       sender,
       participant,
@@ -1443,6 +1689,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       sourcePath: null,
       candidateType: null,
       confidence: 'none',
+      resolutionRule: null,
       remoteJidOriginal,
       sender,
       participant,
@@ -1503,6 +1750,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
           lidFromFallbackCandidate.confidence === 'none'
             ? 'low'
             : lidFromFallbackCandidate.confidence,
+        resolutionRule: 'lid_from_fallback_promoted',
         remoteJidOriginal,
         sender,
         participant,
@@ -1529,6 +1777,10 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
           senderFallbackCandidate.confidence === 'none'
             ? 'low'
             : senderFallbackCandidate.confidence,
+        resolutionRule:
+          conversationKind === 'lid'
+            ? 'lid_sender_fallback_promoted'
+            : 'sender_fallback_promoted',
         remoteJidOriginal,
         sender,
         participant,
@@ -1547,6 +1799,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       sourcePath: null,
       candidateType: null,
       confidence: 'none',
+      resolutionRule: null,
       remoteJidOriginal,
       sender,
       participant,
@@ -1569,6 +1822,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
     sourcePath: bestCandidate.sourcePath,
     candidateType: bestCandidate.candidateType,
     confidence: bestCandidate.confidence,
+    resolutionRule: 'candidate_ranked_best',
     remoteJidOriginal,
     sender,
     participant,
@@ -1588,6 +1842,7 @@ export const extractWhatsAppPhoneFromWebhookDetailed = (payload = {}, options = 
     sourcePath: authorResolution.sourcePath,
     candidateType: authorResolution.candidateType,
     confidence: authorResolution.confidence,
+    resolutionRule: authorResolution.resolutionRule,
     remoteJidOriginal: authorResolution.remoteJidOriginal,
     sender: authorResolution.sender,
     participant: authorResolution.participant,
