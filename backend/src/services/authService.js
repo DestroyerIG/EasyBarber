@@ -186,6 +186,14 @@ const buildResendVerificationResponse = () => ({
 
 const mapResendVerificationSupabaseError = (error) => {
   if (error instanceof AppError) {
+    if (error.code === 'INVALID_VERIFICATION_TOKEN') {
+      return new AppError(
+        'Não foi possível localizar a identidade pendente no provedor de autenticação. Revise a configuração do Supabase Auth e a URL de redirecionamento.',
+        502,
+        'RESEND_VERIFICATION_IDENTITY_NOT_FOUND'
+      );
+    }
+
     if (error.code === 'SUPABASE_NETWORK_ERROR' || error.code === 'SUPABASE_AUTH_ERROR') {
       return new AppError(
         'Não foi possível reenviar o e-mail de verificação no provedor de identidade. Tente novamente.',
@@ -1109,6 +1117,13 @@ export const authService = {
     const safeResponse = buildResendVerificationResponse();
 
     const mode = getAuthProviderMode();
+    logger.info(
+      {
+        mode,
+        email: normalizedEmail,
+      },
+      'Reenvio de verificacao solicitado'
+    );
 
     if (!isLegacyAuthProviderMode()) {
       const [pendingRegistration, user] = await Promise.all([
@@ -1130,21 +1145,32 @@ export const authService = {
       }
 
       try {
-        await supabaseAuthService.resendVerificationEmail(normalizedEmail);
-      } catch (error) {
-        if (error instanceof AppError && error.code === 'INVALID_VERIFICATION_TOKEN') {
-          logger.info(
-            {
-              mode,
-              email: normalizedEmail,
-              userId: user?.id || null,
-              pendingRegistrationId: pendingRegistration?.id || null,
-            },
-            'Identidade não encontrada no Supabase para reenvio de verificação'
-          );
+        const resendResult = await supabaseAuthService.resendVerificationEmail(normalizedEmail);
 
-          return safeResponse;
-        }
+        logger.info(
+          {
+            mode,
+            email: normalizedEmail,
+            userId: user?.id || null,
+            pendingRegistrationId: pendingRegistration?.id || null,
+            redirectTo: resendResult?.redirectTo || null,
+            delivered: resendResult?.delivered === true,
+            status: 'success',
+          },
+          'Reenvio de verificacao concluido no Supabase'
+        );
+      } catch (error) {
+        logger.error(
+          {
+            err: error,
+            mode,
+            email: normalizedEmail,
+            userId: user?.id || null,
+            pendingRegistrationId: pendingRegistration?.id || null,
+            status: 'error',
+          },
+          'Falha ao reenviar verificacao no Supabase'
+        );
 
         throw mapResendVerificationSupabaseError(error);
       }
@@ -1170,9 +1196,7 @@ export const authService = {
         }
       }
 
-      return {
-        message: 'Se o e-mail estiver pendente de confirmação, um novo link foi enviado pelo provedor de identidade.',
-      };
+      return safeResponse;
     }
 
     const user = await authRepository.findUserByEmail(normalizedEmail);

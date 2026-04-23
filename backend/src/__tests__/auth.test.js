@@ -781,6 +781,32 @@ describe('Auth API — /api/v1/auth', () => {
       expect(res.body.error.code).toBe('RESEND_VERIFICATION_PROVIDER_UNAVAILABLE');
       expect(mockEmailService.sendAccountVerificationEmail).not.toHaveBeenCalled();
     });
+
+    it('deve retornar erro tecnico quando a identidade pendente nao existir no Supabase', async () => {
+      process.env.AUTH_PROVIDER_MODE = 'supabase';
+
+      mockAuthRepository.findPendingRegistrationByEmail.mockResolvedValue({
+        id: 'pending-uuid',
+        email: 'joao@teste.com',
+      });
+      mockAuthRepository.findUserByEmail.mockResolvedValue(null);
+      mockSupabaseAuthService.resendVerificationEmail.mockRejectedValue(
+        new AppError(
+          'Link de verificação inválido ou já utilizado. Solicite um novo e-mail.',
+          400,
+          'INVALID_VERIFICATION_TOKEN'
+        )
+      );
+
+      const res = await request.post('/api/v1/auth/resend-verification').send({
+        email: 'joao@teste.com',
+      });
+
+      expect(res.status).toBe(502);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('RESEND_VERIFICATION_IDENTITY_NOT_FOUND');
+      expect(mockEmailService.sendAccountVerificationEmail).not.toHaveBeenCalled();
+    });
   });
 
   // --- REFRESH ---

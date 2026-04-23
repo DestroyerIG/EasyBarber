@@ -1,6 +1,16 @@
 import { NextRequest } from 'next/server';
 import { errorResponse, requestBackendAuth, successResponse } from '@/lib/server/authBff';
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const normalizeEmail = (value: unknown) => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value.trim().toLowerCase();
+};
+
 export async function POST(request: NextRequest) {
   let body: unknown;
 
@@ -10,25 +20,68 @@ export async function POST(request: NextRequest) {
     return errorResponse(400, null, 'Corpo JSON inválido.');
   }
 
+  const email = normalizeEmail((body as { email?: unknown } | null)?.email);
+
+  if (!email || !EMAIL_REGEX.test(email)) {
+    return errorResponse(400, null, 'E-mail inválido.');
+  }
+
+  console.info('[auth/resend-verification][bff] request received', {
+    email,
+  });
+
   const upstream = await requestBackendAuth('resend-verification', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ email }),
   });
 
   if (!upstream.response || upstream.networkError) {
-    return errorResponse(502, null, 'Falha ao comunicar com o serviço de autenticação.');
+    const status = upstream.timedOut ? 504 : 502;
+
+    console.error('[auth/resend-verification][bff] upstream unavailable', {
+      email,
+      timedOut: Boolean(upstream.timedOut),
+      timeoutMs: upstream.timeoutMs,
+      reason:
+        upstream.networkError instanceof Error
+          ? upstream.networkError.message
+          : String(upstream.networkError || 'erro-desconhecido'),
+      finalStatus: status,
+    });
+
+    return errorResponse(
+      status,
+      null,
+      upstream.timedOut
+        ? 'Tempo esgotado ao comunicar com o serviço de autenticação.'
+        : 'Falha ao comunicar com o serviço de autenticação.'
+    );
   }
 
   if (!upstream.response.ok) {
+    console.warn('[auth/resend-verification][bff] upstream returned error', {
+      email,
+      upstreamStatus: upstream.response.status,
+      payload: upstream.payload,
+      finalStatus: upstream.response.status,
+    });
+
     return errorResponse(
       upstream.response.status,
       upstream.payload,
       'Não foi possível processar o reenvio de verificação.'
     );
   }
+
+  console.info('[auth/resend-verification][bff] upstream returned success', {
+    email,
+    upstreamStatus: upstream.response.status,
+    payload: upstream.payload,
+    finalStatus: upstream.response.status,
+  });
 
   return successResponse(upstream.payload, upstream.response.status);
 }

@@ -8,6 +8,24 @@ const normalizeEnvValue = (value: string | undefined) => {
 };
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
+const ensureAbsoluteUrl = (value: string | undefined) => {
+  const normalized = normalizeEnvValue(value);
+
+  if (!normalized) {
+    return '';
+  }
+
+  const withProtocol =
+    normalized.startsWith('http://') || normalized.startsWith('https://')
+      ? normalized
+      : `https://${normalized}`;
+
+  try {
+    return trimTrailingSlash(new URL(withProtocol).toString());
+  } catch {
+    return '';
+  }
+};
 
 const resolveSupabaseUrl = () => normalizeEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL);
 const resolveSupabaseAnonKey = () => normalizeEnvValue(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
@@ -109,10 +127,12 @@ export const getSupabaseClient = () => {
 };
 
 export const resolveFrontendAppUrl = () => {
-  const configuredAppUrl = normalizeEnvValue(process.env.NEXT_PUBLIC_APP_URL);
+  const configuredAppUrl =
+    ensureAbsoluteUrl(process.env.NEXT_PUBLIC_APP_URL)
+    || ensureAbsoluteUrl(process.env.NEXT_PUBLIC_VERCEL_URL);
 
   if (configuredAppUrl) {
-    return trimTrailingSlash(configuredAppUrl);
+    return configuredAppUrl;
   }
 
   if (typeof window !== 'undefined' && window.location.origin) {

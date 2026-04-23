@@ -156,23 +156,59 @@ const runSupabaseOperation = async ({ operation, context = {} }, action) => {
   }
 };
 
+const trimTrailingSlash = (value) => value.replace(/\/+$/, '');
+
+const ensureAbsoluteUrl = (value, envName) => {
+  const normalized = String(value || '').trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const withProtocol =
+    normalized.startsWith('http://') || normalized.startsWith('https://')
+      ? normalized
+      : `https://${normalized}`;
+
+  try {
+    const parsed = new URL(withProtocol);
+    return trimTrailingSlash(parsed.toString());
+  } catch {
+    throw new AppError(
+      `URL pública inválida em ${envName}.`,
+      500,
+      'INVALID_PUBLIC_APP_URL'
+    );
+  }
+};
+
 const resolveFrontendBaseUrl = () => {
-  const baseUrl =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.FRONTEND_URL ||
-    process.env.APP_URL ||
-    'http://localhost:3000';
-  return baseUrl.replace(/\/+$/, '');
+  const candidates = [
+    ['NEXT_PUBLIC_APP_URL', process.env.NEXT_PUBLIC_APP_URL],
+    ['FRONTEND_URL', process.env.FRONTEND_URL],
+    ['APP_URL', process.env.APP_URL],
+    ['VERCEL_URL', process.env.VERCEL_URL],
+  ];
+
+  for (const [envName, envValue] of candidates) {
+    const resolved = ensureAbsoluteUrl(envValue, envName);
+
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  return 'http://localhost:3000';
 };
 
 const resolveEmailRedirectTo = () => {
   const explicitRedirect = String(process.env.AUTH_SUPABASE_REDIRECT_TO || '').trim();
 
   if (explicitRedirect) {
-    return explicitRedirect;
+    return ensureAbsoluteUrl(explicitRedirect, 'AUTH_SUPABASE_REDIRECT_TO');
   }
 
-  return `${resolveFrontendBaseUrl()}/auth/confirm`;
+  return new URL('/auth/confirm', `${resolveFrontendBaseUrl()}/`).toString().replace(/\/$/, '');
 };
 
 const buildSyntheticPassword = () => {
@@ -341,6 +377,35 @@ const getSupabaseAdminClient = () => {
 };
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+
+const summarizeSupabaseResendResult = (data) => {
+  if (!data || typeof data !== 'object') {
+    return null;
+  }
+
+  const user = data.user && typeof data.user === 'object'
+    ? data.user
+    : null;
+
+  return {
+    hasUser: Boolean(user),
+    userId: user?.id || null,
+    email: normalizeEmail(user?.email || ''),
+    actionLinkHost: (() => {
+      const actionLink = typeof data.action_link === 'string' ? data.action_link : '';
+
+      if (!actionLink) {
+        return null;
+      }
+
+      try {
+        return new URL(actionLink).host;
+      } catch {
+        return 'invalid-url';
+      }
+    })(),
+  };
+};
 
 export const supabaseAuthService = {
   resolveEmailRedirectTo,
@@ -511,33 +576,67 @@ export const supabaseAuthService = {
     }
 
     const client = getSupabaseClient();
+    const redirectTo = resolveEmailRedirectTo();
 
+    let data;
     let error;
 
     try {
-      ({ error } = await runSupabaseOperation(
+      ({ data, error } = await runSupabaseOperation(
         {
           operation: 'resendVerificationEmail',
-          context: { email: normalizedEmail },
+          context: {
+            email: normalizedEmail,
+            redirectTo,
+          },
         },
         () => client.auth.resend({
           type: 'signup',
           email: normalizedEmail,
           options: {
-            emailRedirectTo: resolveEmailRedirectTo(),
+            emailRedirectTo: redirectTo,
           },
         })
       ));
     } catch (operationError) {
+      logger.error(
+        {
+          email: normalizedEmail,
+          redirectTo,
+          reason: operationError instanceof Error ? operationError.message : String(operationError),
+        },
+        'Supabase Auth: falha inesperada ao reenviar verificacao'
+      );
       throw mapSupabaseError(operationError, 'Não foi possível reenviar o e-mail de verificação.');
     }
 
     if (error) {
+      logger.warn(
+        {
+          email: normalizedEmail,
+          redirectTo,
+          errorCode: error?.code || error?.error_code || null,
+          errorMessage: error?.message || null,
+          data: summarizeSupabaseResendResult(data),
+        },
+        'Supabase Auth: reenvio de verificacao retornou erro'
+      );
       throw mapSupabaseError(error, 'Não foi possível reenviar o e-mail de verificação.');
     }
 
+    logger.info(
+      {
+        email: normalizedEmail,
+        redirectTo,
+        data: summarizeSupabaseResendResult(data),
+        error: null,
+      },
+      'Supabase Auth: reenvio de verificacao concluido'
+    );
+
     return {
       delivered: true,
+      redirectTo,
     };
   },
 

@@ -208,7 +208,7 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
       const message =
         typeof response.data?.message === 'string'
           ? response.data.message
-          : 'Se existir uma conta pendente para este e-mail, enviaremos um novo link de verificação.';
+          : 'Se existir uma conta pendente para este e-mail, processaremos um novo envio de verificação.';
 
       setVerificationEmail(email);
       setVerificationSent(true);

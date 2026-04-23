@@ -335,7 +335,7 @@ export function AuthConfirmView() {
 
       const resendMessage = getBackendMessage(
         response.data,
-        'Se existir uma conta pendente, enviaremos um novo link de verificação.'
+        'Se existir uma conta pendente, processaremos um novo envio de verificação.'
       );
 
       setMessage(resendMessage);

@@ -96,7 +96,7 @@ export function EmailVerificationView({ initialToken, initialEmail }: EmailVerif
       const successMessage =
         typeof response.data?.message === 'string'
           ? response.data.message
-          : 'Se existir uma conta pendente para este e-mail, enviaremos um novo link de verificação.';
+          : 'Se existir uma conta pendente para este e-mail, processaremos um novo envio de verificação.';
 
       setMessage(successMessage);
       showToast(successMessage, 'info');
