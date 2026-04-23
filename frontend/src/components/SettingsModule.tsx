@@ -17,7 +17,7 @@ import { PasswordInput } from '@/components/ui';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
 import { formatPhone } from '@/lib/formatters';
-import { getApiErrorMessage } from '@/utils/handleApiError';
+import { getApiErrorCode, getApiErrorMessage } from '@/utils/handleApiError';
 import { formatCpfCnpj, isValidCpfCnpj, normalizeCpfCnpjDigits } from '@/utils/cpfCnpj';
 
 const SETTINGS_STORAGE_KEY = 'easybarber.settings.v1';
@@ -141,6 +141,30 @@ const getPasswordRequirementsError = (value: string) => {
   }
 
   return null;
+};
+
+const getAccountProfileSaveErrorMessage = (error: unknown) => {
+  const code = getApiErrorCode(error);
+  const fallbackMessage = getApiErrorMessage(error, 'Não foi possível atualizar os dados cadastrais.');
+  const normalizedMessage = fallbackMessage.toLowerCase();
+
+  if (code === 'CONFLICT' || normalizedMessage.includes('e-mail já está em uso') || normalizedMessage.includes('email já cadastrado')) {
+    return 'E-mail já está em uso.';
+  }
+
+  if (code === 'VALIDATION_ERROR' || normalizedMessage.includes('cpf/cnpj')) {
+    if (normalizedMessage.includes('whatsapp')) {
+      return 'WhatsApp inválido.';
+    }
+
+    if (normalizedMessage.includes('e-mail') || normalizedMessage.includes('email')) {
+      return 'E-mail inválido.';
+    }
+
+    return 'CPF/CNPJ inválido.';
+  }
+
+  return 'Não foi possível atualizar os dados cadastrais.';
 };
 
 function SettingsPanel({
@@ -515,7 +539,7 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
       await refreshMe();
       showToast('Dados cadastrais atualizados com sucesso.', 'success');
     } catch (error: unknown) {
-      showToast(getApiErrorMessage(error, 'Não foi possível atualizar os dados cadastrais.'), 'error');
+      showToast(getAccountProfileSaveErrorMessage(error), 'error');
     } finally {
       setAccountSaving(false);
     }

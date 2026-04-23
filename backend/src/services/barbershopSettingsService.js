@@ -5,6 +5,7 @@ import { supabaseAuthService } from './supabaseAuthService.js';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../utils/errors.js';
 import { isValidCpfCnpj, normalizeDocumentDigits } from '../utils/cpfCnpj.js';
 import { normalizeWhatsAppInstanceName } from './whatsapp/whatsappInstanceService.js';
+import logger from '../utils/logger.js';
 
 const ALLOWED_SLOT_INTERVALS = new Set([15, 20, 30, 45, 60]);
 const TENANT_ACCOUNT_ROLE = 'tenant_admin';
@@ -23,11 +24,55 @@ const normalizeOptionalInstanceName = (value) => {
 };
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
+const normalizeText = (value) => String(value || '').trim();
 
 const normalizePhoneDigits = (value) => {
   const digits = String(value || '').replace(/\D+/g, '');
   return digits || '';
 };
+
+const maskEmailForLog = (value) => {
+  const normalizedValue = normalizeEmail(value);
+
+  if (!normalizedValue || !normalizedValue.includes('@')) {
+    return null;
+  }
+
+  const [localPart, domain] = normalizedValue.split('@');
+  const visibleLocal = localPart.slice(0, 2);
+
+  return `${visibleLocal}${'*'.repeat(Math.max(localPart.length - visibleLocal.length, 0))}@${domain}`;
+};
+
+const maskDigitsForLog = (value, visibleSuffix = 4) => {
+  const digits = String(value || '').replace(/\D+/g, '');
+
+  if (!digits) {
+    return null;
+  }
+
+  const suffix = digits.slice(-visibleSuffix);
+  return `${'*'.repeat(Math.max(digits.length - suffix.length, 0))}${suffix}`;
+};
+
+const summarizeAccountPayloadForLog = (payload) => ({
+  barbershopName: normalizeText(payload?.barbershopName) || null,
+  ownerName: normalizeText(payload?.ownerName) || null,
+  email: maskEmailForLog(payload?.email),
+  whatsapp: maskDigitsForLog(payload?.whatsapp),
+  cpfCnpj: maskDigitsForLog(payload?.cpfCnpj),
+});
+
+const summarizeUserForLog = (user) => ({
+  userId: user?.userId || null,
+  barbershopId: user?.barbershopId || null,
+  role: user?.role || null,
+  email: maskEmailForLog(user?.email),
+});
+
+const isUniqueViolation = (error) => error?.code === '23505';
+
+const isMissingColumnError = (error) => error?.code === '42703';
 
 const ensureTenantAdmin = (role) => {
   if (String(role || '').trim().toLowerCase() !== TENANT_ACCOUNT_ROLE) {
@@ -139,26 +184,79 @@ export const barbershopSettingsService = {
   async updateAccountProfile({ barbershopId, userId, role }, data) {
     ensureTenantAdmin(role);
 
-    const normalizedEmail = normalizeEmail(data.email);
-    const normalizedWhatsapp = normalizePhoneDigits(data.whatsapp);
-    const normalizedCpfCnpj = normalizeDocumentDigits(data.cpfCnpj);
+    const currentStage = {
+      value: 'normalize_input',
+    };
+    const normalizedPayload = {
+      barbershopName: normalizeText(data.barbershopName),
+      ownerName: normalizeText(data.ownerName),
+      whatsapp: normalizePhoneDigits(data.whatsapp),
+      cpfCnpj: normalizeDocumentDigits(data.cpfCnpj),
+      email: normalizeEmail(data.email),
+    };
 
-    if (!isValidCpfCnpj(normalizedCpfCnpj)) {
+    logger.info(
+      {
+        operation: 'updateAccountProfile',
+        stage: currentStage.value,
+        authUser: summarizeUserForLog({ barbershopId, userId, role }),
+        payload: summarizeAccountPayloadForLog(normalizedPayload),
+      },
+      'Atualizacao de dados cadastrais iniciada'
+    );
+
+    if (!normalizedPayload.barbershopName) {
+      throw new ValidationError('Nome da barbearia obrigatório', ['Informe o nome da barbearia.']);
+    }
+
+    if (!normalizedPayload.ownerName) {
+      throw new ValidationError('Nome do responsável obrigatório', ['Informe o nome do responsável.']);
+    }
+
+    if (!normalizedPayload.email) {
+      throw new ValidationError('E-mail obrigatório', ['Informe o e-mail da conta.']);
+    }
+
+    if (!normalizedPayload.whatsapp) {
+      throw new ValidationError('WhatsApp obrigatório', ['Informe o telefone/WhatsApp.']);
+    }
+
+    if (!normalizedPayload.cpfCnpj) {
+      throw new ValidationError('CPF/CNPJ obrigatório', ['Informe o CPF/CNPJ.']);
+    }
+
+    if (!isValidCpfCnpj(normalizedPayload.cpfCnpj)) {
       throw new ValidationError('CPF/CNPJ inválido', ['Informe um CPF ou CNPJ válido para continuar.']);
     }
 
-    if (normalizedWhatsapp.length < 10 || normalizedWhatsapp.length > 18) {
+    if (normalizedPayload.whatsapp.length < 10 || normalizedPayload.whatsapp.length > 18) {
       throw new ValidationError('WhatsApp inválido', ['Informe um telefone/WhatsApp com DDD válido.']);
     }
 
+    currentStage.value = 'load_current_account';
     const currentUser = await barbershopSettingsRepository.findAccountUserById(barbershopId, userId);
+    const currentProfile = await barbershopSettingsRepository.findAccountProfileByUserId(barbershopId, userId);
 
-    if (!currentUser) {
+    logger.info(
+      {
+        operation: 'updateAccountProfile',
+        stage: currentStage.value,
+        authUser: summarizeUserForLog({ barbershopId, userId, role }),
+        resolvedUser: summarizeUserForLog(currentUser),
+        resolvedTenantProfile: summarizeAccountPayloadForLog(currentProfile),
+      },
+      'Dados atuais da conta carregados para atualizacao cadastral'
+    );
+
+    if (!currentUser || !currentProfile) {
       throw new NotFoundError('Conta');
     }
 
-    if (normalizedEmail !== currentUser.email) {
-      const conflictingUser = await authRepository.findAnyUserByEmail(normalizedEmail);
+    const emailChanged = normalizedPayload.email !== currentUser.email;
+
+    if (emailChanged) {
+      currentStage.value = 'check_email_conflict';
+      const conflictingUser = await authRepository.findAnyUserByEmail(normalizedPayload.email);
 
       if (conflictingUser && conflictingUser.id !== userId) {
         throw new ConflictError('Este e-mail já está em uso por outra conta.');
@@ -166,24 +264,23 @@ export const barbershopSettingsService = {
     }
 
     const client = await authRepository.getClient();
+    let supabaseEmailUpdated = false;
 
     try {
-      await client.query('BEGIN');
-
-      if (normalizedEmail !== currentUser.email && currentUser.supabaseUserId) {
-        await supabaseAuthService.updateUserEmailById(currentUser.supabaseUserId, normalizedEmail);
+      if (emailChanged && currentUser.supabaseUserId) {
+        currentStage.value = 'update_supabase_email';
+        await supabaseAuthService.updateUserEmailById(currentUser.supabaseUserId, normalizedPayload.email);
+        supabaseEmailUpdated = true;
       }
 
+      currentStage.value = 'begin_transaction';
+      await client.query('BEGIN');
+
+      currentStage.value = 'update_local_profile';
       const updatedProfile = await barbershopSettingsRepository.updateAccountProfile(
         barbershopId,
         userId,
-        {
-          barbershopName: data.barbershopName.trim(),
-          ownerName: data.ownerName.trim(),
-          whatsapp: normalizedWhatsapp,
-          cpfCnpj: normalizedCpfCnpj,
-          email: normalizedEmail,
-        },
+        normalizedPayload,
         client
       );
 
@@ -191,17 +288,97 @@ export const barbershopSettingsService = {
         throw new NotFoundError('Conta');
       }
 
+      currentStage.value = 'load_session_user';
       const sessionUser = await barbershopSettingsRepository.findAccountUserById(barbershopId, userId, client);
 
+      currentStage.value = 'commit_transaction';
       await client.query('COMMIT');
+
+      logger.info(
+        {
+          operation: 'updateAccountProfile',
+          stage: 'completed',
+          authUser: summarizeUserForLog({ barbershopId, userId, role }),
+          updatedProfile: summarizeAccountPayloadForLog(updatedProfile),
+          emailChanged,
+          supabaseEmailUpdated,
+        },
+        'Dados cadastrais atualizados com sucesso'
+      );
 
       return {
         profile: updatedProfile,
         sessionUser,
-        emailChanged: normalizedEmail !== currentUser.email,
+        emailChanged,
       };
     } catch (error) {
-      await client.query('ROLLBACK');
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        logger.error(
+          {
+            err: rollbackError,
+            operation: 'updateAccountProfile',
+            stage: currentStage.value,
+            authUser: summarizeUserForLog({ barbershopId, userId, role }),
+          },
+          'Falha ao executar rollback da atualizacao cadastral'
+        );
+      }
+
+      if (supabaseEmailUpdated && currentUser.supabaseUserId) {
+        try {
+          await supabaseAuthService.updateUserEmailById(currentUser.supabaseUserId, currentUser.email);
+          logger.warn(
+            {
+              operation: 'updateAccountProfile',
+              stage: 'compensate_supabase_email',
+              authUser: summarizeUserForLog({ barbershopId, userId, role }),
+              restoredEmail: maskEmailForLog(currentUser.email),
+            },
+            'E-mail do Supabase restaurado apos falha no banco local'
+          );
+        } catch (revertError) {
+          logger.error(
+            {
+              err: revertError,
+              operation: 'updateAccountProfile',
+              stage: 'compensate_supabase_email',
+              authUser: summarizeUserForLog({ barbershopId, userId, role }),
+              attemptedRestoreEmail: maskEmailForLog(currentUser.email),
+            },
+            'Falha ao restaurar e-mail no Supabase apos erro local'
+          );
+        }
+      }
+
+      if (isUniqueViolation(error)) {
+        throw new ConflictError('Este e-mail já está em uso por outra conta.');
+      }
+
+      if (isMissingColumnError(error)) {
+        logger.error(
+          {
+            err: error,
+            operation: 'updateAccountProfile',
+            stage: currentStage.value,
+            authUser: summarizeUserForLog({ barbershopId, userId, role }),
+          },
+          'Estrutura do banco incompatível com a atualização cadastral'
+        );
+      } else {
+        logger.error(
+          {
+            err: error,
+            operation: 'updateAccountProfile',
+            stage: currentStage.value,
+            authUser: summarizeUserForLog({ barbershopId, userId, role }),
+            payload: summarizeAccountPayloadForLog(normalizedPayload),
+          },
+          'Falha ao atualizar dados cadastrais'
+        );
+      }
+
       throw error;
     } finally {
       client.release();
