@@ -279,10 +279,17 @@ const rethrowAsaasError = (
     error?.response?.data ||
     error?.providerData ||
     error?.details?.payload ||
+    error?.details?.responseText ||
     error?.details ||
+    null;
+  const responseHeaders =
+    error?.response?.headers ||
+    error?.providerHeaders ||
+    error?.details?.responseHeaders ||
     null;
   const asaasMessage =
     responseData?.errors?.map((item) => item.description).filter(Boolean).join(' | ') ||
+    (typeof responseData === 'string' ? responseData : null) ||
     responseData?.message ||
     error?.message ||
     fallbackMessage;
@@ -296,6 +303,7 @@ const rethrowAsaasError = (
   appError.details = responseData || null;
   appError.providerStatus = responseStatus || null;
   appError.providerData = responseData || null;
+  appError.providerHeaders = responseHeaders || null;
   throw appError;
 };
 
@@ -335,6 +343,7 @@ const syncExistingCustomer = async ({
         statusCode,
         providerStatus: error?.response?.status || statusCode,
         providerData: error?.response?.data || error?.details || null,
+        providerHeaders: error?.response?.headers || error?.details?.responseHeaders || null,
         code: error?.code || 'ASAAS_CUSTOMER_UPDATE_ERROR',
         details: error?.details || null,
         customerId,
@@ -416,6 +425,7 @@ export const asaasService = {
           statusCode: error?.statusCode || error?.status || null,
           providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
           providerData: error?.response?.data || error?.details || null,
+          providerHeaders: error?.response?.headers || error?.details?.responseHeaders || null,
           code: error?.code || 'ASAAS_CUSTOMER_CREATE_ERROR',
           details: error?.details || null,
           payload,
@@ -468,6 +478,7 @@ export const asaasService = {
           statusCode: error?.statusCode || error?.status || null,
           providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
           providerData: error?.response?.data || error?.details || null,
+          providerHeaders: error?.response?.headers || error?.details?.responseHeaders || null,
           code: error?.code || 'ASAAS_PIX_PAYMENT_CREATE_ERROR',
           details: error?.details || null,
           payload,
@@ -546,6 +557,7 @@ export const asaasService = {
           statusCode: error?.statusCode || error?.status || null,
           providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
           providerData: error?.response?.data || error?.details || null,
+          providerHeaders: error?.response?.headers || error?.details?.responseHeaders || null,
           code: error?.code || 'ASAAS_SUBSCRIPTION_CREATE_ERROR',
           details: error?.details || null,
           payload: subscriptionPayload,
@@ -605,6 +617,7 @@ export const asaasService = {
           statusCode: error?.statusCode || error?.status || null,
           providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
           providerData: error?.response?.data || error?.details || null,
+          providerHeaders: error?.response?.headers || error?.details?.responseHeaders || null,
           code: error?.code || 'ASAAS_PAYMENT_FETCH_ERROR',
           details: error?.details || null,
           paymentId,
@@ -646,6 +659,7 @@ export const asaasService = {
           statusCode: error?.statusCode || error?.status || null,
           providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
           providerData: error?.response?.data || error?.details || null,
+          providerHeaders: error?.response?.headers || error?.details?.responseHeaders || null,
           code: error?.code || 'ASAAS_SUBSCRIPTION_CANCEL_ERROR',
           details: error?.details || null,
           subscriptionId,
@@ -691,6 +705,7 @@ export const asaasService = {
           statusCode: error?.statusCode || error?.status || null,
           providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
           providerData: error?.response?.data || error?.details || null,
+          providerHeaders: error?.response?.headers || error?.details?.responseHeaders || null,
           code: error?.code || 'ASAAS_REACTIVATE_UNAVAILABLE',
           details: error?.details || null,
           subscriptionId,

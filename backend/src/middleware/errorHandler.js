@@ -60,6 +60,7 @@ export const errorHandler = (err, req, res, _next) => {
         statusCode: err.statusCode,
         providerStatus: err.providerStatus,
         providerData: err.providerData,
+        providerHeaders: err.providerHeaders,
         path: req.path,
         requestId: req.id,
         barbershopId: req.user?.barbershopId,
@@ -78,6 +79,7 @@ export const errorHandler = (err, req, res, _next) => {
     if (err.details) body.error.details = err.details;
     if (isDebugEnvironment && err.providerStatus) body.error.providerStatus = err.providerStatus;
     if (isDebugEnvironment && err.providerData) body.error.providerData = err.providerData;
+    if (isDebugEnvironment && err.providerHeaders) body.error.providerHeaders = err.providerHeaders;
     if (err.requiredPlan) body.error.requiredPlan = err.requiredPlan;
     if (err.subscriptionStatus) body.error.subscriptionStatus = err.subscriptionStatus;
     if (err.feature) body.error.feature = err.feature;
