@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
+import { PasswordInput } from '@/components/ui';
 import { isPlanId, PLAN_MAP, SAAS_PLANS, type PlanId } from '@/lib/plans';
 import { formatCurrency } from '@/lib/formatters';
 import api from '@/lib/api';
@@ -366,8 +367,7 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
               className="input"
             />
 
-            <input
-              type="password"
+            <PasswordInput
               name="password"
               placeholder={
                 isLogin ? 'Senha' : 'Senha (mín. 8 caracteres, maiúscula e número)'
@@ -377,6 +377,8 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
               required
               minLength={isLogin ? 1 : 8}
               className="input"
+              autoComplete={isLogin ? 'current-password' : 'new-password'}
+              toggleLabel="senha"
             />
 
             {isLogin && (

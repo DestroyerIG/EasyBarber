@@ -13,6 +13,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { useToast } from '@/components/Toast';
+import { PasswordInput } from '@/components/ui';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
 import { formatPhone } from '@/lib/formatters';
@@ -682,13 +683,14 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
               </div>
 
               <Field id="currentPassword" label="Senha atual" error={passwordErrors.currentPassword}>
-                <input
+                <PasswordInput
                   id="currentPassword"
-                  type="password"
                   className={`${FIELD_CLASS} ${passwordErrors.currentPassword ? ERROR_FIELD_CLASS : ''}`}
                   value={passwordForm.currentPassword}
                   onChange={(event) => updatePasswordField('currentPassword', event.target.value)}
                   placeholder="Digite sua senha atual"
+                  autoComplete="current-password"
+                  toggleLabel="senha atual"
                 />
               </Field>
 
@@ -698,24 +700,26 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
                 hint="Mínimo 8 caracteres"
                 error={passwordErrors.newPassword}
               >
-                <input
+                <PasswordInput
                   id="newPassword"
-                  type="password"
                   className={`${FIELD_CLASS} ${passwordErrors.newPassword ? ERROR_FIELD_CLASS : ''}`}
                   value={passwordForm.newPassword}
                   onChange={(event) => updatePasswordField('newPassword', event.target.value)}
                   placeholder="Inclua letra maiúscula e número"
+                  autoComplete="new-password"
+                  toggleLabel="nova senha"
                 />
               </Field>
 
               <Field id="confirmNewPassword" label="Confirmar nova senha" error={passwordErrors.confirmNewPassword}>
-                <input
+                <PasswordInput
                   id="confirmNewPassword"
-                  type="password"
                   className={`${FIELD_CLASS} ${passwordErrors.confirmNewPassword ? ERROR_FIELD_CLASS : ''}`}
                   value={passwordForm.confirmNewPassword}
                   onChange={(event) => updatePasswordField('confirmNewPassword', event.target.value)}
                   placeholder="Repita a nova senha"
+                  autoComplete="new-password"
+                  toggleLabel="confirmação da nova senha"
                 />
               </Field>
 
