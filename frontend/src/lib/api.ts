@@ -3,6 +3,7 @@ import axios, {
   AxiosResponse,
   InternalAxiosRequestConfig,
 } from 'axios';
+import { isPublicAuthPath } from '@/lib/publicRoutes';
 
 type RetryableRequestConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
@@ -47,7 +48,7 @@ const notifySessionExpired = () => {
   window.dispatchEvent(new Event('auth:session-expired'));
 
   const currentPath = window.location.pathname;
-  if (currentPath !== '/login' && currentPath !== '/cadastro') {
+  if (!isPublicAuthPath(currentPath)) {
     window.location.replace('/login');
   }
 };

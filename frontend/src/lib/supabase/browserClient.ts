@@ -12,6 +12,20 @@ const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
 const resolveSupabaseUrl = () => normalizeEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL);
 const resolveSupabaseAnonKey = () => normalizeEnvValue(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
+export const getMissingSupabasePublicEnvVars = () => {
+  const missing: string[] = [];
+
+  if (!resolveSupabaseUrl()) {
+    missing.push('NEXT_PUBLIC_SUPABASE_URL');
+  }
+
+  if (!resolveSupabaseAnonKey()) {
+    missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+  }
+
+  return missing;
+};
+
 export const isSupabaseBrowserClientConfigured = () => {
   return Boolean(resolveSupabaseUrl() && resolveSupabaseAnonKey());
 };
@@ -21,8 +35,9 @@ export const getSupabaseBrowserClient = () => {
   const anonKey = resolveSupabaseAnonKey();
 
   if (!url || !anonKey) {
+    const missingVars = getMissingSupabasePublicEnvVars();
     throw new Error(
-      'Configuração Supabase ausente no frontend. Defina NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY.'
+      `Configuração Supabase ausente no frontend. Defina ${missingVars.join(' e ')}.`
     );
   }
 

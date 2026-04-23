@@ -106,5 +106,7 @@ export const config = {
     '/admin/:path*',
     '/login',
     '/cadastro',
+    '/esqueci-senha',
+    '/auth/redefinir-senha',
   ],
 };

@@ -5,6 +5,7 @@ import { useEffect, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   getSupabaseBrowserClient,
+  getMissingSupabasePublicEnvVars,
   isSupabaseBrowserClientConfigured,
 } from '@/lib/supabase/browserClient';
 
@@ -25,10 +26,14 @@ export function ResetPasswordView() {
     const prepareSession = async () => {
       try {
         if (!isSupabaseBrowserClientConfigured()) {
-          throw new Error('Configuração do Supabase ausente no frontend.');
+          throw new Error(
+            `Configuração do Supabase ausente no frontend. Verifique ${getMissingSupabasePublicEnvVars().join(', ')}.`
+          );
         }
 
         const supabase = getSupabaseBrowserClient();
+        const currentUrl = new URL(window.location.href);
+        const searchParams = currentUrl.searchParams;
 
         const hash = window.location.hash.startsWith('#')
           ? window.location.hash.slice(1)
@@ -38,18 +43,44 @@ export function ResetPasswordView() {
         const accessToken = hashParams.get('access_token');
         const refreshToken = hashParams.get('refresh_token');
         const type = hashParams.get('type');
+        const authCode = searchParams.get('code');
+        const tokenHash = searchParams.get('token_hash');
+        const otpType = searchParams.get('type');
 
-        if (type !== 'recovery' || !accessToken || !refreshToken) {
+        if (type === 'recovery' && accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+          if (error) {
+            throw error;
+          }
+        } else if (authCode) {
+          const { error } = await supabase.auth.exchangeCodeForSession(authCode);
+
+          if (error) {
+            throw error;
+          }
+        } else if (otpType === 'recovery' && tokenHash) {
+          const { error } = await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type: 'recovery',
+          });
+
+          if (error) {
+            throw error;
+          }
+        } else {
           throw new Error('Link inválido ou expirado.');
         }
 
-        const { error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-        if (error) {
-          throw error;
+        if (!session) {
+          throw new Error('Sessão de recuperação não foi criada.');
         }
 
         const cleanUrl = new URL(window.location.origin + window.location.pathname);
@@ -96,7 +127,9 @@ export function ResetPasswordView() {
 
     try {
       if (!isSupabaseBrowserClientConfigured()) {
-        throw new Error('Configuração do Supabase ausente no frontend.');
+        throw new Error(
+          `Configuração do Supabase ausente no frontend. Verifique ${getMissingSupabasePublicEnvVars().join(', ')}.`
+        );
       }
 
       const supabase = getSupabaseBrowserClient();
@@ -110,6 +143,7 @@ export function ResetPasswordView() {
 
       setStatus('success');
       setMessage('Senha redefinida com sucesso. Redirecionando para o login...');
+      await supabase.auth.signOut();
 
       setTimeout(() => {
         router.replace('/login?reset=1');

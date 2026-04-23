@@ -8,8 +8,9 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import api from '@/lib/api';
+import { isPublicAuthPath } from '@/lib/publicRoutes';
 import type { PlanId } from '@/lib/plans';
 import type { User } from '@/types';
 
@@ -99,6 +100,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const pathname = usePathname();
+  const isPublicRoute = isPublicAuthPath(pathname || '/');
 
   const refreshMe = useCallback(async (): Promise<User | null> => {
     try {
@@ -114,6 +117,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+
+    if (isPublicRoute) {
+      setUser(null);
+      setLoading(false);
+
+      return () => {
+        mounted = false;
+      };
+    }
 
     const initAuth = async () => {
       try {
@@ -134,7 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [isPublicRoute]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {

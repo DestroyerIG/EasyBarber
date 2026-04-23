@@ -4,7 +4,9 @@ import { FormEvent, useState } from 'react';
 import Link from 'next/link';
 import {
   getSupabaseBrowserClient,
+  getMissingSupabasePublicEnvVars,
   isSupabaseBrowserClientConfigured,
+  resolveFrontendAppUrl,
 } from '@/lib/supabase/browserClient';
 
 export function ForgotPasswordView() {
@@ -30,11 +32,13 @@ export function ForgotPasswordView() {
 
     try {
       if (!isSupabaseBrowserClientConfigured()) {
-        throw new Error('Configuração do Supabase ausente no frontend.');
+        throw new Error(
+          `Configuração do Supabase ausente no frontend. Verifique ${getMissingSupabasePublicEnvVars().join(', ')}.`
+        );
       }
 
       const supabase = getSupabaseBrowserClient();
-      const redirectTo = `${process.env.NEXT_PUBLIC_APP_URL}/auth/redefinir-senha`;
+      const redirectTo = `${resolveFrontendAppUrl()}/auth/redefinir-senha`;
 
       const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
         redirectTo,
