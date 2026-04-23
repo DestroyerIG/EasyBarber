@@ -8,9 +8,9 @@ import api from '@/lib/api';
 import { useToast } from '@/components/Toast';
 import { getApiErrorMessage } from '@/utils/handleApiError';
 import {
-  getSupabaseBrowserClient,
-  isSupabaseBrowserClientConfigured,
-} from '@/lib/supabase/browserClient';
+  getSupabaseClient,
+  isSupabaseClientConfigured,
+} from '@/lib/supabase/client';
 
 type ConfirmationStatus = 'loading' | 'success' | 'error';
 
@@ -106,7 +106,7 @@ export function AuthConfirmView() {
       setMessage('Validando a confirmação do seu e-mail...');
 
       try {
-        if (!isSupabaseBrowserClientConfigured()) {
+        if (!isSupabaseClientConfigured()) {
           throw new Error(
             'Configuração Supabase ausente no frontend. Solicite suporte para configurar as variáveis públicas.'
           );
@@ -162,7 +162,7 @@ export function AuthConfirmView() {
           setEmail(callbackParams.email);
         }
 
-        const supabase = getSupabaseBrowserClient();
+        const supabase = getSupabaseClient();
         let accessToken = callbackParams.accessToken;
         let supabaseConfirmed = false;
 

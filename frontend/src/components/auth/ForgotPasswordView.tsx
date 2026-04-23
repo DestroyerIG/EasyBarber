@@ -3,11 +3,11 @@
 import { FormEvent, useState } from 'react';
 import Link from 'next/link';
 import {
-  getSupabaseBrowserClientEnvStatus,
-  getSupabaseBrowserClient,
+  getSupabaseClient,
+  getSupabaseClientDiagnostics,
   getMissingSupabasePublicEnvVars,
-  isSupabaseBrowserClientConfigured,
-} from '@/lib/supabase/browserClient';
+  isSupabaseClientConfigured,
+} from '@/lib/supabase/client';
 
 export function ForgotPasswordView() {
   const [email, setEmail] = useState('');
@@ -31,22 +31,29 @@ export function ForgotPasswordView() {
 
     try {
       const redirectTo = `${window.location.origin}/auth/redefinir-senha`;
-      const { hasSupabaseUrl, hasSupabaseAnonKey } = getSupabaseBrowserClientEnvStatus();
+      const diagnostics = getSupabaseClientDiagnostics();
 
       console.info('[forgot-password] submit iniciado', {
         email: normalizedEmail,
       });
-      console.info('[forgot-password] supabase url presente?', hasSupabaseUrl);
-      console.info('[forgot-password] anon key presente?', hasSupabaseAnonKey);
+      console.info('[forgot-password] origin atual', window.location.origin);
+      console.info('[forgot-password] host do Supabase URL', diagnostics.supabaseUrlHost);
+      console.info('[forgot-password] supabase url presente?', diagnostics.hasSupabaseUrl);
+      console.info('[forgot-password] anon key presente?', diagnostics.hasSupabaseAnonKey);
+      console.info('[forgot-password] prefixo seguro da key', diagnostics.anonKeyPrefix);
+      console.info('[forgot-password] project ref da URL', diagnostics.supabaseUrlProjectRef);
+      console.info('[forgot-password] project ref extraido da key', diagnostics.anonKeyProjectRef);
+      console.info('[forgot-password] mismatch detectavel?', diagnostics.canCompareProjectRef);
+      console.info('[forgot-password] mismatch entre URL e key?', diagnostics.isProjectRefMismatch);
       console.info('[forgot-password] redirectTo', redirectTo);
 
-      if (!isSupabaseBrowserClientConfigured()) {
+      if (!isSupabaseClientConfigured()) {
         throw new Error(
           `Configuração do Supabase ausente no frontend. Verifique ${getMissingSupabasePublicEnvVars().join(', ')}.`
         );
       }
 
-      const supabase = getSupabaseBrowserClient();
+      const supabase = getSupabaseClient();
 
       const response = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
         redirectTo,
@@ -54,6 +61,7 @@ export function ForgotPasswordView() {
 
       console.info('[forgot-password] resposta', {
         hasError: Boolean(response.error),
+        errorMessage: response.error?.message || null,
       });
 
       if (response.error) {

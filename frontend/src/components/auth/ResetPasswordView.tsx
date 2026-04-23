@@ -4,10 +4,10 @@ import Link from 'next/link';
 import { useEffect, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  getSupabaseBrowserClient,
+  getSupabaseClient,
   getMissingSupabasePublicEnvVars,
-  isSupabaseBrowserClientConfigured,
-} from '@/lib/supabase/browserClient';
+  isSupabaseClientConfigured,
+} from '@/lib/supabase/client';
 
 type Status = 'loading' | 'ready' | 'success' | 'error';
 
@@ -25,13 +25,13 @@ export function ResetPasswordView() {
 
     const prepareSession = async () => {
       try {
-        if (!isSupabaseBrowserClientConfigured()) {
+        if (!isSupabaseClientConfigured()) {
           throw new Error(
             `Configuração do Supabase ausente no frontend. Verifique ${getMissingSupabasePublicEnvVars().join(', ')}.`
           );
         }
 
-        const supabase = getSupabaseBrowserClient();
+        const supabase = getSupabaseClient();
         const currentUrl = new URL(window.location.href);
         const searchParams = currentUrl.searchParams;
 
@@ -126,13 +126,13 @@ export function ResetPasswordView() {
     setMessage('Atualizando sua senha...');
 
     try {
-      if (!isSupabaseBrowserClientConfigured()) {
+      if (!isSupabaseClientConfigured()) {
         throw new Error(
           `Configuração do Supabase ausente no frontend. Verifique ${getMissingSupabasePublicEnvVars().join(', ')}.`
         );
       }
 
-      const supabase = getSupabaseBrowserClient();
+      const supabase = getSupabaseClient();
       const { error } = await supabase.auth.updateUser({
         password,
       });
