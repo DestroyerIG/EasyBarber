@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { passwordSchema } from './common.js';
 import { isValidCpfCnpj, normalizeDocumentDigits } from '../../utils/cpfCnpj.js';
 
 export const updateBarbershopSettingsSchema = z.object({
@@ -46,3 +47,44 @@ export const updateBarbershopProfileSchema = z.object({
       message: 'CPF/CNPJ inválido',
     }),
 });
+
+export const updateAccountProfileSchema = z.object({
+  barbershopName: z.string().trim().min(1, 'Nome da barbearia é obrigatório').max(255),
+  ownerName: z.string().trim().min(1, 'Nome do responsável é obrigatório').max(255),
+  whatsapp: z
+    .string()
+    .trim()
+    .min(1, 'WhatsApp é obrigatório')
+    .transform((value) => value.replace(/\D+/g, ''))
+    .refine((value) => value.length >= 10 && value.length <= 18, {
+      message: 'WhatsApp inválido',
+    }),
+  cpfCnpj: z
+    .string()
+    .trim()
+    .min(1, 'CPF/CNPJ é obrigatório')
+    .transform((value) => normalizeDocumentDigits(value))
+    .refine((value) => value.length === 11 || value.length === 14, {
+      message: 'CPF/CNPJ deve ter 11 ou 14 dígitos',
+    })
+    .refine((value) => isValidCpfCnpj(value), {
+      message: 'CPF/CNPJ inválido',
+    }),
+  email: z.string().trim().email('Email inválido').max(255).transform((value) => value.toLowerCase()),
+});
+
+export const updateAccountPasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Senha atual é obrigatória'),
+    newPassword: passwordSchema,
+    confirmNewPassword: z.string().min(1, 'Confirmação da nova senha é obrigatória'),
+  })
+  .superRefine((data, ctx) => {
+    if (data.newPassword !== data.confirmNewPassword) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'A confirmação da nova senha não confere.',
+        path: ['confirmNewPassword'],
+      });
+    }
+  });

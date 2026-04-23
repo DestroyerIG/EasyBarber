@@ -87,6 +87,10 @@ const buildAsaasError = ({ statusCode, payload, method, path }) => {
   const apiMessage = payload?.errors?.[0]?.description || payload?.message || null;
   const message = apiMessage || `Erro Asaas (${method} ${path})`;
   const error = new AppError(message, statusCode || 502, 'ASAAS_API_ERROR');
+  error.response = {
+    status: statusCode || 502,
+    data: payload || null,
+  };
 
   error.details = {
     provider: 'asaas',

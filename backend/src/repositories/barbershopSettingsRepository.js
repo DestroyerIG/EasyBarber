@@ -20,6 +20,29 @@ const mapRowToProfile = (row) => ({
   cpfCnpj: row.cpf_cnpj || null,
 });
 
+const mapRowToAccountProfile = (row) => ({
+  barbershopName: row.barbershop_name,
+  ownerName: row.owner_name,
+  whatsapp: row.whatsapp || '',
+  cpfCnpj: row.cpf_cnpj || '',
+  email: row.email,
+});
+
+const mapRowToAccountUser = (row) => ({
+  userId: row.user_id,
+  barbershopId: row.barbershop_id,
+  role: row.role,
+  email: row.email,
+  passwordHash: row.password_hash,
+  authProvider: row.auth_provider || 'legacy',
+  supabaseUserId: row.supabase_user_id || null,
+  emailVerified: row.email_verified,
+  plan: row.plan,
+  barbershopName: row.barbershop_name,
+  subscriptionStatus: row.subscription_status,
+  subscriptionCurrentPeriodEnd: row.subscription_current_period_end,
+});
+
 const mapRowToOperationalSettings = (row) => ({
   openingTime: row.opening_time,
   closingTime: row.closing_time,
@@ -102,6 +125,99 @@ class BarbershopSettingsRepository extends BaseRepository {
     return mapRowToProfile(result.rows[0]);
   }
 
+  async findAccountProfileByUserId(barbershopId, userId, executor = this.pool) {
+    const result = await executor.query(
+      `SELECT
+         b.name AS barbershop_name,
+         b.owner_name,
+         COALESCE(b.whatsapp, '') AS whatsapp,
+         COALESCE(b.cpf_cnpj, '') AS cpf_cnpj,
+         u.email
+       FROM users u
+       JOIN barbershops b ON b.id = u.barbershop_id
+       WHERE u.id = $1
+         AND u.barbershop_id = $2
+         AND u.blocked = false
+         AND b.active = true
+       LIMIT 1`,
+      [userId, barbershopId]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return mapRowToAccountProfile(result.rows[0]);
+  }
+
+  async findAccountUserById(barbershopId, userId, executor = this.pool) {
+    try {
+      const result = await executor.query(
+        `SELECT
+           u.id AS user_id,
+           u.barbershop_id,
+           u.role,
+           u.email,
+           u.password_hash,
+           u.email_verified,
+           u.supabase_user_id,
+           u.auth_provider,
+           b.plan,
+           b.name AS barbershop_name,
+           b.subscription_status,
+           b.subscription_current_period_end
+         FROM users u
+         JOIN barbershops b ON b.id = u.barbershop_id
+         WHERE u.id = $1
+           AND u.barbershop_id = $2
+           AND u.blocked = false
+           AND b.active = true
+         LIMIT 1`,
+        [userId, barbershopId]
+      );
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      return mapRowToAccountUser(result.rows[0]);
+    } catch (error) {
+      if (error?.code !== '42703') {
+        throw error;
+      }
+
+      const legacyResult = await executor.query(
+        `SELECT
+           u.id AS user_id,
+           u.barbershop_id,
+           u.role,
+           u.email,
+           u.password_hash,
+           u.email_verified,
+           NULL::UUID AS supabase_user_id,
+           'legacy'::VARCHAR AS auth_provider,
+           b.plan,
+           b.name AS barbershop_name,
+           b.subscription_status,
+           b.subscription_current_period_end
+         FROM users u
+         JOIN barbershops b ON b.id = u.barbershop_id
+         WHERE u.id = $1
+           AND u.barbershop_id = $2
+           AND u.blocked = false
+           AND b.active = true
+         LIMIT 1`,
+        [userId, barbershopId]
+      );
+
+      if (legacyResult.rows.length === 0) {
+        return null;
+      }
+
+      return mapRowToAccountUser(legacyResult.rows[0]);
+    }
+  }
+
   async findWhatsAppInstanceContextByBarbershopId(barbershopId, executor = this.pool) {
     const result = await executor.query(
       `SELECT id,
@@ -142,6 +258,60 @@ class BarbershopSettingsRepository extends BaseRepository {
     }
 
     return mapRowToProfile(result.rows[0]);
+  }
+
+  async updateAccountProfile(barbershopId, userId, payload, executor = this.pool) {
+    const barbershopResult = await executor.query(
+      `UPDATE barbershops
+       SET name = $3,
+           owner_name = $4,
+           whatsapp = $5,
+           cpf_cnpj = $6,
+           email = $7,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+         AND active = true
+         AND EXISTS (
+           SELECT 1
+           FROM users u
+           WHERE u.id = $2
+             AND u.barbershop_id = $1
+             AND u.blocked = false
+         )
+       RETURNING id`,
+      [barbershopId, userId, payload.barbershopName, payload.ownerName, payload.whatsapp, payload.cpfCnpj, payload.email]
+    );
+
+    if (barbershopResult.rowCount === 0) {
+      return null;
+    }
+
+    await executor.query(
+      `UPDATE users
+       SET email = $3,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+         AND barbershop_id = $1
+         AND blocked = false`,
+      [barbershopId, userId, payload.email]
+    );
+
+    return this.findAccountProfileByUserId(barbershopId, userId, executor);
+  }
+
+  async updateUserPassword(barbershopId, userId, passwordHash, executor = this.pool) {
+    const result = await executor.query(
+      `UPDATE users
+       SET password_hash = $3,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+         AND barbershop_id = $1
+         AND blocked = false
+       RETURNING id`,
+      [barbershopId, userId, passwordHash]
+    );
+
+    return result.rows[0] || null;
   }
 
   async upsert(barbershopId, payload) {

@@ -8,6 +8,8 @@ import logger from '../utils/logger.js';
  * e erros inesperados com log de stack trace completo.
  */
 export const errorHandler = (err, req, res, _next) => {
+  const isDebugEnvironment = process.env.NODE_ENV !== 'production';
+
   // Payload maior que o limite do body parser
   if (err?.type === 'entity.too.large' || err?.status === 413 || err?.statusCode === 413) {
     logger.warn(
@@ -53,7 +55,15 @@ export const errorHandler = (err, req, res, _next) => {
   // Erros operacionais (esperados)
   if (err instanceof AppError) {
     logger.warn(
-      { code: err.code, statusCode: err.statusCode, path: req.path, requestId: req.id, barbershopId: req.user?.barbershopId },
+      {
+        code: err.code,
+        statusCode: err.statusCode,
+        providerStatus: err.providerStatus,
+        providerData: err.providerData,
+        path: req.path,
+        requestId: req.id,
+        barbershopId: req.user?.barbershopId,
+      },
       err.message
     );
 
@@ -66,6 +76,8 @@ export const errorHandler = (err, req, res, _next) => {
       },
     };
     if (err.details) body.error.details = err.details;
+    if (isDebugEnvironment && err.providerStatus) body.error.providerStatus = err.providerStatus;
+    if (isDebugEnvironment && err.providerData) body.error.providerData = err.providerData;
     if (err.requiredPlan) body.error.requiredPlan = err.requiredPlan;
     if (err.subscriptionStatus) body.error.subscriptionStatus = err.subscriptionStatus;
     if (err.feature) body.error.feature = err.feature;

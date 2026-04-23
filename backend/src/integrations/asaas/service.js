@@ -1,5 +1,6 @@
 import { AppError } from '../../utils/errors.js';
 import { isValidCpfCnpj, normalizeDocumentDigits } from '../../utils/cpfCnpj.js';
+import logger from '../../utils/logger.js';
 import { asaasClient } from './client.js';
 import { asaasMapper } from './mapper.js';
 
@@ -9,14 +10,18 @@ const PLAN_VALUES = Object.freeze({
   premium: 199.9,
 });
 
-const normalizePhoneDigits = (value) => {
+const onlyNumbers = (value) => {
   if (value === undefined || value === null) {
     return null;
   }
 
-  const stringValue = String(value);
-  const digits = stringValue.replace(/\D+/g, '');
-  return digits.length >= 10 && digits.length <= 18 ? digits : null;
+  const digits = String(value).replace(/\D+/g, '');
+  return digits.length > 0 ? digits : null;
+};
+
+const normalizePhoneDigits = (value) => {
+  const digits = onlyNumbers(value);
+  return digits && digits.length >= 10 && digits.length <= 18 ? digits : null;
 };
 
 const resolvePlanValue = (plan) => {
@@ -124,11 +129,41 @@ const resolvePixQrCode = async (paymentId) => {
 };
 
 const resolveCustomerName = (barbershop) => {
-  return barbershop?.owner_name || barbershop?.name || 'Cliente EasyBarber';
+  const candidate = barbershop?.owner_name || barbershop?.name || null;
+  const normalized = typeof candidate === 'string' ? candidate.trim() : '';
+  return normalized || null;
+};
+
+const isValidPublicEmail = (email) => {
+  if (typeof email !== 'string') {
+    return false;
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail) {
+    return false;
+  }
+
+  const basicEmailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!basicEmailRegex.test(normalizedEmail)) {
+    return false;
+  }
+
+  const [, domain = ''] = normalizedEmail.split('@');
+  if (!domain || domain.endsWith('.local')) {
+    return false;
+  }
+
+  if (/^example(\.|-)/i.test(domain) || domain === 'example') {
+    return false;
+  }
+
+  return true;
 };
 
 const resolveCustomerEmail = (barbershop) => {
-  return barbershop?.email || 'cliente@easybarber.com';
+  const candidate = typeof barbershop?.email === 'string' ? barbershop.email.trim() : '';
+  return isValidPublicEmail(candidate) ? candidate.toLowerCase() : null;
 };
 
 const resolveCustomerCpfCnpj = (barbershop) => {
@@ -153,30 +188,40 @@ const buildCustomerPayload = (barbershop) => {
   const mobilePhone = normalizePhoneDigits(barbershop?.whatsapp);
   const cpfCnpj = resolveCustomerCpfCnpj(barbershop);
   const externalReference = barbershop.id;
+  const notificationDisabledCandidates = [
+    barbershop?.notificationDisabled,
+    barbershop?.metadata?.asaas?.notificationDisabled,
+    barbershop?.metadata?.billing?.asaas?.notificationDisabled,
+  ];
+  const notificationDisabled = notificationDisabledCandidates.find(
+    (value) => typeof value === 'boolean'
+  );
+
+  if (!name) {
+    throw new AppError(
+      'Nome é obrigatório para pagamento via Pix.',
+      400,
+      'CUSTOMER_NAME_REQUIRED'
+    );
+  }
 
   if (!cpfCnpj) {
     throw new AppError(
-      'Cadastre CPF ou CNPJ antes de gerar pagamento via PIX.',
+      'CPF/CNPJ é obrigatório para pagamento via Pix.',
       400,
       'CPF_CNPJ_REQUIRED'
     );
   }
 
-  if (!mobilePhone) {
-    throw new AppError(
-      'Telefone da barbearia é obrigatório para pagamentos via Pix',
-      400,
-      'MOBILE_PHONE_REQUIRED'
-    );
-  }
-
   return {
     name,
-    email,
-    mobilePhone,
     cpfCnpj,
-    externalReference,
-    notificationDisabled: false,
+    ...(mobilePhone ? { mobilePhone } : {}),
+    ...(email ? { email } : {}),
+    ...(externalReference ? { externalReference } : {}),
+    ...(typeof notificationDisabled === 'boolean'
+      ? { notificationDisabled }
+      : {}),
   };
 };
 
@@ -185,11 +230,17 @@ const rethrowAsaasError = (
   fallbackMessage,
   fallbackCode = 'ASAAS_REQUEST_ERROR'
 ) => {
-  if (error instanceof AppError) {
-    throw error;
-  }
-
-  const responseData = error?.response?.data;
+  const responseStatus =
+    error?.response?.status ||
+    error?.statusCode ||
+    error?.details?.statusCode ||
+    null;
+  const responseData =
+    error?.response?.data ||
+    error?.providerData ||
+    error?.details?.payload ||
+    error?.details ||
+    null;
   const asaasMessage =
     responseData?.errors?.map((item) => item.description).filter(Boolean).join(' | ') ||
     responseData?.message ||
@@ -198,11 +249,13 @@ const rethrowAsaasError = (
 
   const appError = new AppError(
     asaasMessage || fallbackMessage,
-    error?.response?.status || 502,
+    responseStatus || 502,
     fallbackCode
   );
 
   appError.details = responseData || null;
+  appError.providerStatus = responseStatus || null;
+  appError.providerData = responseData || null;
   throw appError;
 };
 
@@ -227,14 +280,19 @@ const syncExistingCustomer = async ({
       return null;
     }
 
-    console.error('ASAAS CUSTOMER SYNC ERROR', {
-      message: error?.message,
-      statusCode,
-      code: error?.code || null,
-      details: error?.details || null,
-      customerId,
-      payload,
-    });
+    logger.error(
+      {
+        message: error?.message,
+        statusCode,
+        providerStatus: error?.response?.status || statusCode,
+        providerData: error?.response?.data || error?.details || null,
+        code: error?.code || null,
+        details: error?.details || null,
+        customerId,
+        payload,
+      },
+      'ASAAS CUSTOMER SYNC ERROR'
+    );
 
     rethrowAsaasError(
       error,
@@ -245,6 +303,8 @@ const syncExistingCustomer = async ({
 };
 
 export const asaasService = {
+  onlyNumbers,
+  isValidPublicEmail,
   resolvePlanValue,
 
   async createOrGetCustomer({ barbershop, idempotencyKey = null }) {
@@ -289,13 +349,18 @@ export const asaasService = {
         idempotencyKey,
       });
     } catch (error) {
-      console.error('ASAAS CUSTOMER ERROR', {
-        message: error?.message,
-        statusCode: error?.statusCode || error?.status || null,
-        code: error?.code || null,
-        details: error?.details || null,
-        payload,
-      });
+      logger.error(
+        {
+          message: error?.message,
+          statusCode: error?.statusCode || error?.status || null,
+          providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
+          providerData: error?.response?.data || error?.details || null,
+          code: error?.code || null,
+          details: error?.details || null,
+          payload,
+        },
+        'ASAAS CUSTOMER ERROR'
+      );
 
       rethrowAsaasError(
         error,
@@ -336,13 +401,18 @@ export const asaasService = {
         idempotencyKey,
       });
     } catch (error) {
-      console.error('ASAAS PAYMENT ERROR', {
-        message: error?.message,
-        statusCode: error?.statusCode || error?.status || null,
-        code: error?.code || null,
-        details: error?.details || null,
-        payload,
-      });
+      logger.error(
+        {
+          message: error?.message,
+          statusCode: error?.statusCode || error?.status || null,
+          providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
+          providerData: error?.response?.data || error?.details || null,
+          code: error?.code || null,
+          details: error?.details || null,
+          payload,
+        },
+        'ASAAS PAYMENT ERROR'
+      );
 
       rethrowAsaasError(
         error,
@@ -363,7 +433,7 @@ export const asaasService = {
 
     if (!payerCpfCnpj) {
       throw new AppError(
-        'Cadastre CPF ou CNPJ antes de gerar pagamento via PIX.',
+        'CPF/CNPJ é obrigatório para pagamento via Pix.',
         400,
         'CPF_CNPJ_REQUIRED'
       );
@@ -401,13 +471,18 @@ export const asaasService = {
         idempotencyKey,
       });
     } catch (error) {
-      console.error('ASAAS SUBSCRIPTION ERROR', {
-        message: error?.message,
-        statusCode: error?.statusCode || error?.status || null,
-        code: error?.code || null,
-        details: error?.details || null,
-        payload: subscriptionPayload,
-      });
+      logger.error(
+        {
+          message: error?.message,
+          statusCode: error?.statusCode || error?.status || null,
+          providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
+          providerData: error?.response?.data || error?.details || null,
+          code: error?.code || null,
+          details: error?.details || null,
+          payload: subscriptionPayload,
+        },
+        'ASAAS SUBSCRIPTION ERROR'
+      );
 
       rethrowAsaasError(
         error,
@@ -455,13 +530,18 @@ export const asaasService = {
     try {
       return await asaasClient.get(`/payments/${paymentId}`);
     } catch (error) {
-      console.error('ASAAS GET PAYMENT ERROR', {
-        message: error?.message,
-        statusCode: error?.statusCode || error?.status || null,
-        code: error?.code || null,
-        details: error?.details || null,
-        paymentId,
-      });
+      logger.error(
+        {
+          message: error?.message,
+          statusCode: error?.statusCode || error?.status || null,
+          providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
+          providerData: error?.response?.data || error?.details || null,
+          code: error?.code || null,
+          details: error?.details || null,
+          paymentId,
+        },
+        'ASAAS GET PAYMENT ERROR'
+      );
 
       rethrowAsaasError(
         error,
@@ -491,13 +571,18 @@ export const asaasService = {
     try {
       await asaasClient.delete(`/subscriptions/${subscriptionId}`);
     } catch (error) {
-      console.error('ASAAS CANCEL SUBSCRIPTION ERROR', {
-        message: error?.message,
-        statusCode: error?.statusCode || error?.status || null,
-        code: error?.code || null,
-        details: error?.details || null,
-        subscriptionId,
-      });
+      logger.error(
+        {
+          message: error?.message,
+          statusCode: error?.statusCode || error?.status || null,
+          providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
+          providerData: error?.response?.data || error?.details || null,
+          code: error?.code || null,
+          details: error?.details || null,
+          subscriptionId,
+        },
+        'ASAAS CANCEL SUBSCRIPTION ERROR'
+      );
 
       rethrowAsaasError(
         error,
@@ -531,13 +616,18 @@ export const asaasService = {
         subscription: restored,
       };
     } catch (error) {
-      console.error('ASAAS REACTIVATE SUBSCRIPTION ERROR', {
-        message: error?.message,
-        statusCode: error?.statusCode || error?.status || null,
-        code: error?.code || null,
-        details: error?.details || null,
-        subscriptionId,
-      });
+      logger.error(
+        {
+          message: error?.message,
+          statusCode: error?.statusCode || error?.status || null,
+          providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
+          providerData: error?.response?.data || error?.details || null,
+          code: error?.code || null,
+          details: error?.details || null,
+          subscriptionId,
+        },
+        'ASAAS REACTIVATE SUBSCRIPTION ERROR'
+      );
 
       throw new AppError(
         'Não foi possível reativar a assinatura Pix no Asaas automaticamente',

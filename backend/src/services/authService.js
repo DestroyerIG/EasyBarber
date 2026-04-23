@@ -1016,6 +1016,51 @@ export const authService = {
     }
   },
 
+  async refreshAuthenticatedSession(res, sessionUser) {
+    const client = await authRepository.getClient();
+
+    try {
+      await client.query('BEGIN');
+      await authRepository.revokeUserRefreshTokens(client, sessionUser.userId);
+
+      const normalizedRole = normalizeRole(sessionUser.role);
+      const accessToken = generateAccessToken({
+        userId: sessionUser.userId,
+        barbershopId: sessionUser.barbershopId,
+        email: sessionUser.email,
+        plan: sessionUser.plan,
+        role: normalizedRole,
+        subscriptionStatus: sessionUser.subscriptionStatus,
+        subscriptionCurrentPeriodEnd: sessionUser.subscriptionCurrentPeriodEnd,
+      });
+
+      const refreshToken = await generateRefreshToken(client, sessionUser.userId);
+
+      await client.query('COMMIT');
+      setAuthCookies(res, accessToken, refreshToken);
+
+      return {
+        token: accessToken,
+        refreshToken,
+        user: buildUserPayload({
+          barbershopId: sessionUser.barbershopId,
+          email: sessionUser.email,
+          role: normalizedRole,
+          barbershopName: sessionUser.barbershopName,
+          plan: sessionUser.plan,
+          emailVerified: sessionUser.emailVerified,
+          subscriptionStatus: sessionUser.subscriptionStatus,
+          subscriptionCurrentPeriodEnd: sessionUser.subscriptionCurrentPeriodEnd,
+        }),
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
   async logout(refreshCookieToken, res) {
     if (refreshCookieToken) {
       const tokenHash = hashToken(refreshCookieToken);

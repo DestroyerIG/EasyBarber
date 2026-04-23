@@ -1,6 +1,6 @@
 import express from 'express';
 import { authMiddleware } from '../middleware/auth.js';
-import { requireTenantRoles } from '../middleware/rbac.js';
+import { requireRole, requireTenantRoles } from '../middleware/rbac.js';
 import { requireFeature } from '../middleware/subscriptionGuard.js';
 import { validate } from '../middleware/validate.js';
 import { getServices, createService, updateService, deleteService } from '../controllers/serviceController.js';
@@ -12,12 +12,17 @@ import {
 	updateBarberSchema,
 	updateBarbershopSettingsSchema,
 	updateBarbershopProfileSchema,
+	updateAccountProfileSchema,
+	updateAccountPasswordSchema,
 } from '../validators/schemas/index.js';
 import {
 	getBarbershopSettings,
 	getBarbershopProfile,
 	updateBarbershopProfile,
 	updateBarbershopSettings,
+	getAccountProfile,
+	updateAccountProfile,
+	updateAccountPassword,
 } from '../controllers/barbershopSettingsController.js';
 
 const router = express.Router();
@@ -37,5 +42,8 @@ router.put('/settings', authMiddleware, requireTenantRoles, requireFeature('adva
 
 router.get('/profile', authMiddleware, requireTenantRoles, requireFeature('billing'), getBarbershopProfile);
 router.put('/profile', authMiddleware, requireTenantRoles, requireFeature('billing'), validate({ body: updateBarbershopProfileSchema }), updateBarbershopProfile);
+router.get('/account-profile', authMiddleware, requireRole(['tenant_admin']), requireFeature('advanced_admin'), getAccountProfile);
+router.put('/account-profile', authMiddleware, requireRole(['tenant_admin']), requireFeature('advanced_admin'), validate({ body: updateAccountProfileSchema }), updateAccountProfile);
+router.put('/account-password', authMiddleware, requireRole(['tenant_admin']), requireFeature('advanced_admin'), validate({ body: updateAccountPasswordSchema }), updateAccountPassword);
 
 export default router;

@@ -1,9 +1,13 @@
 import { barbershopSettingsRepository } from '../repositories/barbershopSettingsRepository.js';
-import { NotFoundError, ValidationError } from '../utils/errors.js';
+import bcrypt from 'bcryptjs';
+import { authRepository } from '../repositories/authRepository.js';
+import { supabaseAuthService } from './supabaseAuthService.js';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../utils/errors.js';
 import { isValidCpfCnpj, normalizeDocumentDigits } from '../utils/cpfCnpj.js';
 import { normalizeWhatsAppInstanceName } from './whatsapp/whatsappInstanceService.js';
 
 const ALLOWED_SLOT_INTERVALS = new Set([15, 20, 30, 45, 60]);
+const TENANT_ACCOUNT_ROLE = 'tenant_admin';
 
 const toMinutes = (timeValue) => {
   const [hours, minutes] = timeValue.split(':').map(Number);
@@ -24,6 +28,19 @@ const normalizeOptionalInstanceName = (value) => {
   }
 
   return normalizeWhatsAppInstanceName(String(value));
+};
+
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
+
+const normalizePhoneDigits = (value) => {
+  const digits = String(value || '').replace(/\D+/g, '');
+  return digits || '';
+};
+
+const ensureTenantAdmin = (role) => {
+  if (String(role || '').trim().toLowerCase() !== TENANT_ACCOUNT_ROLE) {
+    throw new ForbiddenError('Apenas o administrador da conta pode alterar os dados cadastrais.');
+  }
 };
 
 export const barbershopSettingsService = {
@@ -116,5 +133,154 @@ export const barbershopSettingsService = {
     }
 
     return profile;
+  },
+
+  async getAccountProfile({ barbershopId, userId, role }) {
+    ensureTenantAdmin(role);
+
+    const profile = await barbershopSettingsRepository.findAccountProfileByUserId(barbershopId, userId);
+
+    if (!profile) {
+      throw new NotFoundError('Conta');
+    }
+
+    return profile;
+  },
+
+  async updateAccountProfile({ barbershopId, userId, role }, data) {
+    ensureTenantAdmin(role);
+
+    const normalizedEmail = normalizeEmail(data.email);
+    const normalizedWhatsapp = normalizePhoneDigits(data.whatsapp);
+    const normalizedCpfCnpj = normalizeDocumentDigits(data.cpfCnpj);
+
+    if (!isValidCpfCnpj(normalizedCpfCnpj)) {
+      throw new ValidationError('CPF/CNPJ inválido', ['Informe um CPF ou CNPJ válido para continuar.']);
+    }
+
+    if (normalizedWhatsapp.length < 10 || normalizedWhatsapp.length > 18) {
+      throw new ValidationError('WhatsApp inválido', ['Informe um telefone/WhatsApp com DDD válido.']);
+    }
+
+    const currentUser = await barbershopSettingsRepository.findAccountUserById(barbershopId, userId);
+
+    if (!currentUser) {
+      throw new NotFoundError('Conta');
+    }
+
+    if (normalizedEmail !== currentUser.email) {
+      const conflictingUser = await authRepository.findAnyUserByEmail(normalizedEmail);
+
+      if (conflictingUser && conflictingUser.id !== userId) {
+        throw new ConflictError('Este e-mail já está em uso por outra conta.');
+      }
+    }
+
+    const client = await authRepository.getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      if (normalizedEmail !== currentUser.email && currentUser.supabaseUserId) {
+        await supabaseAuthService.updateUserEmailById(currentUser.supabaseUserId, normalizedEmail);
+      }
+
+      const updatedProfile = await barbershopSettingsRepository.updateAccountProfile(
+        barbershopId,
+        userId,
+        {
+          barbershopName: data.barbershopName.trim(),
+          ownerName: data.ownerName.trim(),
+          whatsapp: normalizedWhatsapp,
+          cpfCnpj: normalizedCpfCnpj,
+          email: normalizedEmail,
+        },
+        client
+      );
+
+      if (!updatedProfile) {
+        throw new NotFoundError('Conta');
+      }
+
+      const sessionUser = await barbershopSettingsRepository.findAccountUserById(barbershopId, userId, client);
+
+      await client.query('COMMIT');
+
+      return {
+        profile: updatedProfile,
+        sessionUser,
+        emailChanged: normalizedEmail !== currentUser.email,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  async updatePassword({ barbershopId, userId, role }, data) {
+    ensureTenantAdmin(role);
+
+    const user = await barbershopSettingsRepository.findAccountUserById(barbershopId, userId);
+
+    if (!user) {
+      throw new NotFoundError('Conta');
+    }
+
+    const authProvider = String(user.authProvider || '').trim().toLowerCase();
+    const currentPassword = String(data.currentPassword || '');
+    const newPassword = String(data.newPassword || '');
+
+    if (authProvider === 'supabase' || user.supabaseUserId) {
+      await supabaseAuthService.signInWithPassword(user.email, currentPassword);
+    } else {
+      const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.passwordHash || '');
+
+      if (!isCurrentPasswordValid) {
+        throw new ValidationError('Senha atual incorreta', ['Confirme a senha atual para continuar.']);
+      }
+    }
+
+    const currentMatchesNew = await bcrypt.compare(newPassword, user.passwordHash || '');
+    if (currentMatchesNew) {
+      throw new ValidationError('Nova senha inválida', ['A nova senha deve ser diferente da senha atual.']);
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    const client = await authRepository.getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      if (user.supabaseUserId) {
+        await supabaseAuthService.updateUserPasswordById(user.supabaseUserId, newPassword);
+      }
+
+      const updatedPassword = await barbershopSettingsRepository.updateUserPassword(
+        barbershopId,
+        userId,
+        passwordHash,
+        client
+      );
+
+      if (!updatedPassword) {
+        throw new NotFoundError('Conta');
+      }
+
+      const sessionUser = await barbershopSettingsRepository.findAccountUserById(barbershopId, userId, client);
+
+      await client.query('COMMIT');
+
+      return {
+        message: 'Senha alterada com sucesso.',
+        sessionUser,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 };

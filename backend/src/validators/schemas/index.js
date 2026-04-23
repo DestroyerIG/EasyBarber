@@ -18,6 +18,8 @@ export { createBarberSchema, updateBarberSchema } from './barberSchemas.js';
 export {
 	updateBarbershopSettingsSchema,
 	updateBarbershopProfileSchema,
+	updateAccountProfileSchema,
+	updateAccountPasswordSchema,
 } from './barbershopSettingsSchemas.js';
 export { createCheckoutSessionSchema } from './subscriptionSchemas.js';
 export {

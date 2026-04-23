@@ -4,6 +4,7 @@ import { AppError, UnauthorizedError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 
 let supabaseClient;
+let supabaseAdminClient;
 const DEFAULT_SUPABASE_AUTH_TIMEOUT_MS = 12000;
 
 const resolveSupabaseConfig = () => {
@@ -14,6 +15,17 @@ const resolveSupabaseConfig = () => {
     url,
     anonKey,
     isConfigured: Boolean(url && anonKey),
+  };
+};
+
+const resolveSupabaseAdminConfig = () => {
+  const url = String(process.env.SUPABASE_URL || '').trim();
+  const serviceRoleKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+
+  return {
+    url,
+    serviceRoleKey,
+    isConfigured: Boolean(url && serviceRoleKey),
   };
 };
 
@@ -299,6 +311,35 @@ const getSupabaseClient = () => {
   return supabaseClient;
 };
 
+const getSupabaseAdminClient = () => {
+  const config = resolveSupabaseAdminConfig();
+
+  if (!config.isConfigured) {
+    throw new AppError(
+      'Supabase Admin não configurado. Defina SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY.',
+      503,
+      'SUPABASE_ADMIN_NOT_CONFIGURED'
+    );
+  }
+
+  if (!supabaseAdminClient) {
+    const timeoutMs = resolveSupabaseAuthTimeoutMs();
+
+    supabaseAdminClient = createClient(config.url, config.serviceRoleKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+      global: {
+        fetch: buildTimeoutFetch(timeoutMs),
+      },
+    });
+  }
+
+  return supabaseAdminClient;
+};
+
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
 export const supabaseAuthService = {
@@ -547,5 +588,75 @@ export const supabaseAuthService = {
     }
 
     throw mapSupabaseError(lastError, 'Não foi possível confirmar o e-mail no Supabase Auth.');
+  },
+
+  async updateUserEmailById(userId, email) {
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!userId || !normalizedEmail) {
+      throw new AppError('Dados inválidos para atualizar e-mail no Supabase Auth.', 400, 'INVALID_EMAIL_UPDATE');
+    }
+
+    const client = getSupabaseAdminClient();
+    let data;
+    let error;
+
+    try {
+      ({ data, error } = await runSupabaseOperation(
+        {
+          operation: 'updateUserEmailById',
+          context: { userId, email: normalizedEmail },
+        },
+        () => client.auth.admin.updateUserById(userId, {
+          email: normalizedEmail,
+          email_confirm: true,
+        })
+      ));
+    } catch (operationError) {
+      throw mapSupabaseError(operationError, 'Não foi possível atualizar o e-mail no provedor de identidade.');
+    }
+
+    if (error) {
+      throw mapSupabaseError(error, 'Não foi possível atualizar o e-mail no provedor de identidade.');
+    }
+
+    return {
+      userId: data?.user?.id || userId,
+      email: normalizeEmail(data?.user?.email || normalizedEmail),
+    };
+  },
+
+  async updateUserPasswordById(userId, password) {
+    const normalizedPassword = String(password || '');
+
+    if (!userId || !normalizedPassword) {
+      throw new AppError('Dados inválidos para atualizar senha no Supabase Auth.', 400, 'INVALID_PASSWORD_UPDATE');
+    }
+
+    const client = getSupabaseAdminClient();
+    let data;
+    let error;
+
+    try {
+      ({ data, error } = await runSupabaseOperation(
+        {
+          operation: 'updateUserPasswordById',
+          context: { userId },
+        },
+        () => client.auth.admin.updateUserById(userId, {
+          password: normalizedPassword,
+        })
+      ));
+    } catch (operationError) {
+      throw mapSupabaseError(operationError, 'Não foi possível atualizar a senha no provedor de identidade.');
+    }
+
+    if (error) {
+      throw mapSupabaseError(error, 'Não foi possível atualizar a senha no provedor de identidade.');
+    }
+
+    return {
+      userId: data?.user?.id || userId,
+    };
   },
 };
