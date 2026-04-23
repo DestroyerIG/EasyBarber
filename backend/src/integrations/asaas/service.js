@@ -1,5 +1,10 @@
 import { AppError } from '../../utils/errors.js';
-import { isValidCpfCnpj, normalizeDocumentDigits } from '../../utils/cpfCnpj.js';
+import {
+  isValidCpf as validateCpf,
+  isValidCnpj as validateCnpj,
+  isValidCpfCnpj as validateCpfCnpj,
+  normalizeDocumentDigits,
+} from '../../utils/cpfCnpj.js';
 import logger from '../../utils/logger.js';
 import { asaasClient } from './client.js';
 import { asaasMapper } from './mapper.js';
@@ -19,9 +24,36 @@ const onlyNumbers = (value) => {
   return digits.length > 0 ? digits : null;
 };
 
-const normalizePhoneDigits = (value) => {
+const normalizeBrazilPhone = (value) => {
   const digits = onlyNumbers(value);
-  return digits && digits.length >= 10 && digits.length <= 18 ? digits : null;
+
+  if (!digits) {
+    return null;
+  }
+
+  const nationalDigits =
+    digits.startsWith('55') && (digits.length === 12 || digits.length === 13)
+      ? digits.slice(2)
+      : digits;
+
+  return nationalDigits.length === 10 || nationalDigits.length === 11
+    ? nationalDigits
+    : null;
+};
+
+const isValidCpf = (value) => {
+  const digits = onlyNumbers(value);
+  return digits ? validateCpf(digits) : false;
+};
+
+const isValidCnpj = (value) => {
+  const digits = onlyNumbers(value);
+  return digits ? validateCnpj(digits) : false;
+};
+
+const isValidCpfCnpj = (value) => {
+  const digits = onlyNumbers(value);
+  return digits ? validateCpfCnpj(digits) : false;
 };
 
 const resolvePlanValue = (plan) => {
@@ -166,7 +198,7 @@ const resolveCustomerEmail = (barbershop) => {
   return isValidPublicEmail(candidate) ? candidate.toLowerCase() : null;
 };
 
-const resolveCustomerCpfCnpj = (barbershop) => {
+const resolveCustomerCpfCnpjInput = (barbershop) => {
   const candidates = [
     barbershop?.cpf_cnpj,
     barbershop?.cpfCnpj,
@@ -174,7 +206,7 @@ const resolveCustomerCpfCnpj = (barbershop) => {
 
   for (const candidate of candidates) {
     const normalized = normalizeDocumentDigits(candidate);
-    if (isValidCpfCnpj(normalized)) {
+    if (normalized) {
       return normalized;
     }
   }
@@ -185,8 +217,8 @@ const resolveCustomerCpfCnpj = (barbershop) => {
 const buildCustomerPayload = (barbershop) => {
   const name = resolveCustomerName(barbershop);
   const email = resolveCustomerEmail(barbershop);
-  const mobilePhone = normalizePhoneDigits(barbershop?.whatsapp);
-  const cpfCnpj = resolveCustomerCpfCnpj(barbershop);
+  const mobilePhone = normalizeBrazilPhone(barbershop?.whatsapp);
+  const cpfCnpj = resolveCustomerCpfCnpjInput(barbershop);
   const externalReference = barbershop.id;
   const notificationDisabledCandidates = [
     barbershop?.notificationDisabled,
@@ -210,6 +242,14 @@ const buildCustomerPayload = (barbershop) => {
       'CPF/CNPJ é obrigatório para pagamento via Pix.',
       400,
       'CPF_CNPJ_REQUIRED'
+    );
+  }
+
+  if (!isValidCpfCnpj(cpfCnpj)) {
+    throw new AppError(
+      'CPF/CNPJ inválido para pagamento via Pix.',
+      400,
+      'INVALID_CPF_CNPJ'
     );
   }
 
@@ -265,6 +305,15 @@ const syncExistingCustomer = async ({
   idempotencyKey,
   allowNotFound = false,
 }) => {
+  logger.debug(
+    {
+      code: 'ASAAS_CUSTOMER_UPDATE_REQUEST',
+      customerId,
+      payload,
+    },
+    'ASAAS CUSTOMER PAYLOAD'
+  );
+
   try {
     return await asaasClient.put(`/customers/${customerId}`, payload, {
       idempotencyKey,
@@ -286,7 +335,7 @@ const syncExistingCustomer = async ({
         statusCode,
         providerStatus: error?.response?.status || statusCode,
         providerData: error?.response?.data || error?.details || null,
-        code: error?.code || null,
+        code: error?.code || 'ASAAS_CUSTOMER_UPDATE_ERROR',
         details: error?.details || null,
         customerId,
         payload,
@@ -304,7 +353,11 @@ const syncExistingCustomer = async ({
 
 export const asaasService = {
   onlyNumbers,
+  normalizeBrazilPhone,
+  isValidCpf,
+  isValidCnpj,
   isValidPublicEmail,
+  isValidCpfCnpj,
   resolvePlanValue,
 
   async createOrGetCustomer({ barbershop, idempotencyKey = null }) {
@@ -345,6 +398,14 @@ export const asaasService = {
     }
 
     try {
+      logger.debug(
+        {
+          code: 'ASAAS_CUSTOMER_CREATE_REQUEST',
+          payload,
+        },
+        'ASAAS CUSTOMER PAYLOAD'
+      );
+
       return await asaasClient.post('/customers', payload, {
         idempotencyKey,
       });
@@ -355,7 +416,7 @@ export const asaasService = {
           statusCode: error?.statusCode || error?.status || null,
           providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
           providerData: error?.response?.data || error?.details || null,
-          code: error?.code || null,
+          code: error?.code || 'ASAAS_CUSTOMER_CREATE_ERROR',
           details: error?.details || null,
           payload,
         },
@@ -407,7 +468,7 @@ export const asaasService = {
           statusCode: error?.statusCode || error?.status || null,
           providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
           providerData: error?.response?.data || error?.details || null,
-          code: error?.code || null,
+          code: error?.code || 'ASAAS_PIX_PAYMENT_CREATE_ERROR',
           details: error?.details || null,
           payload,
         },
@@ -429,13 +490,21 @@ export const asaasService = {
     amount,
     idempotencyKey = null,
   }) {
-    const payerCpfCnpj = resolveCustomerCpfCnpj(barbershop);
+    const payerCpfCnpj = resolveCustomerCpfCnpjInput(barbershop);
 
     if (!payerCpfCnpj) {
       throw new AppError(
         'CPF/CNPJ é obrigatório para pagamento via Pix.',
         400,
         'CPF_CNPJ_REQUIRED'
+      );
+    }
+
+    if (!isValidCpfCnpj(payerCpfCnpj)) {
+      throw new AppError(
+        'CPF/CNPJ inválido para pagamento via Pix.',
+        400,
+        'INVALID_CPF_CNPJ'
       );
     }
 
@@ -477,7 +546,7 @@ export const asaasService = {
           statusCode: error?.statusCode || error?.status || null,
           providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
           providerData: error?.response?.data || error?.details || null,
-          code: error?.code || null,
+          code: error?.code || 'ASAAS_SUBSCRIPTION_CREATE_ERROR',
           details: error?.details || null,
           payload: subscriptionPayload,
         },
@@ -536,7 +605,7 @@ export const asaasService = {
           statusCode: error?.statusCode || error?.status || null,
           providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
           providerData: error?.response?.data || error?.details || null,
-          code: error?.code || null,
+          code: error?.code || 'ASAAS_PAYMENT_FETCH_ERROR',
           details: error?.details || null,
           paymentId,
         },
@@ -577,7 +646,7 @@ export const asaasService = {
           statusCode: error?.statusCode || error?.status || null,
           providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
           providerData: error?.response?.data || error?.details || null,
-          code: error?.code || null,
+          code: error?.code || 'ASAAS_SUBSCRIPTION_CANCEL_ERROR',
           details: error?.details || null,
           subscriptionId,
         },
@@ -622,7 +691,7 @@ export const asaasService = {
           statusCode: error?.statusCode || error?.status || null,
           providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
           providerData: error?.response?.data || error?.details || null,
-          code: error?.code || null,
+          code: error?.code || 'ASAAS_REACTIVATE_UNAVAILABLE',
           details: error?.details || null,
           subscriptionId,
         },
