@@ -30,6 +30,13 @@ export const isSupabaseBrowserClientConfigured = () => {
   return Boolean(resolveSupabaseUrl() && resolveSupabaseAnonKey());
 };
 
+export const getSupabaseBrowserClientEnvStatus = () => {
+  return {
+    hasSupabaseUrl: Boolean(resolveSupabaseUrl()),
+    hasSupabaseAnonKey: Boolean(resolveSupabaseAnonKey()),
+  };
+};
+
 export const getSupabaseBrowserClient = () => {
   const url = resolveSupabaseUrl();
   const anonKey = resolveSupabaseAnonKey();

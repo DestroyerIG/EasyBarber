@@ -8,7 +8,6 @@ import {
   getMissingSupabasePublicEnvVars,
   isSupabaseBrowserClientConfigured,
 } from '@/lib/supabase/browserClient';
-import { PasswordInput } from '@/components/ui';
 
 type Status = 'loading' | 'ready' | 'success' | 'error';
 
@@ -179,15 +178,14 @@ export function ResetPasswordView() {
               >
                 Nova senha
               </label>
-              <PasswordInput
+              <input
                 id="new-password"
+                type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 className="input mt-2"
                 placeholder="Digite a nova senha"
                 required
-                autoComplete="new-password"
-                toggleLabel="nova senha"
               />
             </div>
 
@@ -198,15 +196,14 @@ export function ResetPasswordView() {
               >
                 Confirmar nova senha
               </label>
-              <PasswordInput
+              <input
                 id="confirm-password"
+                type="password"
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
                 className="input mt-2"
                 placeholder="Repita a nova senha"
                 required
-                autoComplete="new-password"
-                toggleLabel="confirmação da nova senha"
               />
             </div>
 

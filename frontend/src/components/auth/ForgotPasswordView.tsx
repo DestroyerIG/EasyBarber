@@ -3,10 +3,10 @@
 import { FormEvent, useState } from 'react';
 import Link from 'next/link';
 import {
+  getSupabaseBrowserClientEnvStatus,
   getSupabaseBrowserClient,
   getMissingSupabasePublicEnvVars,
   isSupabaseBrowserClientConfigured,
-  resolveFrontendAppUrl,
 } from '@/lib/supabase/browserClient';
 
 export function ForgotPasswordView() {
@@ -19,7 +19,6 @@ export function ForgotPasswordView() {
     event.preventDefault();
 
     const normalizedEmail = email.trim().toLowerCase();
-
     if (!normalizedEmail) {
       setStatus('error');
       setMessage('Informe seu e-mail.');
@@ -31,6 +30,16 @@ export function ForgotPasswordView() {
     setMessage('');
 
     try {
+      const redirectTo = `${window.location.origin}/auth/redefinir-senha`;
+      const { hasSupabaseUrl, hasSupabaseAnonKey } = getSupabaseBrowserClientEnvStatus();
+
+      console.info('[forgot-password] submit iniciado', {
+        email: normalizedEmail,
+      });
+      console.info('[forgot-password] supabase url presente?', hasSupabaseUrl);
+      console.info('[forgot-password] anon key presente?', hasSupabaseAnonKey);
+      console.info('[forgot-password] redirectTo', redirectTo);
+
       if (!isSupabaseBrowserClientConfigured()) {
         throw new Error(
           `Configuração do Supabase ausente no frontend. Verifique ${getMissingSupabasePublicEnvVars().join(', ')}.`
@@ -38,20 +47,26 @@ export function ForgotPasswordView() {
       }
 
       const supabase = getSupabaseBrowserClient();
-      const redirectTo = `${resolveFrontendAppUrl()}/auth/redefinir-senha`;
 
-      const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+      const response = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
         redirectTo,
       });
 
-      if (error) {
-        throw error;
+      console.info('[forgot-password] resposta', {
+        hasError: Boolean(response.error),
+      });
+
+      if (response.error) {
+        throw response.error;
       }
 
       setStatus('success');
-      setMessage('Se existir uma conta com esse e-mail, enviaremos um link para redefinir a senha.');
+      setMessage('Link de redefinição enviado. Confira seu e-mail para continuar.');
     } catch (error) {
-      console.error('Erro ao solicitar redefinição de senha:', error);
+      console.error('[forgot-password] erro detalhado', {
+        message: error instanceof Error ? error.message : 'Erro desconhecido',
+        error,
+      });
       setStatus('error');
       if (error instanceof Error && error.message.includes('Configuração do Supabase')) {
         setMessage(error.message);
