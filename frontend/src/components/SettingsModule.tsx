@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import axios from 'axios';
 import {
   BellRing,
@@ -12,7 +12,6 @@ import {
   Store,
   UserRound,
 } from 'lucide-react';
-import { PageHeader } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
@@ -21,16 +20,19 @@ import { getApiErrorMessage } from '@/utils/handleApiError';
 import { formatCpfCnpj, isValidCpfCnpj, normalizeCpfCnpjDigits } from '@/utils/cpfCnpj';
 
 const SETTINGS_STORAGE_KEY = 'easybarber.settings.v1';
+const PANEL_CLASS =
+  'rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.96),rgba(10,10,10,0.98))] shadow-[0_24px_80px_rgba(0,0,0,0.35)]';
+const FIELD_CLASS =
+  'input min-h-[52px] rounded-2xl border-white/10 bg-black/40 px-4 py-3 text-[15px] placeholder:text-gray-500 focus:border-primary/70 focus:ring-primary/30';
+const ERROR_FIELD_CLASS = 'border-red-400/70 focus:border-red-400 focus:ring-red-400/30';
+const MUTED_TEXT_CLASS = 'text-sm leading-6 text-gray-400';
 
 interface SettingsModuleProps {
   initialBarbershopName: string;
 }
 
 interface SettingsState {
-  shopName: string;
   whatsappInstanceName: string;
-  contactPhone: string;
-  address: string;
   openingTime: string;
   closingTime: string;
   slotIntervalMinutes: number;
@@ -58,11 +60,8 @@ interface PasswordState {
 
 type FormErrors<T extends string> = Partial<Record<T, string>>;
 
-const buildDefaultSettings = (barbershopName: string): SettingsState => ({
-  shopName: barbershopName || 'Minha Barbearia',
+const buildDefaultSettings = (): SettingsState => ({
   whatsappInstanceName: '',
-  contactPhone: '',
-  address: '',
   openingTime: '09:00',
   closingTime: '20:00',
   slotIntervalMinutes: 30,
@@ -143,27 +142,137 @@ const getPasswordRequirementsError = (value: string) => {
   return null;
 };
 
+function SettingsPanel({
+  eyebrow,
+  title,
+  description,
+  icon,
+  children,
+  className = '',
+}: {
+  eyebrow?: string;
+  title: string;
+  description?: string;
+  icon?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`${PANEL_CLASS} p-6 sm:p-7 ${className}`}>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div className="space-y-2">
+          {eyebrow && (
+            <span className="inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
+              {eyebrow}
+            </span>
+          )}
+          <div>
+            <h2 className="text-xl font-bold text-white sm:text-2xl">{title}</h2>
+            {description && <p className={`${MUTED_TEXT_CLASS} mt-2 max-w-2xl`}>{description}</p>}
+          </div>
+        </div>
+        {icon && (
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-primary/15 bg-primary/10 text-primary">
+            {icon}
+          </div>
+        )}
+      </div>
+
+      {children}
+    </section>
+  );
+}
+
+function Field({
+  id,
+  label,
+  hint,
+  error,
+  children,
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  error?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <label htmlFor={id} className="text-sm font-medium text-gray-200">
+          {label}
+        </label>
+        {hint && <span className="text-xs text-gray-500">{hint}</span>}
+      </div>
+      {children}
+      {error && <p className="text-xs font-medium text-red-300">{error}</p>}
+    </div>
+  );
+}
+
+function ToggleRow({
+  title,
+  description,
+  checked,
+  onChange,
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-white/10 bg-black/25 px-4 py-4 transition-colors hover:border-primary/20 hover:bg-black/35">
+      <div className="space-y-1">
+        <p className="text-sm font-medium text-white">{title}</p>
+        <p className="text-sm text-gray-400">{description}</p>
+      </div>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="mt-1 h-4 w-4 shrink-0 accent-primary"
+      />
+    </label>
+  );
+}
+
+function LoadingBlock({ lines = 3 }: { lines?: number }) {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: lines }).map((_, index) => (
+        <div key={index} className="skeleton h-12 rounded-2xl" />
+      ))}
+    </div>
+  );
+}
+
 export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
   const { user, refreshMe } = useAuth();
-  const defaults = useMemo(() => buildDefaultSettings(initialBarbershopName), [initialBarbershopName]);
+  const defaults = useMemo(() => buildDefaultSettings(), []);
   const isTenantAdmin = user?.role === 'tenant_admin';
+
   const [settings, setSettings] = useState<SettingsState>(defaults);
   const [accountProfile, setAccountProfile] = useState<AccountProfileState>(
     buildDefaultAccountProfile(initialBarbershopName, user?.email || '')
   );
   const [passwordForm, setPasswordForm] = useState<PasswordState>(buildDefaultPasswordState());
-  const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
+
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsSaving, setSettingsSaving] = useState(false);
   const [usingLocalFallback, setUsingLocalFallback] = useState(false);
+
   const [accountLoading, setAccountLoading] = useState(isTenantAdmin);
   const [accountSaving, setAccountSaving] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
+
   const [accountErrors, setAccountErrors] = useState<FormErrors<keyof AccountProfileState>>({});
   const [passwordErrors, setPasswordErrors] = useState<FormErrors<keyof PasswordState>>({});
+
   const { showToast } = useToast();
 
   useEffect(() => {
-    setAccountProfile(prev => ({
+    setAccountProfile((prev) => ({
       ...prev,
       barbershopName: prev.barbershopName || initialBarbershopName || '',
       email: prev.email || user?.email || '',
@@ -172,14 +281,13 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
 
   useEffect(() => {
     const loadSettings = async () => {
-      setLoading(true);
+      setSettingsLoading(true);
 
       try {
         const response = await api.get('/barbershop/settings');
-        const remoteSettings = response.data as Partial<SettingsState>;
         const merged = {
           ...defaults,
-          ...remoteSettings,
+          ...(response.data as Partial<SettingsState>),
         };
 
         setSettings(merged);
@@ -195,22 +303,19 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
 
         try {
           const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-          if (!raw) {
-            setSettings(defaults);
-          } else {
-            const parsed = JSON.parse(raw) as Partial<SettingsState>;
-            setSettings({
-              ...defaults,
-              ...parsed,
-            });
-          }
+          const parsed = raw ? (JSON.parse(raw) as Partial<SettingsState>) : {};
+
+          setSettings({
+            ...defaults,
+            ...parsed,
+          });
           setUsingLocalFallback(true);
         } catch {
           setSettings(defaults);
           setUsingLocalFallback(true);
         }
       } finally {
-        setLoading(false);
+        setSettingsLoading(false);
       }
     };
 
@@ -248,47 +353,35 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
     loadAccountProfile();
   }, [initialBarbershopName, isTenantAdmin, showToast, user?.email]);
 
-  const updateField = <K extends keyof SettingsState>(field: K, value: SettingsState[K]) => {
-    setSettings(prev => ({
+  const updateSettingsField = <K extends keyof SettingsState>(field: K, value: SettingsState[K]) => {
+    setSettings((prev) => ({
       ...prev,
       [field]: value,
     }));
   };
 
   const updateAccountField = <K extends keyof AccountProfileState>(field: K, value: AccountProfileState[K]) => {
-    setAccountProfile(prev => ({
+    setAccountProfile((prev) => ({
       ...prev,
       [field]: value,
     }));
 
-    setAccountErrors(prev => {
-      if (!prev[field]) {
-        return prev;
-      }
-
-      return {
-        ...prev,
-        [field]: undefined,
-      };
-    });
+    setAccountErrors((prev) => ({
+      ...prev,
+      [field]: undefined,
+    }));
   };
 
   const updatePasswordField = <K extends keyof PasswordState>(field: K, value: PasswordState[K]) => {
-    setPasswordForm(prev => ({
+    setPasswordForm((prev) => ({
       ...prev,
       [field]: value,
     }));
 
-    setPasswordErrors(prev => {
-      if (!prev[field]) {
-        return prev;
-      }
-
-      return {
-        ...prev,
-        [field]: undefined,
-      };
-    });
+    setPasswordErrors((prev) => ({
+      ...prev,
+      [field]: undefined,
+    }));
   };
 
   const validateAccountProfile = () => {
@@ -359,32 +452,36 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
   };
 
   const saveSettings = async () => {
-    setSaving(true);
+    setSettingsSaving(true);
 
     try {
       const response = await api.put('/barbershop/settings', settings);
-      const persisted = response.data as Partial<SettingsState>;
-      const mergedSettings = {
+      const merged = {
         ...settings,
-        ...persisted,
+        ...(response.data as Partial<SettingsState>),
       };
 
-      setSettings(mergedSettings);
-      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(mergedSettings));
+      setSettings(merged);
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(merged));
       setUsingLocalFallback(false);
-      showToast('Configurações salvas com sucesso.', 'success');
+      showToast('Preferências operacionais salvas com sucesso.', 'success');
     } catch (error: unknown) {
       if (shouldUseLocalFallback(error)) {
         localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-        const message = getApiErrorMessage(error, 'Não foi possível salvar no servidor. Dados salvos localmente neste navegador.');
         setUsingLocalFallback(true);
-        showToast(message, 'error');
+        showToast(
+          getApiErrorMessage(
+            error,
+            'Não foi possível salvar no servidor. As preferências ficaram salvas localmente neste navegador.'
+          ),
+          'error'
+        );
       } else {
         setUsingLocalFallback(false);
-        showToast(getApiErrorMessage(error, 'Não foi possível salvar as configurações.'), 'error');
+        showToast(getApiErrorMessage(error, 'Não foi possível salvar as preferências operacionais.'), 'error');
       }
     } finally {
-      setSaving(false);
+      setSettingsSaving(false);
     }
   };
 
@@ -448,458 +545,366 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
   const resetSettings = () => {
     setSettings(defaults);
     localStorage.removeItem(SETTINGS_STORAGE_KEY);
-    showToast('Configurações restauradas para o padrão.', 'info');
+    showToast('Preferências operacionais restauradas para o padrão.', 'info');
   };
 
   return (
-    <div className="space-y-8">
-      <PageHeader
-        title="Configurações"
-        description="Ajuste dados da barbearia, horários de atendimento, lembretes e integrações."
-        action={
-          <div className="flex items-center gap-2">
-            <button
-              onClick={resetSettings}
-              className="btn-secondary flex items-center gap-2"
-              type="button"
-            >
-              <RotateCcw size={16} /> Restaurar padrão
-            </button>
-
-            <button
-              onClick={saveSettings}
-              className="btn-primary flex items-center gap-2"
-              type="button"
-              disabled={saving || loading}
-            >
-              <Save size={18} /> {saving ? 'Salvando...' : 'Salvar alterações'}
-            </button>
-          </div>
-        }
-      />
-
-      {loading && (
-        <div className="card border border-primary/20 text-sm text-gray-300">
-          Carregando configurações...
-        </div>
-      )}
-
-      {!loading && usingLocalFallback && (
-        <div className="card border border-amber-500/30 text-sm text-amber-200">
-          Configurações em modo local por indisponibilidade temporária do servidor.
-        </div>
-      )}
-
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="card space-y-5">
-          <div className="flex items-center gap-3">
-            <Store className="text-primary" size={20} />
-            <h3 className="text-lg font-bold text-white">Dados da barbearia</h3>
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="shopName" className="block text-sm text-gray-400 mb-2">
-                Nome da barbearia
-              </label>
-              <input
-                id="shopName"
-                className="input"
-                value={settings.shopName}
-                onChange={event => updateField('shopName', event.target.value)}
-                placeholder="Ex: Barbearia Central"
-              />
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-1 pb-6">
+      <section className={`${PANEL_CLASS} overflow-hidden p-6 sm:p-8`}>
+        <div className="relative">
+          <div className="absolute inset-x-0 top-0 h-28 bg-[radial-gradient(circle_at_top_right,rgba(249,115,22,0.22),transparent_60%)]" />
+          <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-3xl space-y-3">
+              <span className="inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-primary">
+                Painel da conta
+              </span>
+              <div className="space-y-2">
+                <h1 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">Configurações</h1>
+                <p className="max-w-2xl text-base leading-7 text-gray-400">
+                  Centralize os dados cadastrais, preferências operacionais e integrações da sua barbearia em um fluxo mais limpo e consistente.
+                </p>
+              </div>
             </div>
 
-            <div>
-              <label htmlFor="contactPhone" className="block text-sm text-gray-400 mb-2">
-                Telefone principal
-              </label>
-              <input
-                id="contactPhone"
-                className="input"
-                value={settings.contactPhone}
-                onChange={event => updateField('contactPhone', event.target.value)}
-                placeholder="(11) 99999-9999"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="address" className="block text-sm text-gray-400 mb-2">
-                Endereço
-              </label>
-              <input
-                id="address"
-                className="input"
-                value={settings.address}
-                onChange={event => updateField('address', event.target.value)}
-                placeholder="Rua, numero e bairro"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="card space-y-5">
-          <div className="flex items-center gap-3">
-            <Clock3 className="text-primary" size={20} />
-            <h3 className="text-lg font-bold text-white">Horarios de atendimento</h3>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="openingTime" className="block text-sm text-gray-400 mb-2">
-                Abre as
-              </label>
-              <input
-                id="openingTime"
-                type="time"
-                className="input"
-                value={settings.openingTime}
-                onChange={event => updateField('openingTime', event.target.value)}
-              />
-            </div>
-
-            <div>
-              <label htmlFor="closingTime" className="block text-sm text-gray-400 mb-2">
-                Fecha as
-              </label>
-              <input
-                id="closingTime"
-                type="time"
-                className="input"
-                value={settings.closingTime}
-                onChange={event => updateField('closingTime', event.target.value)}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="slotIntervalMinutes" className="block text-sm text-gray-400 mb-2">
-              Intervalo entre horarios (min)
-            </label>
-            <select
-              id="slotIntervalMinutes"
-              className="input"
-              value={settings.slotIntervalMinutes}
-              onChange={event => updateField('slotIntervalMinutes', Number(event.target.value))}
-            >
-              <option value={15}>15 minutos</option>
-              <option value={20}>20 minutos</option>
-              <option value={30}>30 minutos</option>
-              <option value={45}>45 minutos</option>
-              <option value={60}>60 minutos</option>
-            </select>
-          </div>
-
-          <label className="flex items-center justify-between gap-3 p-4 rounded-xl border border-white/10 bg-black/20">
-            <span className="text-gray-300">Permitir encaixes sem agendamento</span>
-            <input
-              type="checkbox"
-              checked={settings.allowWalkins}
-              onChange={event => updateField('allowWalkins', event.target.checked)}
-              className="h-4 w-4 accent-primary"
-            />
-          </label>
-
-          <label className="flex items-center justify-between gap-3 p-4 rounded-xl border border-white/10 bg-black/20">
-            <span className="text-gray-300">Confirmacao automatica de agendamentos</span>
-            <input
-              type="checkbox"
-              checked={settings.autoConfirmAppointments}
-              onChange={event => updateField('autoConfirmAppointments', event.target.checked)}
-              className="h-4 w-4 accent-primary"
-            />
-          </label>
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="card space-y-5">
-          <div className="flex items-center gap-3">
-            <BellRing className="text-primary" size={20} />
-            <h3 className="text-lg font-bold text-white">Lembretes e notificacoes</h3>
-          </div>
-
-          <label className="flex items-center justify-between gap-3 p-4 rounded-xl border border-white/10 bg-black/20">
-            <span className="text-gray-300">Enviar lembretes por WhatsApp</span>
-            <input
-              type="checkbox"
-              checked={settings.whatsappReminders}
-              onChange={event => updateField('whatsappReminders', event.target.checked)}
-              className="h-4 w-4 accent-primary"
-            />
-          </label>
-
-          <label className="flex items-center justify-between gap-3 p-4 rounded-xl border border-white/10 bg-black/20">
-            <span className="text-gray-300">Enviar lembretes por email</span>
-            <input
-              type="checkbox"
-              checked={settings.emailReminders}
-              onChange={event => updateField('emailReminders', event.target.checked)}
-              className="h-4 w-4 accent-primary"
-            />
-          </label>
-        </div>
-
-        <div className="card space-y-5">
-          <div className="flex items-center gap-3">
-            <Link2 className="text-primary" size={20} />
-            <h3 className="text-lg font-bold text-white">Integracoes</h3>
-          </div>
-
-          <label className="flex items-center justify-between gap-3 p-4 rounded-xl border border-white/10 bg-black/20">
-            <span className="text-gray-300">Sincronizar com Google Calendar</span>
-            <input
-              type="checkbox"
-              checked={settings.googleCalendarEnabled}
-              onChange={event => updateField('googleCalendarEnabled', event.target.checked)}
-              className="h-4 w-4 accent-primary"
-            />
-          </label>
-
-          <div>
-            <label htmlFor="whatsappInstanceName" className="block text-sm text-gray-400 mb-2">
-              Nome da instancia WhatsApp (Evolution)
-            </label>
-            <input
-              id="whatsappInstanceName"
-              className="input"
-              value={settings.whatsappInstanceName}
-              onChange={event => updateField('whatsappInstanceName', event.target.value)}
-              placeholder="Sera gerado automaticamente ao conectar"
-              readOnly
-            />
-            <p className="text-xs text-gray-500 mt-2">
-              Esse identificador tecnico e gerado automaticamente e vincula os webhooks da Evolution ao tenant correto.
-            </p>
-          </div>
-
-          <div>
-            <label htmlFor="customWebhookUrl" className="block text-sm text-gray-400 mb-2">
-              URL de webhook personalizado
-            </label>
-            <input
-              id="customWebhookUrl"
-              className="input"
-              value={settings.customWebhookUrl}
-              onChange={event => updateField('customWebhookUrl', event.target.value)}
-              placeholder="https://seu-webhook.exemplo.com/eventos"
-            />
-            <p className="text-xs text-gray-500 mt-2">
-              Use para integrar automacoes externas quando um agendamento for criado ou atualizado.
-            </p>
+            {usingLocalFallback && (
+              <div className="max-w-md rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                Algumas preferências operacionais estão em modo local por indisponibilidade temporária do servidor.
+              </div>
+            )}
           </div>
         </div>
       </section>
 
-      <section className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-6">
-        <div className="card space-y-5">
-          <div className="flex items-center gap-3">
-            <UserRound className="text-primary" size={20} />
-            <div>
-              <h3 className="text-lg font-bold text-white">Dados cadastrais</h3>
-              <p className="text-sm text-gray-400">
-                Atualize os dados da conta usados no cadastro do tenant autenticado.
-              </p>
-            </div>
-          </div>
-
+      <section className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.92fr)]">
+        <SettingsPanel
+          eyebrow="Fonte oficial"
+          title="Dados cadastrais"
+          description="Edite aqui os dados oficiais da conta. Nome da barbearia, telefone, CPF/CNPJ e e-mail passam a ter uma única fonte de verdade."
+          icon={<UserRound size={22} />}
+        >
           {!isTenantAdmin && (
-            <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-gray-300">
-              Essa seção fica disponível apenas para o administrador da conta do tenant.
+            <div className="rounded-2xl border border-white/10 bg-black/25 px-4 py-4 text-sm text-gray-300">
+              Essa área fica disponível apenas para o administrador da conta do tenant.
             </div>
           )}
 
-          {isTenantAdmin && accountLoading && (
-            <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-gray-300">
-              Carregando dados cadastrais...
-            </div>
-          )}
+          {isTenantAdmin && accountLoading && <LoadingBlock lines={5} />}
 
           {isTenantAdmin && !accountLoading && (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="accountBarbershopName" className="block text-sm text-gray-400 mb-2">
-                    Nome da barbearia
-                  </label>
+            <div className="space-y-5">
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                <Field id="accountBarbershopName" label="Nome da barbearia" error={accountErrors.barbershopName}>
                   <input
                     id="accountBarbershopName"
-                    className="input"
+                    className={`${FIELD_CLASS} ${accountErrors.barbershopName ? ERROR_FIELD_CLASS : ''}`}
                     value={accountProfile.barbershopName}
-                    onChange={event => updateAccountField('barbershopName', event.target.value)}
-                    placeholder="Ex: Barbearia Central"
+                    onChange={(event) => updateAccountField('barbershopName', event.target.value)}
+                    placeholder="Ex: EasyBarber Prime"
                   />
-                  {accountErrors.barbershopName && (
-                    <p className="mt-2 text-xs text-red-300">{accountErrors.barbershopName}</p>
-                  )}
-                </div>
+                </Field>
 
-                <div>
-                  <label htmlFor="ownerName" className="block text-sm text-gray-400 mb-2">
-                    Nome do responsável
-                  </label>
-                  <div className="relative">
-                    <UserRound className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
-                    <input
-                      id="ownerName"
-                      className="input pl-10"
-                      value={accountProfile.ownerName}
-                      onChange={event => updateAccountField('ownerName', event.target.value)}
-                      placeholder="Nome completo"
-                    />
-                  </div>
-                  {accountErrors.ownerName && (
-                    <p className="mt-2 text-xs text-red-300">{accountErrors.ownerName}</p>
-                  )}
-                </div>
+                <Field id="ownerName" label="Nome do responsável" error={accountErrors.ownerName}>
+                  <input
+                    id="ownerName"
+                    className={`${FIELD_CLASS} ${accountErrors.ownerName ? ERROR_FIELD_CLASS : ''}`}
+                    value={accountProfile.ownerName}
+                    onChange={(event) => updateAccountField('ownerName', event.target.value)}
+                    placeholder="Nome completo do responsável"
+                  />
+                </Field>
 
-                <div>
-                  <label htmlFor="whatsapp" className="block text-sm text-gray-400 mb-2">
-                    WhatsApp
-                  </label>
+                <Field id="whatsapp" label="WhatsApp" error={accountErrors.whatsapp}>
                   <input
                     id="whatsapp"
-                    className="input"
+                    className={`${FIELD_CLASS} ${accountErrors.whatsapp ? ERROR_FIELD_CLASS : ''}`}
                     value={accountProfile.whatsapp}
-                    onChange={event => updateAccountField('whatsapp', formatPhoneInput(event.target.value))}
+                    onChange={(event) => updateAccountField('whatsapp', formatPhoneInput(event.target.value))}
                     placeholder="(11) 99999-9999"
                   />
-                  {accountErrors.whatsapp && (
-                    <p className="mt-2 text-xs text-red-300">{accountErrors.whatsapp}</p>
-                  )}
-                </div>
+                </Field>
 
-                <div>
-                  <label htmlFor="cpfCnpj" className="block text-sm text-gray-400 mb-2">
-                    CPF/CNPJ
-                  </label>
+                <Field id="cpfCnpj" label="CPF/CNPJ" error={accountErrors.cpfCnpj}>
                   <input
                     id="cpfCnpj"
-                    className="input"
+                    className={`${FIELD_CLASS} ${accountErrors.cpfCnpj ? ERROR_FIELD_CLASS : ''}`}
                     value={accountProfile.cpfCnpj}
-                    onChange={event => updateAccountField('cpfCnpj', formatCpfCnpj(event.target.value))}
+                    onChange={(event) => updateAccountField('cpfCnpj', formatCpfCnpj(event.target.value))}
                     placeholder="000.000.000-00"
                   />
-                  {accountErrors.cpfCnpj && (
-                    <p className="mt-2 text-xs text-red-300">{accountErrors.cpfCnpj}</p>
-                  )}
-                </div>
+                </Field>
               </div>
 
-              <div>
-                <label htmlFor="accountEmail" className="block text-sm text-gray-400 mb-2">
-                  E-mail da conta
-                </label>
+              <Field id="accountEmail" label="E-mail da conta" error={accountErrors.email}>
                 <input
                   id="accountEmail"
                   type="email"
-                  className="input"
+                  className={`${FIELD_CLASS} ${accountErrors.email ? ERROR_FIELD_CLASS : ''}`}
                   value={accountProfile.email}
-                  onChange={event => updateAccountField('email', event.target.value)}
+                  onChange={(event) => updateAccountField('email', event.target.value)}
                   placeholder="contato@barbearia.com"
                 />
-                {accountErrors.email && (
-                  <p className="mt-2 text-xs text-red-300">{accountErrors.email}</p>
-                )}
-              </div>
+              </Field>
 
-              <div className="flex justify-end">
+              <div className="flex flex-col gap-3 border-t border-white/10 pt-5 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-gray-500">
+                  As alterações ficam no formulário mesmo se houver erro, para você ajustar e reenviar.
+                </p>
                 <button
                   type="button"
                   onClick={saveAccountProfile}
                   disabled={accountSaving}
-                  className="btn-primary flex items-center gap-2"
+                  className="btn-primary inline-flex min-h-[50px] items-center justify-center gap-2 rounded-2xl px-6 sm:min-w-[230px]"
                 >
                   <Save size={18} /> {accountSaving ? 'Salvando...' : 'Salvar dados cadastrais'}
                 </button>
               </div>
-            </>
-          )}
-        </div>
-
-        <div className="card space-y-5">
-          <div className="flex items-center gap-3">
-            <KeyRound className="text-primary" size={20} />
-            <div>
-              <h3 className="text-lg font-bold text-white">Alterar senha</h3>
-              <p className="text-sm text-gray-400">
-                Esse fluxo é separado do formulário principal para manter a alteração mais segura.
-              </p>
             </div>
-          </div>
+          )}
+        </SettingsPanel>
 
+        <SettingsPanel
+          eyebrow="Segurança"
+          title="Alterar senha"
+          description="A troca de senha fica isolada do cadastro principal para dar mais clareza e reforçar a segurança da conta."
+          icon={<KeyRound size={22} />}
+          className="h-full"
+        >
           {!isTenantAdmin && (
-            <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-gray-300">
-              A troca de senha pela tela de configurações fica disponível apenas para o administrador da conta.
+            <div className="rounded-2xl border border-white/10 bg-black/25 px-4 py-4 text-sm text-gray-300">
+              A troca de senha por essa tela fica disponível apenas para o administrador da conta.
             </div>
           )}
 
           {isTenantAdmin && (
-            <>
-              <div>
-                <label htmlFor="currentPassword" className="block text-sm text-gray-400 mb-2">
-                  Senha atual
-                </label>
+            <div className="space-y-5">
+              <div className="rounded-2xl border border-primary/10 bg-primary/5 px-4 py-3 text-sm text-gray-300">
+                Use a senha atual para confirmar sua identidade antes de definir uma nova senha.
+              </div>
+
+              <Field id="currentPassword" label="Senha atual" error={passwordErrors.currentPassword}>
                 <input
                   id="currentPassword"
                   type="password"
-                  className="input"
+                  className={`${FIELD_CLASS} ${passwordErrors.currentPassword ? ERROR_FIELD_CLASS : ''}`}
                   value={passwordForm.currentPassword}
-                  onChange={event => updatePasswordField('currentPassword', event.target.value)}
+                  onChange={(event) => updatePasswordField('currentPassword', event.target.value)}
                   placeholder="Digite sua senha atual"
                 />
-                {passwordErrors.currentPassword && (
-                  <p className="mt-2 text-xs text-red-300">{passwordErrors.currentPassword}</p>
-                )}
-              </div>
+              </Field>
 
-              <div>
-                <label htmlFor="newPassword" className="block text-sm text-gray-400 mb-2">
-                  Nova senha
-                </label>
+              <Field
+                id="newPassword"
+                label="Nova senha"
+                hint="Mínimo 8 caracteres"
+                error={passwordErrors.newPassword}
+              >
                 <input
                   id="newPassword"
                   type="password"
-                  className="input"
+                  className={`${FIELD_CLASS} ${passwordErrors.newPassword ? ERROR_FIELD_CLASS : ''}`}
                   value={passwordForm.newPassword}
-                  onChange={event => updatePasswordField('newPassword', event.target.value)}
-                  placeholder="Min. 8 caracteres, com maiúscula e número"
+                  onChange={(event) => updatePasswordField('newPassword', event.target.value)}
+                  placeholder="Inclua letra maiúscula e número"
                 />
-                {passwordErrors.newPassword && (
-                  <p className="mt-2 text-xs text-red-300">{passwordErrors.newPassword}</p>
-                )}
-              </div>
+              </Field>
 
-              <div>
-                <label htmlFor="confirmNewPassword" className="block text-sm text-gray-400 mb-2">
-                  Confirmar nova senha
-                </label>
+              <Field id="confirmNewPassword" label="Confirmar nova senha" error={passwordErrors.confirmNewPassword}>
                 <input
                   id="confirmNewPassword"
                   type="password"
-                  className="input"
+                  className={`${FIELD_CLASS} ${passwordErrors.confirmNewPassword ? ERROR_FIELD_CLASS : ''}`}
                   value={passwordForm.confirmNewPassword}
-                  onChange={event => updatePasswordField('confirmNewPassword', event.target.value)}
+                  onChange={(event) => updatePasswordField('confirmNewPassword', event.target.value)}
                   placeholder="Repita a nova senha"
                 />
-                {passwordErrors.confirmNewPassword && (
-                  <p className="mt-2 text-xs text-red-300">{passwordErrors.confirmNewPassword}</p>
-                )}
-              </div>
+              </Field>
 
-              <div className="flex justify-end">
+              <div className="flex flex-col gap-3 border-t border-white/10 pt-5">
                 <button
                   type="button"
                   onClick={savePassword}
                   disabled={passwordSaving}
-                  className="btn-primary flex items-center gap-2"
+                  className="btn-primary inline-flex min-h-[50px] items-center justify-center gap-2 rounded-2xl px-6"
                 >
                   <Save size={18} /> {passwordSaving ? 'Atualizando...' : 'Atualizar senha'}
                 </button>
+                <p className="text-xs leading-6 text-gray-500">
+                  A senha nunca é carregada do backend e continua sendo validada no fluxo seguro do provedor de autenticação quando aplicável.
+                </p>
               </div>
-            </>
+            </div>
           )}
+        </SettingsPanel>
+      </section>
+
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <SettingsPanel
+          eyebrow="Operação"
+          title="Horários de atendimento"
+          description="Defina a janela de atendimento e o comportamento padrão da agenda."
+          icon={<Clock3 size={22} />}
+        >
+          {settingsLoading ? (
+            <LoadingBlock lines={4} />
+          ) : (
+            <div className="space-y-5">
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <Field id="openingTime" label="Abre às">
+                  <input
+                    id="openingTime"
+                    type="time"
+                    className={FIELD_CLASS}
+                    value={settings.openingTime}
+                    onChange={(event) => updateSettingsField('openingTime', event.target.value)}
+                  />
+                </Field>
+
+                <Field id="closingTime" label="Fecha às">
+                  <input
+                    id="closingTime"
+                    type="time"
+                    className={FIELD_CLASS}
+                    value={settings.closingTime}
+                    onChange={(event) => updateSettingsField('closingTime', event.target.value)}
+                  />
+                </Field>
+              </div>
+
+              <Field id="slotIntervalMinutes" label="Intervalo entre horários">
+                <select
+                  id="slotIntervalMinutes"
+                  className={FIELD_CLASS}
+                  value={settings.slotIntervalMinutes}
+                  onChange={(event) => updateSettingsField('slotIntervalMinutes', Number(event.target.value))}
+                >
+                  <option value={15}>15 minutos</option>
+                  <option value={20}>20 minutos</option>
+                  <option value={30}>30 minutos</option>
+                  <option value={45}>45 minutos</option>
+                  <option value={60}>60 minutos</option>
+                </select>
+              </Field>
+
+              <div className="space-y-3">
+                <ToggleRow
+                  title="Permitir encaixes sem agendamento"
+                  description="Mantém a agenda flexível para atender clientes fora da marcação formal."
+                  checked={settings.allowWalkins}
+                  onChange={(checked) => updateSettingsField('allowWalkins', checked)}
+                />
+                <ToggleRow
+                  title="Confirmação automática de agendamentos"
+                  description="Confirma novos agendamentos automaticamente para reduzir etapas no fluxo."
+                  checked={settings.autoConfirmAppointments}
+                  onChange={(checked) => updateSettingsField('autoConfirmAppointments', checked)}
+                />
+              </div>
+            </div>
+          )}
+        </SettingsPanel>
+
+        <SettingsPanel
+          eyebrow="Comunicação"
+          title="Lembretes e notificações"
+          description="Escolha como a barbearia se comunica com os clientes ao longo da agenda."
+          icon={<BellRing size={22} />}
+        >
+          {settingsLoading ? (
+            <LoadingBlock lines={3} />
+          ) : (
+            <div className="space-y-3">
+              <ToggleRow
+                title="Enviar lembretes por WhatsApp"
+                description="Usa o canal com melhor taxa de abertura para lembrar os clientes."
+                checked={settings.whatsappReminders}
+                onChange={(checked) => updateSettingsField('whatsappReminders', checked)}
+              />
+              <ToggleRow
+                title="Enviar lembretes por e-mail"
+                description="Mantém um segundo canal ativo para confirmações e reforço da comunicação."
+                checked={settings.emailReminders}
+                onChange={(checked) => updateSettingsField('emailReminders', checked)}
+              />
+            </div>
+          )}
+        </SettingsPanel>
+
+        <SettingsPanel
+          eyebrow="Conectividade"
+          title="Integrações"
+          description="Gerencie identificadores técnicos e conexões externas sem misturar com os dados oficiais da conta."
+          icon={<Link2 size={22} />}
+          className="lg:col-span-2"
+        >
+          {settingsLoading ? (
+            <LoadingBlock lines={4} />
+          ) : (
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+              <div className="space-y-3">
+                <ToggleRow
+                  title="Sincronizar com Google Calendar"
+                  description="Ative para integrar o calendário externo quando essa rotina estiver habilitada."
+                  checked={settings.googleCalendarEnabled}
+                  onChange={(checked) => updateSettingsField('googleCalendarEnabled', checked)}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-5">
+                <Field id="whatsappInstanceName" label="Nome da instância WhatsApp (Evolution)">
+                  <input
+                    id="whatsappInstanceName"
+                    className={`${FIELD_CLASS} opacity-80`}
+                    value={settings.whatsappInstanceName}
+                    onChange={(event) => updateSettingsField('whatsappInstanceName', event.target.value)}
+                    placeholder="Gerado automaticamente ao conectar"
+                    readOnly
+                  />
+                </Field>
+
+                <Field id="customWebhookUrl" label="Webhook personalizado" hint="Opcional">
+                  <input
+                    id="customWebhookUrl"
+                    className={FIELD_CLASS}
+                    value={settings.customWebhookUrl}
+                    onChange={(event) => updateSettingsField('customWebhookUrl', event.target.value)}
+                    placeholder="https://seu-webhook.exemplo.com/eventos"
+                  />
+                </Field>
+              </div>
+            </div>
+          )}
+        </SettingsPanel>
+      </section>
+
+      <section className={`${PANEL_CLASS} p-5 sm:p-6`}>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-white">
+              <Store size={18} className="text-primary" />
+              <span className="font-semibold">Preferências operacionais</span>
+            </div>
+            <p className={MUTED_TEXT_CLASS}>
+              Horários, notificações e integrações técnicas continuam sendo salvos separadamente dos dados cadastrais da conta.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={resetSettings}
+              className="btn-secondary inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl px-5"
+            >
+              <RotateCcw size={16} /> Restaurar padrões
+            </button>
+            <button
+              type="button"
+              onClick={saveSettings}
+              disabled={settingsSaving || settingsLoading}
+              className="btn-primary inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl px-6"
+            >
+              <Save size={18} /> {settingsSaving ? 'Salvando...' : 'Salvar preferências'}
+            </button>
+          </div>
         </div>
       </section>
     </div>

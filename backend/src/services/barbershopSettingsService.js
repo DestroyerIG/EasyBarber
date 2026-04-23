@@ -14,14 +14,6 @@ const toMinutes = (timeValue) => {
   return (hours * 60) + minutes;
 };
 
-const normalizeOptionalText = (value) => {
-  if (typeof value !== 'string') {
-    return '';
-  }
-
-  return value.trim();
-};
-
 const normalizeOptionalInstanceName = (value) => {
   if (value === null || value === undefined || value === '') {
     return null;
@@ -68,10 +60,7 @@ export const barbershopSettingsService = {
     }
 
     const payload = {
-      shopName: data.shopName.trim(),
       whatsappInstanceName: normalizeOptionalInstanceName(data.whatsappInstanceName),
-      contactPhone: normalizeOptionalText(data.contactPhone),
-      address: normalizeOptionalText(data.address),
       openingTime: data.openingTime,
       closingTime: data.closingTime,
       slotIntervalMinutes: data.slotIntervalMinutes,
@@ -80,7 +69,7 @@ export const barbershopSettingsService = {
       emailReminders: data.emailReminders,
       whatsappReminders: data.whatsappReminders,
       googleCalendarEnabled: data.googleCalendarEnabled,
-      customWebhookUrl: normalizeOptionalText(data.customWebhookUrl) || null,
+      customWebhookUrl: String(data.customWebhookUrl || '').trim() || null,
     };
 
     let settings;

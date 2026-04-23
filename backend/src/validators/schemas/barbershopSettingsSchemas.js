@@ -3,7 +3,6 @@ import { passwordSchema } from './common.js';
 import { isValidCpfCnpj, normalizeDocumentDigits } from '../../utils/cpfCnpj.js';
 
 export const updateBarbershopSettingsSchema = z.object({
-  shopName: z.string().trim().min(2, 'Nome da barbearia deve ter pelo menos 2 caracteres').max(255),
   whatsappInstanceName: z
     .union([
       z.literal(''),
@@ -16,8 +15,6 @@ export const updateBarbershopSettingsSchema = z.object({
     ])
     .optional()
     .default(''),
-  contactPhone: z.string().trim().max(30).optional().default(''),
-  address: z.string().trim().max(255).optional().default(''),
   openingTime: z.string().regex(/^\d{2}:\d{2}$/, 'Horário de abertura deve estar no formato HH:MM'),
   closingTime: z.string().regex(/^\d{2}:\d{2}$/, 'Horário de fechamento deve estar no formato HH:MM'),
   slotIntervalMinutes: z.number().int().refine((value) => [15, 20, 30, 45, 60].includes(value), {

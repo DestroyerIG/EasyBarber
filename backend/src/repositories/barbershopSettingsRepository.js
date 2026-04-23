@@ -1,10 +1,7 @@
 import { BaseRepository } from './BaseRepository.js';
 
 const mapRowToSettings = (row) => ({
-  shopName: row.shop_name,
   whatsappInstanceName: row.whatsapp_instance_name,
-  contactPhone: row.contact_phone,
-  address: row.address,
   openingTime: row.opening_time,
   closingTime: row.closing_time,
   slotIntervalMinutes: row.slot_interval_minutes,
@@ -60,10 +57,7 @@ class BarbershopSettingsRepository extends BaseRepository {
   async findByBarbershopId(barbershopId, executor = this.pool) {
     const result = await executor.query(
       `SELECT
-         b.name AS shop_name,
          COALESCE(NULLIF(b.whatsapp_instance_name, ''), '') AS whatsapp_instance_name,
-         COALESCE(s.contact_phone, '') AS contact_phone,
-         COALESCE(s.address, '') AS address,
          COALESCE(to_char(s.opening_time, 'HH24:MI'), '09:00') AS opening_time,
          COALESCE(to_char(s.closing_time, 'HH24:MI'), '20:00') AS closing_time,
          COALESCE(s.slot_interval_minutes, 30) AS slot_interval_minutes,
@@ -322,11 +316,10 @@ class BarbershopSettingsRepository extends BaseRepository {
 
       const barbershopResult = await client.query(
         `UPDATE barbershops
-         SET name = $2,
-             whatsapp_instance_name = NULLIF(lower(btrim($3)), '')
+         SET whatsapp_instance_name = NULLIF(lower(btrim($2)), '')
          WHERE id = $1 AND active = true
          RETURNING id`,
-        [barbershopId, payload.shopName, payload.whatsappInstanceName]
+        [barbershopId, payload.whatsappInstanceName]
       );
 
       if (barbershopResult.rowCount === 0) {
@@ -337,8 +330,6 @@ class BarbershopSettingsRepository extends BaseRepository {
       await client.query(
         `INSERT INTO barbershop_settings (
            barbershop_id,
-           contact_phone,
-           address,
            opening_time,
            closing_time,
            slot_interval_minutes,
@@ -348,10 +339,8 @@ class BarbershopSettingsRepository extends BaseRepository {
            whatsapp_reminders,
            google_calendar_enabled,
            custom_webhook_url
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (barbershop_id) DO UPDATE SET
-           contact_phone = EXCLUDED.contact_phone,
-           address = EXCLUDED.address,
            opening_time = EXCLUDED.opening_time,
            closing_time = EXCLUDED.closing_time,
            slot_interval_minutes = EXCLUDED.slot_interval_minutes,
@@ -364,8 +353,6 @@ class BarbershopSettingsRepository extends BaseRepository {
            updated_at = CURRENT_TIMESTAMP`,
         [
           barbershopId,
-          payload.contactPhone,
-          payload.address,
           payload.openingTime,
           payload.closingTime,
           payload.slotIntervalMinutes,
