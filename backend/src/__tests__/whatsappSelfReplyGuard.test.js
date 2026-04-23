@@ -369,8 +369,20 @@ describe('whatsappSelfReplyGuard — bot nao deve responder a si proprio', () =>
     };
 
     const result = await handleIncomingMessage(payload, 'Olá', {
+      barbershopId: 'tenant-1',
       eventName: 'messages-upsert',
       preExtractedInstanceNumbers: [INSTANCE_NUMBER],
+      preExtractedPhone: CUSTOMER_NUMBER,
+      preResolvedAuthorExtraction: {
+        phone: CUSTOMER_NUMBER,
+        sourcePath: 'data.messages[0].messageContextInfo.participantPn',
+        candidateType: 'numeric_fallback',
+        confidence: 'high',
+        resolutionRule: 'candidate_ranked_best',
+        fromMe: false,
+        remoteJidOriginal: '236197968359561@lid',
+        instanceNumbers: [INSTANCE_NUMBER],
+      },
     });
 
     expect(result).toMatchObject({ ok: true, ignored: false });

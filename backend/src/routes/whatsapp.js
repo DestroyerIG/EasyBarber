@@ -1151,6 +1151,7 @@ router.post('/webhook', async (req, res, next) => {
       preExtractedPhone: incoming.extractedPhone,
       preExtractedText: incoming.extractedText,
       preExtractedInstanceNumbers: incoming.extraction?.instanceNumbers || [],
+      preResolvedAuthorExtraction: incoming.extraction || null,
       eventName: incoming.eventName,
       dedupeKey: dedupe.dedupeKey,
       messageId: dedupe.messageId,

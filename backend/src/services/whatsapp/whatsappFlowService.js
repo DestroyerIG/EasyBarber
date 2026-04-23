@@ -102,7 +102,10 @@ const normalizeChoice = (text) => {
 const isFromMe = (payload = {}) => {
   const candidates = [
     payload?.fromMe, payload?.key?.fromMe, payload?.data?.fromMe,
-    payload?.data?.key?.fromMe, payload?.data?.messages?.[0]?.key?.fromMe,
+    payload?.data?.key?.fromMe,
+    payload?.data?.messages?.[0]?.message?.key?.fromMe,
+    payload?.data?.messages?.[0]?.key?.fromMe,
+    payload?.messages?.[0]?.message?.key?.fromMe,
     payload?.messages?.[0]?.key?.fromMe,
   ];
   return candidates.some((v) => isWebhookBooleanTrue(v));
@@ -804,6 +807,23 @@ export const goBackToMainMenu = async (phone, barbershopId) => {
   return { message: await buildMenuMessage(barbershopId) };
 };
 
+const logGreetingEvaluation = (baseContext = {}, greetingEvaluation, extras = {}) => {
+  logger.info(
+    {
+      ...baseContext,
+      originalText: greetingEvaluation.originalText,
+      normalizedText: greetingEvaluation.normalizedText,
+      greetingMatched: greetingEvaluation.isGreeting,
+      greetingRule: greetingEvaluation.rule,
+      greetingCanonical: greetingEvaluation.canonicalGreeting,
+      ...extras,
+    },
+    greetingEvaluation.isGreeting
+      ? 'Saudacao detectada no fluxo WhatsApp'
+      : 'Saudacao nao detectada no fluxo WhatsApp'
+  );
+};
+
 // ==================== HANDLERS DE STEPS ====================
 
 const handleMenuStep = async (phone, text, barbershopId, config, sendContext) => {
@@ -1302,6 +1322,11 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
   const preExtractedPhone = normalizeWhatsAppNumber(options?.preExtractedPhone);
   const preExtractedText = normalizeText(options?.preExtractedText);
   const preExtractedInstanceName = normalizeFlowInstanceName(options?.preExtractedInstanceName);
+  const preResolvedAuthorExtraction =
+    options?.preResolvedAuthorExtraction &&
+    typeof options.preResolvedAuthorExtraction === 'object'
+      ? options.preResolvedAuthorExtraction
+      : null;
   const connectedNumber = resolveConnectedNumber();
   const preExtractedInstanceNumbers = Array.isArray(options?.preExtractedInstanceNumbers)
     ? options.preExtractedInstanceNumbers : [];
@@ -1320,10 +1345,14 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
     };
   }
 
-  const extraction = extractWhatsAppPhoneFromWebhookDetailed(phoneOrPayload, {
+  const rawExtraction = extractWhatsAppPhoneFromWebhookDetailed(phoneOrPayload, {
     connectedNumbers: baseKnownInstanceNumbers,
     messageText: preExtractedText || normalizeText(text),
   });
+  const extraction =
+    preResolvedAuthorExtraction?.phone && !rawExtraction?.phone
+      ? preResolvedAuthorExtraction
+      : rawExtraction;
 
   const payloadInstanceNumbers = extractWhatsAppInstanceNumbersFromWebhook(phoneOrPayload, {
     connectedNumbers: baseKnownInstanceNumbers,
@@ -1576,11 +1605,24 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     }
 
     const greetingEvaluation = evaluateGreetingMessage(normalizedText);
+    let session = await getSession(normalizedPhone, barbershopId);
+    const sessionExpired = Boolean(session && isSessionExpired(session));
+
+    logGreetingEvaluation(
+      {
+        ...flowDebugBase,
+        barbershopId,
+      },
+      greetingEvaluation,
+      {
+        sessionState: session
+          ? (sessionExpired ? 'expired' : 'active')
+          : 'missing',
+      }
+    );
 
     if (greetingEvaluation.isGreeting) {
-      const existingSession = await getSession(normalizedPhone, barbershopId);
-
-      if (existingSession) {
+      if (session) {
         await deleteSession(normalizedPhone, barbershopId);
       }
 
@@ -1601,7 +1643,9 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
           greetingMatched: true,
           greetingRule: greetingEvaluation.rule,
           greetingCanonical: greetingEvaluation.canonicalGreeting,
-          hadActiveSession: Boolean(existingSession),
+          previousSessionState: session
+            ? (sessionExpired ? 'expired' : 'active')
+            : 'missing',
           decision: 'greeting_menu',
           sent,
         },
@@ -1611,37 +1655,47 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       return { ok: sent, ignored: false, reason: sent ? null : 'send_failed' };
     }
 
-    let session = await getSession(normalizedPhone, barbershopId);
-
-    if (!session || isSessionExpired(session)) {
-      if (session) {
+    if (!session || sessionExpired) {
+      if (sessionExpired) {
         await deleteSession(normalizedPhone, barbershopId);
-        await sendWhatsAppMessage(normalizedPhone,
-          config.session_expired_message || '⏰ Sua sessão expirou. Digite qualquer coisa para começar novamente.',
-          sendContext);
       }
-      await createSession(normalizedPhone, barbershopId);
-      const sent = await sendWhatsAppMessage(
-        normalizedPhone,
-        await buildContextualMenuMessage(barbershopId, businessSettings),
-        sendContext
-      );
 
       logger.info(
         {
           ...flowDebugBase,
           barbershopId,
-          decision: session ? 'session_expired_restarted' : 'session_created',
-          sent,
+          originalText: greetingEvaluation.originalText,
+          normalizedText: greetingEvaluation.normalizedText,
+          greetingMatched: false,
+          sessionState: sessionExpired ? 'expired' : 'missing',
+          decision: sessionExpired
+            ? 'session_expired_waiting_for_greeting'
+            : 'missing_session_waiting_for_greeting',
+          menuOpened: false,
         },
         'Decisao de fluxo WhatsApp aplicada'
       );
 
-      return { ok: sent, ignored: false, reason: sent ? null : 'send_failed' };
+      return {
+        ok: false,
+        ignored: true,
+        reason: sessionExpired ? 'session_expired_requires_greeting' : 'non_greeting_without_session',
+      };
     }
 
     const currentStep = session.step;
     const sessionData = typeof session.data === 'object' ? session.data : {};
+
+    logger.info(
+      {
+        ...flowDebugBase,
+        barbershopId,
+        step: currentStep,
+        sessionState: 'active',
+        decision: 'continue_active_session',
+      },
+      'Sessao ativa mantida no fluxo WhatsApp'
+    );
 
     logger.debug(
       {
@@ -1774,6 +1828,7 @@ export const handleWebhook = async (req, res) => {
       preExtractedPhone: extraction.phone,
       preExtractedText: text,
       preExtractedInstanceNumbers: extraction.instanceNumbers,
+      preResolvedAuthorExtraction: extraction,
       eventName,
     });
 

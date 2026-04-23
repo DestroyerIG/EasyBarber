@@ -97,6 +97,7 @@ describe('whatsappFlowService guards', () => {
       no_slots_message: 'Sem horarios disponiveis.',
       confirmation_message: 'Agendamento confirmado',
       session_expired_message: 'Sessao expirada',
+      end_session_message: 'Atendimento encerrado',
     });
     mockGetMenuOptions.mockResolvedValue([{ label: 'Agendar um horario', emoji: '💈' }]);
     mockGetBarbershopBusinessSettings.mockResolvedValue({
@@ -880,6 +881,124 @@ describe('whatsappFlowService guards', () => {
       expect.stringContaining('menu'),
       expect.any(Object)
     );
+  });
+
+  it.each([
+    ['ok'],
+    ['1'],
+  ])('nao abre menu automaticamente sem sessao quando recebe "%s"', async (input) => {
+    process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID = 'tenant-1';
+    mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: null });
+    mockIsWithinBusinessHours.mockReturnValue(true);
+    mockGetSession.mockResolvedValue(null);
+    mockPoolQuery.mockResolvedValue({ rows: [] });
+
+    const result = await handleIncomingMessage('5511777777777', input, {
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        ignored: true,
+        reason: 'non_greeting_without_session',
+      })
+    );
+    expect(mockCreateSession).not.toHaveBeenCalled();
+    expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
+  });
+
+  it('nao reabre menu automaticamente quando a sessao expirou e a nova mensagem nao e saudacao', async () => {
+    process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID = 'tenant-1';
+    mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: null });
+    mockIsWithinBusinessHours.mockReturnValue(true);
+    mockGetSession.mockResolvedValue({
+      step: 'menu',
+      data: {},
+    });
+    mockIsSessionExpired.mockReturnValue(true);
+
+    const result = await handleIncomingMessage('5511777777777', 'ok', {
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        ignored: true,
+        reason: 'session_expired_requires_greeting',
+      })
+    );
+    expect(mockDeleteSession).toHaveBeenCalledWith('5511777777777', 'tenant-1');
+    expect(mockCreateSession).not.toHaveBeenCalled();
+    expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
+  });
+
+  it('reabre menu com saudacao apos sessao expirada', async () => {
+    process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID = 'tenant-1';
+    mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: null });
+    mockIsWithinBusinessHours.mockReturnValue(true);
+    mockGetSession.mockResolvedValue({
+      step: 'menu',
+      data: {},
+    });
+    mockIsSessionExpired.mockReturnValue(true);
+    mockPoolQuery.mockImplementation(async (query) => {
+      if (typeof query === 'string' && query.includes('SELECT name FROM barbershops')) {
+        return { rows: [{ name: 'Barber Prime' }] };
+      }
+
+      return { rows: [] };
+    });
+
+    const result = await handleIncomingMessage('5511777777777', 'Oi', {
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: true, ignored: false }));
+    expect(mockDeleteSession).toHaveBeenCalledWith('5511777777777', 'tenant-1');
+    expect(mockCreateSession).toHaveBeenCalledWith('5511777777777', 'tenant-1');
+    expect(mockSendWhatsAppMessage).toHaveBeenCalledWith(
+      '5511777777777',
+      expect.stringContaining('menu'),
+      expect.any(Object)
+    );
+  });
+
+  it('encerra atendimento normalmente quando a sessao ativa escolhe a opcao de encerrar', async () => {
+    process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID = 'tenant-1';
+    mockGetWhatsAppStatus.mockReturnValue({ connectedNumber: null });
+    mockIsWithinBusinessHours.mockReturnValue(true);
+    mockGetSession.mockResolvedValue({
+      step: 'menu',
+      data: {},
+    });
+    mockIsSessionExpired.mockReturnValue(false);
+    mockPoolQuery.mockImplementation(async (query) => {
+      if (typeof query === 'string' && query.includes('FROM whatsapp_menu_options')) {
+        return {
+          rows: [{
+            handler: 'end_session',
+            type: 'system',
+            response_message: null,
+          }],
+        };
+      }
+
+      return { rows: [] };
+    });
+
+    const result = await handleIncomingMessage('5511777777777', '9', {
+      now: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: true, ignored: false }));
+    expect(mockSendWhatsAppMessage).toHaveBeenCalledWith(
+      '5511777777777',
+      expect.any(String),
+      expect.any(Object)
+    );
+    expect(mockDeleteSession).toHaveBeenCalledWith('5511777777777', 'tenant-1');
   });
 
   it('persiste agendamento via camada central com payload compativel quando auto confirmacao estiver desativada', async () => {
