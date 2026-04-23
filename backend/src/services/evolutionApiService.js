@@ -71,6 +71,54 @@ const parseWebhookEventsFromEnv = () => {
   return sanitizeWebhookEvents(raw.split(','));
 };
 
+const buildDesiredWebhookConfig = ({ instanceName = null, webhookUrl = null } = {}) => {
+  const config = getConfig({ instanceName, webhookUrl });
+
+  return {
+    instanceName: config.instanceName,
+    url: config.webhookUrl || '',
+    events: parseWebhookEventsFromEnv(),
+    webhook_by_events: true,
+    webhook_base64: false,
+    enabled: Boolean(config.webhookUrl),
+  };
+};
+
+const normalizeWebhookConfigSnapshot = (payload = {}) => {
+  const webhookNode =
+    payload?.webhook && typeof payload.webhook === 'object'
+      ? payload.webhook
+      : payload?.webhook?.webhook && typeof payload.webhook.webhook === 'object'
+        ? payload.webhook.webhook
+        : payload;
+
+  return {
+    enabled:
+      typeof webhookNode?.enabled === 'boolean'
+        ? webhookNode.enabled
+        : Boolean(webhookNode?.url),
+    url: typeof webhookNode?.url === 'string' ? webhookNode.url.trim() : '',
+    events: normalizeWebhookEvents(webhookNode?.events),
+    webhook_by_events:
+      typeof webhookNode?.webhook_by_events === 'boolean'
+        ? webhookNode.webhook_by_events
+        : null,
+    webhook_base64:
+      typeof webhookNode?.webhook_base64 === 'boolean'
+        ? webhookNode.webhook_base64
+        : null,
+  };
+};
+
+const areWebhookEventSetsEqual = (left = [], right = []) => {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const rightSet = new Set(right);
+  return left.every((eventName) => rightSet.has(eventName));
+};
+
 class EvolutionApiError extends Error {
   constructor(message, { status = null, details = null, code = 'EVOLUTION_API_ERROR' } = {}) {
     super(message);
@@ -643,6 +691,129 @@ export const getEvolutionConfig = (options = {}) => {
   };
 };
 
+export const getInstanceWebhook = async ({ instanceName = null } = {}) => {
+  const desiredConfig = buildDesiredWebhookConfig({ instanceName });
+
+  const payload = await requestWithFallback(
+    [
+      {
+        method: 'GET',
+        path: `/webhook/find/${desiredConfig.instanceName}`,
+        instanceName: desiredConfig.instanceName,
+      },
+    ],
+    'getInstanceWebhook'
+  );
+
+  return normalizeWebhookConfigSnapshot(payload);
+};
+
+export const setInstanceWebhook = async ({ instanceName = null, webhookUrl = null } = {}) => {
+  const desiredConfig = buildDesiredWebhookConfig({ instanceName, webhookUrl });
+
+  const payload = await requestWithFallback(
+    [
+      {
+        method: 'POST',
+        path: `/webhook/set/${desiredConfig.instanceName}`,
+        body: {
+          url: desiredConfig.url,
+          events: desiredConfig.events,
+          webhook_by_events: desiredConfig.webhook_by_events,
+          webhook_base64: desiredConfig.webhook_base64,
+        },
+        expectedStatuses: [200, 201],
+        instanceName: desiredConfig.instanceName,
+      },
+    ],
+    'setInstanceWebhook'
+  );
+
+  return normalizeWebhookConfigSnapshot(payload);
+};
+
+export const ensureInstanceWebhookConfig = async ({ instanceName = null, webhookUrl = null } = {}) => {
+  const desiredConfig = buildDesiredWebhookConfig({ instanceName, webhookUrl });
+
+  if (!desiredConfig.url) {
+    logger.warn(
+      {
+        instanceName: desiredConfig.instanceName,
+      },
+      'Reaplicacao de webhook da Evolution ignorada: EVOLUTION_WEBHOOK_URL ausente'
+    );
+
+    return {
+      ok: false,
+      skipped: true,
+      reason: 'missing_webhook_url',
+      current: null,
+      desired: desiredConfig,
+    };
+  }
+
+  let currentConfig = null;
+
+  try {
+    currentConfig = await getInstanceWebhook({ instanceName: desiredConfig.instanceName });
+  } catch (error) {
+    logger.warn(
+      {
+        err: error,
+        instanceName: desiredConfig.instanceName,
+      },
+      'Falha ao consultar webhook atual da instancia na Evolution'
+    );
+  }
+
+  const needsReapply =
+    !currentConfig ||
+    currentConfig.enabled !== desiredConfig.enabled ||
+    currentConfig.url !== desiredConfig.url ||
+    currentConfig.webhook_by_events !== desiredConfig.webhook_by_events ||
+    currentConfig.webhook_base64 !== desiredConfig.webhook_base64 ||
+    !areWebhookEventSetsEqual(currentConfig.events, desiredConfig.events);
+
+  if (!needsReapply) {
+    logger.info(
+      {
+        instanceName: desiredConfig.instanceName,
+        webhookUrl: desiredConfig.url,
+        webhookEvents: desiredConfig.events,
+      },
+      'Webhook da instancia Evolution ja corresponde a configuracao minima segura'
+    );
+
+    return {
+      ok: true,
+      reapplied: false,
+      current: currentConfig,
+      desired: desiredConfig,
+    };
+  }
+
+  logger.warn(
+    {
+      instanceName: desiredConfig.instanceName,
+      currentWebhookConfig: currentConfig,
+      desiredWebhookConfig: desiredConfig,
+    },
+    'Webhook da instancia Evolution diverge da configuracao minima segura; reaplicando'
+  );
+
+  const updatedConfig = await setInstanceWebhook({
+    instanceName: desiredConfig.instanceName,
+    webhookUrl: desiredConfig.url,
+  });
+
+  return {
+    ok: true,
+    reapplied: true,
+    current: updatedConfig,
+    desired: desiredConfig,
+  };
+};
+
 export const healthCheck = async () => {
   try {
     ensureConfigured();
@@ -663,9 +834,9 @@ export const healthCheck = async () => {
 
 export const createInstance = async ({ instanceName = null, webhookUrl = null } = {}) => {
   const config = getConfig({ instanceName, webhookUrl });
-  const webhookEvents = parseWebhookEventsFromEnv();
+  const desiredWebhookConfig = buildDesiredWebhookConfig({ instanceName, webhookUrl });
 
-  return requestWithFallback(
+  const payload = await requestWithFallback(
     [
       {
         method: 'POST',
@@ -674,10 +845,10 @@ export const createInstance = async ({ instanceName = null, webhookUrl = null } 
           instanceName: config.instanceName,
           integration: 'WHATSAPP-BAILEYS',
           qrcode: true,
-          webhook: config.webhookUrl || undefined,
-          webhook_by_events: true,
-          webhook_base64: false,
-          webhook_events: webhookEvents,
+          webhook: desiredWebhookConfig.url || undefined,
+          webhook_by_events: desiredWebhookConfig.webhook_by_events,
+          webhook_base64: desiredWebhookConfig.webhook_base64,
+          webhook_events: desiredWebhookConfig.events,
         },
         expectedStatuses: [200, 201, 403, 409],
         instanceName: config.instanceName,
@@ -685,6 +856,13 @@ export const createInstance = async ({ instanceName = null, webhookUrl = null } 
     ],
     'createInstance'
   );
+
+  await ensureInstanceWebhookConfig({
+    instanceName: config.instanceName,
+    webhookUrl: desiredWebhookConfig.url,
+  });
+
+  return payload;
 };
 
 export const connectInstance = async ({ instanceName = null } = {}) => {

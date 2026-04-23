@@ -310,6 +310,69 @@ describe('whatsapp webhook phone extraction', () => {
     expect(extraction.confidence).toBe('low');
   });
 
+  it('resolves @lid author from data.messages[0].message.key.participantPn when nested key metadata is present', () => {
+    const payload = {
+      event: 'messages-upsert',
+      sender: '558396311811@s.whatsapp.net',
+      data: {
+        messages: [
+          {
+            key: {
+              remoteJid: '236197968359561@lid',
+              fromMe: false,
+            },
+            message: {
+              conversation: 'Olá',
+              key: {
+                participantPn: '5583970011223',
+              },
+            },
+          },
+        ],
+      },
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload, {
+      connectedNumbers: ['558396311811'],
+    });
+
+    expect(extraction.phone).toBe('5583970011223');
+    expect(extraction.sourcePath).toBe('data.messages[0].message.key.participantPn');
+    expect(extraction.candidateType).toBe('numeric_fallback');
+  });
+
+  it('ignores nested message.key.fromMe=true before author extraction', () => {
+    const payload = {
+      event: 'messages-upsert',
+      data: {
+        messages: [
+          {
+            key: {
+              remoteJid: '5511999999999@s.whatsapp.net',
+            },
+            message: {
+              conversation: 'Olá',
+              key: {
+                fromMe: true,
+                participant: '5511999999999@s.whatsapp.net',
+              },
+            },
+          },
+        ],
+      },
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
+
+    expect(extraction.phone).toBeNull();
+    expect(extraction.fromMe).toBe(true);
+    expect(extraction.rejections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourcePath: 'fromMe', reason: 'self_message' }),
+      ])
+    );
+  });
+
   it('resolves direct remoteJid as real author even when sender diverges', () => {
     const payload = {
       key: {

@@ -411,7 +411,9 @@ const buildAuthorSignalShape = (payload = {}) => ({
   keyRemoteJid:
     payload?.key?.remoteJid ||
     payload?.data?.key?.remoteJid ||
+    payload?.data?.messages?.[0]?.message?.key?.remoteJid ||
     payload?.data?.messages?.[0]?.key?.remoteJid ||
+    payload?.messages?.[0]?.message?.key?.remoteJid ||
     payload?.messages?.[0]?.key?.remoteJid ||
     null,
   sender:
@@ -431,8 +433,10 @@ const buildAuthorSignalShape = (payload = {}) => ({
     payload?.key?.participant ||
     payload?.data?.participant ||
     payload?.data?.key?.participant ||
+    payload?.data?.messages?.[0]?.message?.key?.participant ||
     payload?.data?.messages?.[0]?.participant ||
     payload?.data?.messages?.[0]?.key?.participant ||
+    payload?.messages?.[0]?.message?.key?.participant ||
     payload?.messages?.[0]?.participant ||
     payload?.messages?.[0]?.key?.participant ||
     null,
@@ -543,7 +547,9 @@ const extractWebhookFromMe = (payload) => {
     payload?.key?.fromMe,
     payload?.data?.fromMe,
     payload?.data?.key?.fromMe,
+    payload?.data?.messages?.[0]?.message?.key?.fromMe,
     payload?.data?.messages?.[0]?.key?.fromMe,
+    payload?.messages?.[0]?.message?.key?.fromMe,
     payload?.messages?.[0]?.key?.fromMe,
   ];
 
