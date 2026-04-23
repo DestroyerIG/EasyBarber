@@ -186,6 +186,33 @@ const isWebhookBooleanTrue = (value) => {
   return normalized === 'true' || normalized === '1';
 };
 
+const isPlainObject = (value) =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const mergePlainObjects = (...values) => {
+  const plainValues = values.filter(isPlainObject);
+
+  if (!plainValues.length) {
+    return null;
+  }
+
+  const result = {};
+
+  for (const value of plainValues) {
+    for (const [key, currentValue] of Object.entries(value)) {
+      const existingValue = result[key];
+
+      if (isPlainObject(existingValue) && isPlainObject(currentValue)) {
+        result[key] = mergePlainObjects(existingValue, currentValue);
+      } else {
+        result[key] = currentValue;
+      }
+    }
+  }
+
+  return result;
+};
+
 const WEBHOOK_MESSAGE_WRAPPER_KEYS = [
   'ephemeralMessage',
   'viewOnceMessage',
@@ -380,6 +407,99 @@ const buildPayloadLogSummary = (payload = {}) => ({
     null,
 });
 
+const buildAuthorSignalShape = (payload = {}) => ({
+  keyRemoteJid:
+    payload?.key?.remoteJid ||
+    payload?.data?.key?.remoteJid ||
+    payload?.data?.messages?.[0]?.key?.remoteJid ||
+    payload?.messages?.[0]?.key?.remoteJid ||
+    null,
+  sender:
+    payload?.sender ||
+    payload?.data?.sender ||
+    payload?.data?.messages?.[0]?.sender ||
+    payload?.messages?.[0]?.sender ||
+    null,
+  from:
+    payload?.from ||
+    payload?.data?.from ||
+    payload?.data?.messages?.[0]?.from ||
+    payload?.messages?.[0]?.from ||
+    null,
+  participant:
+    payload?.participant ||
+    payload?.key?.participant ||
+    payload?.data?.participant ||
+    payload?.data?.key?.participant ||
+    payload?.data?.messages?.[0]?.participant ||
+    payload?.data?.messages?.[0]?.key?.participant ||
+    payload?.messages?.[0]?.participant ||
+    payload?.messages?.[0]?.key?.participant ||
+    null,
+  senderPn:
+    payload?.senderPn ||
+    payload?.key?.senderPn ||
+    payload?.data?.senderPn ||
+    payload?.data?.key?.senderPn ||
+    payload?.data?.messages?.[0]?.senderPn ||
+    payload?.data?.messages?.[0]?.key?.senderPn ||
+    payload?.messages?.[0]?.senderPn ||
+    payload?.messages?.[0]?.key?.senderPn ||
+    payload?.contextInfo?.senderPn ||
+    payload?.messageContextInfo?.senderPn ||
+    payload?.message?.contextInfo?.senderPn ||
+    payload?.message?.messageContextInfo?.senderPn ||
+    payload?.data?.contextInfo?.senderPn ||
+    payload?.data?.messageContextInfo?.senderPn ||
+    payload?.data?.message?.contextInfo?.senderPn ||
+    payload?.data?.message?.messageContextInfo?.senderPn ||
+    payload?.data?.messages?.[0]?.messageContextInfo?.senderPn ||
+    payload?.data?.messages?.[0]?.message?.messageContextInfo?.senderPn ||
+    payload?.messages?.[0]?.messageContextInfo?.senderPn ||
+    payload?.messages?.[0]?.message?.messageContextInfo?.senderPn ||
+    null,
+  participantPn:
+    payload?.participantPn ||
+    payload?.key?.participantPn ||
+    payload?.data?.participantPn ||
+    payload?.data?.key?.participantPn ||
+    payload?.data?.messages?.[0]?.participantPn ||
+    payload?.data?.messages?.[0]?.key?.participantPn ||
+    payload?.messages?.[0]?.participantPn ||
+    payload?.messages?.[0]?.key?.participantPn ||
+    payload?.contextInfo?.participantPn ||
+    payload?.messageContextInfo?.participantPn ||
+    payload?.message?.contextInfo?.participantPn ||
+    payload?.message?.messageContextInfo?.participantPn ||
+    payload?.data?.contextInfo?.participantPn ||
+    payload?.data?.messageContextInfo?.participantPn ||
+    payload?.data?.message?.contextInfo?.participantPn ||
+    payload?.data?.message?.messageContextInfo?.participantPn ||
+    payload?.data?.messages?.[0]?.messageContextInfo?.participantPn ||
+    payload?.data?.messages?.[0]?.message?.messageContextInfo?.participantPn ||
+    payload?.messages?.[0]?.messageContextInfo?.participantPn ||
+    payload?.messages?.[0]?.message?.messageContextInfo?.participantPn ||
+    null,
+  hasContextInfo: Boolean(
+    payload?.contextInfo ||
+    payload?.message?.contextInfo ||
+    payload?.data?.contextInfo ||
+    payload?.data?.message?.contextInfo ||
+    payload?.data?.messages?.[0]?.message?.contextInfo ||
+    payload?.messages?.[0]?.message?.contextInfo
+  ),
+  hasMessageContextInfo: Boolean(
+    payload?.messageContextInfo ||
+    payload?.message?.messageContextInfo ||
+    payload?.data?.messageContextInfo ||
+    payload?.data?.message?.messageContextInfo ||
+    payload?.data?.messages?.[0]?.messageContextInfo ||
+    payload?.data?.messages?.[0]?.message?.messageContextInfo ||
+    payload?.messages?.[0]?.messageContextInfo ||
+    payload?.messages?.[0]?.message?.messageContextInfo
+  ),
+});
+
 const logWebhookReceipt = ({ req, route, eventName = null, payload = {}, parseError = null, bodyType = null }) => {
   logger.info(
     {
@@ -444,13 +564,29 @@ const normalizeWebhookEventPayload = (payload = {}, forcedEvent = null) => {
   const messageNode = dataUpsertMessage || rootUpsertMessage || dataMessage;
 
   const key =
+    mergePlainObjects(
+      payload?.key,
+      payload?.message?.key,
+      dataNode?.key,
+      dataMessage?.key,
+      messageNode?.key
+    ) ||
     messageNode?.key ||
     payload?.key ||
     payload?.message?.key ||
     dataNode?.key ||
     null;
 
+  const mergedMessage =
+    mergePlainObjects(
+      isPlainObject(payload?.message) ? payload.message : null,
+      isPlainObject(dataNode?.message) ? dataNode.message : null,
+      isPlainObject(dataMessage) ? dataMessage : null,
+      isPlainObject(messageNode?.message) ? messageNode.message : null
+    );
+
   const message =
+    mergedMessage ||
     messageNode?.message ||
     payload?.message ||
     dataNode?.message ||
@@ -489,6 +625,20 @@ const normalizeWebhookEventPayload = (payload = {}, forcedEvent = null) => {
     ...(messageNode || {}),
     key: key || undefined,
     message: message || undefined,
+    contextInfo:
+      mergePlainObjects(
+        payload?.contextInfo,
+        dataNode?.contextInfo,
+        messageNode?.contextInfo,
+        message?.contextInfo
+      ) || undefined,
+    messageContextInfo:
+      mergePlainObjects(
+        payload?.messageContextInfo,
+        dataNode?.messageContextInfo,
+        messageNode?.messageContextInfo,
+        message?.messageContextInfo
+      ) || undefined,
     // Restaurar sender e from após o spread para evitar contaminação
     sender: resolvedSender,
     from: resolvedFrom,
@@ -507,6 +657,74 @@ const normalizeWebhookEventPayload = (payload = {}, forcedEvent = null) => {
       dataNode?.event ||
       forcedEvent ||
       null,
+  };
+};
+
+const getConfidenceRank = (value) => {
+  switch (value) {
+    case 'high':
+      return 3;
+    case 'medium':
+      return 2;
+    case 'low':
+      return 1;
+    default:
+      return 0;
+  }
+};
+
+const selectAuthorExtraction = (normalizedExtraction, rawExtraction = null) => {
+  if (!rawExtraction) {
+    return normalizedExtraction;
+  }
+
+  if (!normalizedExtraction?.authorPhone && rawExtraction?.authorPhone) {
+    return rawExtraction;
+  }
+
+  if (normalizedExtraction?.authorPhone && !rawExtraction?.authorPhone) {
+    return normalizedExtraction;
+  }
+
+  if (!normalizedExtraction?.authorPhone && !rawExtraction?.authorPhone) {
+    return normalizedExtraction;
+  }
+
+  if (normalizedExtraction.authorPhone === rawExtraction.authorPhone) {
+    return getConfidenceRank(rawExtraction.confidence) > getConfidenceRank(normalizedExtraction.confidence)
+      ? rawExtraction
+      : normalizedExtraction;
+  }
+
+  return {
+    ...normalizedExtraction,
+    authorPhone: null,
+    sourcePath: null,
+    candidateType: null,
+    confidence: 'none',
+    resolutionRule: null,
+    candidates: [
+      ...(Array.isArray(normalizedExtraction?.candidates) ? normalizedExtraction.candidates : []),
+      ...(Array.isArray(rawExtraction?.candidates)
+        ? rawExtraction.candidates.map((candidate) => ({
+            ...candidate,
+            sourcePath: candidate?.sourcePath ? `raw.${candidate.sourcePath}` : 'raw',
+          }))
+        : []),
+    ],
+    rejections: [
+      ...(Array.isArray(normalizedExtraction?.rejections) ? normalizedExtraction.rejections : []),
+      ...(Array.isArray(rawExtraction?.rejections)
+        ? rawExtraction.rejections.map((item) => ({
+            ...item,
+            sourcePath: item?.sourcePath ? `raw.${item.sourcePath}` : 'raw',
+          }))
+        : []),
+      {
+        sourcePath: 'raw_vs_normalized',
+        reason: 'ambiguous_author_between_payload_shapes',
+      },
+    ],
   };
 };
 
@@ -570,7 +788,15 @@ const mapWebhookIncomingMessage = (payload) => {
       messageText: text,
     }
   );
-  const extractedPhone = extraction.authorPhone;
+  const rawExtraction = resolveIncomingAuthor(
+    payload,
+    {
+      ...buildWebhookPhoneExtractionOptions(),
+      messageText: text,
+    }
+  );
+  const resolvedExtraction = selectAuthorExtraction(extraction, rawExtraction);
+  const extractedPhone = resolvedExtraction.authorPhone;
 
   if (!extractedPhone) {
     logger.warn(
@@ -578,20 +804,24 @@ const mapWebhookIncomingMessage = (payload) => {
         event: eventName,
         text: text || null,
         authorPhone: null,
-        sourcePath: extraction.sourcePath,
-        confidence: extraction.confidence,
-        resolutionRule: extraction.resolutionRule,
-        remoteJidOriginal: extraction.remoteJidOriginal,
+        sourcePath: resolvedExtraction.sourcePath,
+        confidence: resolvedExtraction.confidence,
+        resolutionRule: resolvedExtraction.resolutionRule,
+        remoteJidOriginal: resolvedExtraction.remoteJidOriginal,
         keyRemoteJid: normalizedPayload?.key?.remoteJid || null,
         messageKeyRemoteJid: normalizedPayload?.message?.key?.remoteJid || null,
-        sender: extraction.sender || normalizedPayload?.sender || null,
-        participant: extraction.participant || normalizedPayload?.participant || null,
-        fromMe: extraction.fromMe,
+        sender: resolvedExtraction.sender || normalizedPayload?.sender || null,
+        participant: resolvedExtraction.participant || normalizedPayload?.participant || null,
+        fromMe: resolvedExtraction.fromMe,
         from: normalizedPayload?.from || null,
-        authorCandidates: extraction.candidates,
-        extractionRejections: extraction.rejections,
-        instanceNumbers: extraction.instanceNumbers,
+        authorCandidates: resolvedExtraction.candidates,
+        extractionRejections: resolvedExtraction.rejections,
+        instanceNumbers: resolvedExtraction.instanceNumbers,
         instanceName: normalizedPayload?.instanceName || null,
+        authorSignalComparison: {
+          raw: buildAuthorSignalShape(payload),
+          normalized: buildAuthorSignalShape(normalizedPayload),
+        },
         payloadSummary: buildPayloadLogSummary(normalizedPayload),
       },
       'Webhook ignorado: messages-upsert sem telefone extraivel'
@@ -603,9 +833,9 @@ const mapWebhookIncomingMessage = (payload) => {
     logger.debug(
       {
         event: eventName,
-        authorPhone: extraction.authorPhone,
-        sourcePath: extraction.sourcePath,
-        remoteJidOriginal: extraction.remoteJidOriginal,
+        authorPhone: resolvedExtraction.authorPhone,
+        sourcePath: resolvedExtraction.sourcePath,
+        remoteJidOriginal: resolvedExtraction.remoteJidOriginal,
       },
       'Webhook ignorado: mensagem sem texto'
     );
@@ -616,15 +846,19 @@ const mapWebhookIncomingMessage = (payload) => {
     {
       event: eventName,
       text,
-      authorPhone: extraction.authorPhone,
-      sourcePath: extraction.sourcePath,
-      confidence: extraction.confidence,
-      resolutionRule: extraction.resolutionRule,
-      remoteJidOriginal: extraction.remoteJidOriginal,
+      authorPhone: resolvedExtraction.authorPhone,
+      sourcePath: resolvedExtraction.sourcePath,
+      confidence: resolvedExtraction.confidence,
+      resolutionRule: resolvedExtraction.resolutionRule,
+      remoteJidOriginal: resolvedExtraction.remoteJidOriginal,
       instanceName: normalizedPayload?.instanceName || null,
-      sender: extraction.sender || normalizedPayload?.sender || null,
-      participant: extraction.participant || normalizedPayload?.participant || null,
-      fromMe: extraction.fromMe,
+      sender: resolvedExtraction.sender || normalizedPayload?.sender || null,
+      participant: resolvedExtraction.participant || normalizedPayload?.participant || null,
+      fromMe: resolvedExtraction.fromMe,
+      authorSignalComparison: {
+        raw: buildAuthorSignalShape(payload),
+        normalized: buildAuthorSignalShape(normalizedPayload),
+      },
     },
     'AUTOR RESOLVIDO'
   );
@@ -632,15 +866,15 @@ const mapWebhookIncomingMessage = (payload) => {
   logger.info(
     {
       event: eventName,
-      authorPhone: extraction.authorPhone,
-      sourcePath: extraction.sourcePath,
-      confidence: extraction.confidence,
-      resolutionRule: extraction.resolutionRule,
-      remoteJidOriginal: extraction.remoteJidOriginal,
+      authorPhone: resolvedExtraction.authorPhone,
+      sourcePath: resolvedExtraction.sourcePath,
+      confidence: resolvedExtraction.confidence,
+      resolutionRule: resolvedExtraction.resolutionRule,
+      remoteJidOriginal: resolvedExtraction.remoteJidOriginal,
       instanceName: normalizedPayload?.instanceName || null,
-      sender: extraction.sender || normalizedPayload?.sender || null,
-      participant: extraction.participant || normalizedPayload?.participant || null,
-      fromMe: extraction.fromMe,
+      sender: resolvedExtraction.sender || normalizedPayload?.sender || null,
+      participant: resolvedExtraction.participant || normalizedPayload?.participant || null,
+      fromMe: resolvedExtraction.fromMe,
     },
     'Autor da mensagem WhatsApp resolvido'
   );
@@ -650,7 +884,7 @@ const mapWebhookIncomingMessage = (payload) => {
     eventName,
     extractedPhone,
     extractedText: text,
-    extraction,
+    extraction: resolvedExtraction,
   };
 };
 
