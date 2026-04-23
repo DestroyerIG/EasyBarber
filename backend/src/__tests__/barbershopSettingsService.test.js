@@ -121,6 +121,7 @@ describe('barbershopSettingsService.updateAccountProfile', () => {
         whatsapp: '11998765432',
         cpfCnpj: '70596090404',
         email: 'novo@email.com',
+        emailChanged: true,
       },
       dbClient
     );
@@ -163,6 +164,7 @@ describe('barbershopSettingsService.updateAccountProfile', () => {
       expect.objectContaining({
         whatsapp: '11999998888',
         email: 'atual@email.com',
+        emailChanged: false,
       }),
       dbClient
     );
@@ -189,6 +191,7 @@ describe('barbershopSettingsService.updateAccountProfile', () => {
       'user-1',
       expect.objectContaining({
         email: 'atual@email.com',
+        emailChanged: false,
       }),
       dbClient
     );

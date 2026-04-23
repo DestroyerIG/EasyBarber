@@ -255,40 +255,62 @@ class BarbershopSettingsRepository extends BaseRepository {
   }
 
   async updateAccountProfile(barbershopId, userId, payload, executor = this.pool) {
-    const barbershopResult = await executor.query(
-      `UPDATE barbershops
-       SET name = $3,
-           owner_name = $4,
-           whatsapp = $5,
-           cpf_cnpj = $6,
-           email = $7,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1
-         AND active = true
-         AND EXISTS (
-           SELECT 1
-           FROM users u
-           WHERE u.id = $2
-             AND u.barbershop_id = $1
-             AND u.blocked = false
-         )
-       RETURNING id`,
-      [barbershopId, userId, payload.barbershopName, payload.ownerName, payload.whatsapp, payload.cpfCnpj, payload.email]
-    );
+    const shouldUpdateEmail = payload.emailChanged === true;
+    const barbershopQuery = shouldUpdateEmail
+      ? `UPDATE barbershops
+         SET name = $3,
+             owner_name = $4,
+             whatsapp = $5,
+             cpf_cnpj = $6,
+             email = $7,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+           AND active = true
+           AND EXISTS (
+             SELECT 1
+             FROM users u
+             WHERE u.id = $2
+               AND u.barbershop_id = $1
+               AND u.blocked = false
+           )
+         RETURNING id`
+      : `UPDATE barbershops
+         SET name = $3,
+             owner_name = $4,
+             whatsapp = $5,
+             cpf_cnpj = $6,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+           AND active = true
+           AND EXISTS (
+             SELECT 1
+             FROM users u
+             WHERE u.id = $2
+               AND u.barbershop_id = $1
+               AND u.blocked = false
+           )
+         RETURNING id`;
+    const barbershopParams = shouldUpdateEmail
+      ? [barbershopId, userId, payload.barbershopName, payload.ownerName, payload.whatsapp, payload.cpfCnpj, payload.email]
+      : [barbershopId, userId, payload.barbershopName, payload.ownerName, payload.whatsapp, payload.cpfCnpj];
+
+    const barbershopResult = await executor.query(barbershopQuery, barbershopParams);
 
     if (barbershopResult.rowCount === 0) {
       return null;
     }
 
-    await executor.query(
-      `UPDATE users
-       SET email = $3,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2
-         AND barbershop_id = $1
-         AND blocked = false`,
-      [barbershopId, userId, payload.email]
-    );
+    if (shouldUpdateEmail) {
+      await executor.query(
+        `UPDATE users
+         SET email = $3,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2
+           AND barbershop_id = $1
+           AND blocked = false`,
+        [barbershopId, userId, payload.email]
+      );
+    }
 
     return this.findAccountProfileByUserId(barbershopId, userId, executor);
   }

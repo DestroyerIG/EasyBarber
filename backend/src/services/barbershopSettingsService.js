@@ -71,6 +71,19 @@ const summarizeUserForLog = (user) => ({
 });
 
 const isUniqueViolation = (error) => error?.code === '23505';
+const EMAIL_UNIQUE_CONSTRAINTS = new Set([
+  'users_email_key',
+  'barbershops_email_key',
+]);
+
+const isEmailUniqueViolation = (error) => {
+  if (!isUniqueViolation(error)) {
+    return false;
+  }
+
+  const constraint = String(error?.constraint || '').trim();
+  return EMAIL_UNIQUE_CONSTRAINTS.has(constraint);
+};
 
 const isMissingColumnError = (error) => error?.code === '42703';
 
@@ -255,9 +268,34 @@ export const barbershopSettingsService = {
     const currentEmailNormalized = normalizeEmail(currentUser.email);
     const emailChanged = normalizedPayload.email !== currentEmailNormalized;
 
+    logger.info(
+      {
+        operation: 'updateAccountProfile',
+        stage: 'compare_email_state',
+        currentUserId: currentUser.userId || userId,
+        currentEmailNormalized: maskEmailForLog(currentEmailNormalized),
+        nextEmailNormalized: maskEmailForLog(normalizedPayload.email),
+        emailChanged,
+      },
+      'Estado do e-mail comparado antes da validacao de conflito'
+    );
+
     if (emailChanged) {
       currentStage.value = 'check_email_conflict';
       const conflictingUser = await authRepository.findOtherUserByEmail(normalizedPayload.email, userId);
+
+      logger.info(
+        {
+          operation: 'updateAccountProfile',
+          stage: currentStage.value,
+          currentUserId: currentUser.userId || userId,
+          currentEmailNormalized: maskEmailForLog(currentEmailNormalized),
+          nextEmailNormalized: maskEmailForLog(normalizedPayload.email),
+          emailChanged,
+          conflictUserId: conflictingUser?.id || null,
+        },
+        'Resultado da validacao de unicidade do e-mail'
+      );
 
       if (conflictingUser) {
         throw new ConflictError('Este e-mail já está em uso por outra conta.');
@@ -281,7 +319,10 @@ export const barbershopSettingsService = {
       const updatedProfile = await barbershopSettingsRepository.updateAccountProfile(
         barbershopId,
         userId,
-        normalizedPayload,
+        {
+          ...normalizedPayload,
+          emailChanged,
+        },
         client
       );
 
@@ -353,7 +394,7 @@ export const barbershopSettingsService = {
         }
       }
 
-      if (isUniqueViolation(error)) {
+      if (isEmailUniqueViolation(error)) {
         throw new ConflictError('Este e-mail já está em uso por outra conta.');
       }
 
