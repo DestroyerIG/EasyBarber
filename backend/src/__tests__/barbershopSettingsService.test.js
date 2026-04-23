@@ -3,7 +3,7 @@ import { jest, describe, it, beforeEach, expect } from '@jest/globals';
 const mockFindAccountUserById = jest.fn();
 const mockFindAccountProfileByUserId = jest.fn();
 const mockUpdateAccountProfile = jest.fn();
-const mockFindAnyUserByEmail = jest.fn();
+const mockFindOtherUserByEmail = jest.fn();
 const mockGetClient = jest.fn();
 const mockUpdateUserEmailById = jest.fn();
 
@@ -17,7 +17,7 @@ jest.unstable_mockModule('../repositories/barbershopSettingsRepository.js', () =
 
 jest.unstable_mockModule('../repositories/authRepository.js', () => ({
   authRepository: {
-    findAnyUserByEmail: mockFindAnyUserByEmail,
+    findOtherUserByEmail: mockFindOtherUserByEmail,
     getClient: mockGetClient,
   },
 }));
@@ -81,7 +81,7 @@ describe('barbershopSettingsService.updateAccountProfile', () => {
       email: 'atual@email.com',
     });
 
-    mockFindAnyUserByEmail.mockResolvedValue(null);
+    mockFindOtherUserByEmail.mockResolvedValue(null);
     mockUpdateUserEmailById.mockResolvedValue({
       userId: 'sb-user-1',
       email: 'novo@email.com',
@@ -110,7 +110,7 @@ describe('barbershopSettingsService.updateAccountProfile', () => {
 
     const result = await barbershopSettingsService.updateAccountProfile(baseAuthUser, basePayload);
 
-    expect(mockFindAnyUserByEmail).toHaveBeenCalledWith('novo@email.com');
+    expect(mockFindOtherUserByEmail).toHaveBeenCalledWith('novo@email.com', 'user-1');
     expect(mockUpdateUserEmailById).toHaveBeenCalledWith('sb-user-1', 'novo@email.com');
     expect(mockUpdateAccountProfile).toHaveBeenCalledWith(
       'shop-1',
@@ -134,8 +134,68 @@ describe('barbershopSettingsService.updateAccountProfile', () => {
     );
   });
 
+  it('salva normalmente quando apenas outros campos mudam e o e-mail permanece igual', async () => {
+    const dbClient = {
+      query: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn(),
+    };
+
+    mockGetClient.mockResolvedValue(dbClient);
+    mockUpdateAccountProfile.mockResolvedValue({
+      barbershopName: 'Barbearia Central',
+      ownerName: 'Joao da Silva',
+      whatsapp: '11999998888',
+      cpfCnpj: '70596090404',
+      email: 'atual@email.com',
+    });
+
+    const result = await barbershopSettingsService.updateAccountProfile(baseAuthUser, {
+      ...basePayload,
+      whatsapp: '(11) 99999-8888',
+      email: '  atual@email.com  ',
+    });
+
+    expect(mockFindOtherUserByEmail).not.toHaveBeenCalled();
+    expect(mockUpdateUserEmailById).not.toHaveBeenCalled();
+    expect(mockUpdateAccountProfile).toHaveBeenCalledWith(
+      'shop-1',
+      'user-1',
+      expect.objectContaining({
+        whatsapp: '11999998888',
+        email: 'atual@email.com',
+      }),
+      dbClient
+    );
+    expect(result.profile.email).toBe('atual@email.com');
+  });
+
+  it('trata como mesmo e-mail quando muda apenas casing', async () => {
+    const dbClient = {
+      query: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn(),
+    };
+
+    mockGetClient.mockResolvedValue(dbClient);
+
+    await barbershopSettingsService.updateAccountProfile(baseAuthUser, {
+      ...basePayload,
+      email: '  ATUAL@EMAIL.COM ',
+    });
+
+    expect(mockFindOtherUserByEmail).not.toHaveBeenCalled();
+    expect(mockUpdateUserEmailById).not.toHaveBeenCalled();
+    expect(mockUpdateAccountProfile).toHaveBeenCalledWith(
+      'shop-1',
+      'user-1',
+      expect.objectContaining({
+        email: 'atual@email.com',
+      }),
+      dbClient
+    );
+  });
+
   it('retorna 409 quando o e-mail já pertence a outro usuário', async () => {
-    mockFindAnyUserByEmail.mockResolvedValue({
+    mockFindOtherUserByEmail.mockResolvedValue({
       id: 'user-2',
       email: 'novo@email.com',
     });

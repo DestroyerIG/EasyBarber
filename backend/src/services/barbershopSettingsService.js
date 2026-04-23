@@ -252,13 +252,14 @@ export const barbershopSettingsService = {
       throw new NotFoundError('Conta');
     }
 
-    const emailChanged = normalizedPayload.email !== currentUser.email;
+    const currentEmailNormalized = normalizeEmail(currentUser.email);
+    const emailChanged = normalizedPayload.email !== currentEmailNormalized;
 
     if (emailChanged) {
       currentStage.value = 'check_email_conflict';
-      const conflictingUser = await authRepository.findAnyUserByEmail(normalizedPayload.email);
+      const conflictingUser = await authRepository.findOtherUserByEmail(normalizedPayload.email, userId);
 
-      if (conflictingUser && conflictingUser.id !== userId) {
+      if (conflictingUser) {
         throw new ConflictError('Este e-mail já está em uso por outra conta.');
       }
     }
@@ -328,13 +329,13 @@ export const barbershopSettingsService = {
 
       if (supabaseEmailUpdated && currentUser.supabaseUserId) {
         try {
-          await supabaseAuthService.updateUserEmailById(currentUser.supabaseUserId, currentUser.email);
+          await supabaseAuthService.updateUserEmailById(currentUser.supabaseUserId, currentEmailNormalized);
           logger.warn(
             {
               operation: 'updateAccountProfile',
               stage: 'compensate_supabase_email',
               authUser: summarizeUserForLog({ barbershopId, userId, role }),
-              restoredEmail: maskEmailForLog(currentUser.email),
+              restoredEmail: maskEmailForLog(currentEmailNormalized),
             },
             'E-mail do Supabase restaurado apos falha no banco local'
           );
@@ -345,7 +346,7 @@ export const barbershopSettingsService = {
               operation: 'updateAccountProfile',
               stage: 'compensate_supabase_email',
               authUser: summarizeUserForLog({ barbershopId, userId, role }),
-              attemptedRestoreEmail: maskEmailForLog(currentUser.email),
+              attemptedRestoreEmail: maskEmailForLog(currentEmailNormalized),
             },
             'Falha ao restaurar e-mail no Supabase apos erro local'
           );

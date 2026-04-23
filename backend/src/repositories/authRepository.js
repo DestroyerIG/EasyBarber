@@ -254,6 +254,45 @@ export const authRepository = {
     }
   },
 
+  async findOtherUserByEmail(email, excludedUserId) {
+    try {
+      const result = await pool.query(
+        `SELECT u.id, u.email, u.barbershop_id, u.blocked,
+                u.email_verified, u.email_verified_at,
+                u.supabase_user_id, u.auth_provider,
+                b.active as barbershop_active
+         FROM users u
+         JOIN barbershops b ON u.barbershop_id = b.id
+         WHERE LOWER(u.email) = LOWER($1)
+           AND u.id <> $2
+         LIMIT 1`,
+        [email, excludedUserId]
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code !== '42703') {
+        throw error;
+      }
+
+      const legacyResult = await pool.query(
+        `SELECT u.id, u.email, u.barbershop_id, u.blocked,
+                u.email_verified, u.email_verified_at,
+                NULL::UUID as supabase_user_id,
+                'legacy'::VARCHAR as auth_provider,
+                b.active as barbershop_active
+         FROM users u
+         JOIN barbershops b ON u.barbershop_id = b.id
+         WHERE LOWER(u.email) = LOWER($1)
+           AND u.id <> $2
+         LIMIT 1`,
+        [email, excludedUserId]
+      );
+
+      return legacyResult.rows[0] || null;
+    }
+  },
+
   async findUserByEmailForSync(client, email) {
     const result = await client.query(
       `SELECT id, email, barbershop_id
