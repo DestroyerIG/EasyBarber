@@ -10,6 +10,11 @@ import {
 } from '@/lib/supabase/client';
 
 type Status = 'loading' | 'ready' | 'success' | 'error';
+const MIN_PASSWORD_LENGTH = 6;
+
+const readAuthParam = (searchParams: URLSearchParams, hashParams: URLSearchParams, key: string) => {
+  return searchParams.get(key) || hashParams.get(key);
+};
 
 export function ResetPasswordView() {
   const router = useRouter();
@@ -40,12 +45,11 @@ export function ResetPasswordView() {
           : window.location.hash;
         const hashParams = new URLSearchParams(hash);
 
-        const accessToken = hashParams.get('access_token');
-        const refreshToken = hashParams.get('refresh_token');
-        const type = hashParams.get('type');
-        const authCode = searchParams.get('code');
-        const tokenHash = searchParams.get('token_hash');
-        const otpType = searchParams.get('type');
+        const accessToken = readAuthParam(searchParams, hashParams, 'access_token');
+        const refreshToken = readAuthParam(searchParams, hashParams, 'refresh_token');
+        const type = readAuthParam(searchParams, hashParams, 'type');
+        const authCode = readAuthParam(searchParams, hashParams, 'code');
+        const tokenHash = readAuthParam(searchParams, hashParams, 'token_hash');
 
         if (type === 'recovery' && accessToken && refreshToken) {
           const { error } = await supabase.auth.setSession({
@@ -62,7 +66,7 @@ export function ResetPasswordView() {
           if (error) {
             throw error;
           }
-        } else if (otpType === 'recovery' && tokenHash) {
+        } else if (type === 'recovery' && tokenHash) {
           const { error } = await supabase.auth.verifyOtp({
             token_hash: tokenHash,
             type: 'recovery',
@@ -110,9 +114,9 @@ export function ResetPasswordView() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (password.length < 6) {
+    if (password.length < MIN_PASSWORD_LENGTH) {
       setStatus('error');
-      setMessage('A nova senha precisa ter pelo menos 6 caracteres.');
+      setMessage(`A nova senha precisa ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres.`);
       return;
     }
 
@@ -185,6 +189,7 @@ export function ResetPasswordView() {
                 onChange={(event) => setPassword(event.target.value)}
                 className="input mt-2"
                 placeholder="Digite a nova senha"
+                minLength={MIN_PASSWORD_LENGTH}
                 required
               />
             </div>
@@ -203,6 +208,7 @@ export function ResetPasswordView() {
                 onChange={(event) => setConfirmPassword(event.target.value)}
                 className="input mt-2"
                 placeholder="Repita a nova senha"
+                minLength={MIN_PASSWORD_LENGTH}
                 required
               />
             </div>

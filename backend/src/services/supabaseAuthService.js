@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { AppError, UnauthorizedError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
@@ -211,10 +210,6 @@ const resolveEmailRedirectTo = () => {
   return new URL('/auth/confirm', `${resolveFrontendBaseUrl()}/`).toString().replace(/\/$/, '');
 };
 
-const buildSyntheticPassword = () => {
-  return `${crypto.randomBytes(32).toString('base64url')}Aa1!`;
-};
-
 const buildOtpTypeCandidates = (requestedType) => {
   const normalizedType = String(requestedType || '').trim().toLowerCase();
   const candidates = [normalizedType, 'email', 'signup'];
@@ -407,6 +402,26 @@ const summarizeSupabaseResendResult = (data) => {
   };
 };
 
+const isSupabaseUserEmailConfirmed = (user) => Boolean(
+  user?.email_confirmed_at ||
+  user?.confirmed_at
+);
+
+const mapSupabaseUser = (user, fallbackEmail = null) => {
+  if (!user || typeof user !== 'object') {
+    return null;
+  }
+
+  return {
+    id: user.id || null,
+    email: normalizeEmail(user.email || fallbackEmail || ''),
+    email_confirmed_at: user.email_confirmed_at || null,
+    confirmed_at: user.confirmed_at || null,
+    confirmation_sent_at: user.confirmation_sent_at || null,
+    raw: user,
+  };
+};
+
 export const supabaseAuthService = {
   resolveEmailRedirectTo,
 
@@ -462,6 +477,7 @@ export const supabaseAuthService = {
       emailVerified: Boolean(confirmedAt),
       emailVerifiedAt: confirmedAt,
       sessionExpiresAt: data?.session?.expires_at || null,
+      user: mapSupabaseUser(data?.user, normalizedEmail),
     };
   },
 
@@ -520,13 +536,15 @@ export const supabaseAuthService = {
       email,
       emailVerified: Boolean(confirmedAt),
       verifiedAt: confirmedAt || new Date().toISOString(),
+      user: mapSupabaseUser(data?.user, email),
     };
   },
 
-  async signUpForEmailVerification(email) {
+  async signUpForEmailVerification(email, password) {
     const normalizedEmail = normalizeEmail(email);
+    const normalizedPassword = String(password || '');
 
-    if (!normalizedEmail) {
+    if (!normalizedEmail || !normalizedPassword) {
       throw new AppError('Email inválido para cadastro externo.', 400, 'INVALID_EMAIL');
     }
 
@@ -543,7 +561,7 @@ export const supabaseAuthService = {
         },
         () => client.auth.signUp({
           email: normalizedEmail,
-          password: buildSyntheticPassword(),
+          password: normalizedPassword,
           options: {
             emailRedirectTo: resolveEmailRedirectTo(),
             data: {
@@ -565,7 +583,97 @@ export const supabaseAuthService = {
       userId: data?.user?.id || null,
       email: data?.user?.email || normalizedEmail,
       verificationEmailSent: true,
+      user: mapSupabaseUser(data?.user, normalizedEmail),
     };
+  },
+
+  async getUserById(userId) {
+    if (!userId) {
+      throw new AppError('Usuário Supabase inválido.', 400, 'INVALID_SUPABASE_USER');
+    }
+
+    const client = getSupabaseAdminClient();
+    let data;
+    let error;
+
+    try {
+      ({ data, error } = await runSupabaseOperation(
+        {
+          operation: 'getSupabaseUserById',
+          context: { userId },
+        },
+        () => client.auth.admin.getUserById(userId)
+      ));
+    } catch (operationError) {
+      throw mapSupabaseError(operationError, 'Não foi possível consultar o usuário no Supabase Auth.');
+    }
+
+    if (error) {
+      throw mapSupabaseError(error, 'Não foi possível consultar o usuário no Supabase Auth.');
+    }
+
+    const user = mapSupabaseUser(data?.user);
+
+    return user
+      ? {
+          ...user,
+          emailVerified: isSupabaseUserEmailConfirmed(user),
+        }
+      : null;
+  },
+
+  async getUserByEmail(email) {
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!normalizedEmail) {
+      throw new AppError('Email inválido para consulta no Supabase Auth.', 400, 'INVALID_EMAIL');
+    }
+
+    const client = getSupabaseAdminClient();
+    let page = 1;
+    const perPage = 200;
+
+    while (page <= 50) {
+      let data;
+      let error;
+
+      try {
+        ({ data, error } = await runSupabaseOperation(
+          {
+            operation: 'getSupabaseUserByEmail',
+            context: { email: normalizedEmail, page, perPage },
+          },
+          () => client.auth.admin.listUsers({ page, perPage })
+        ));
+      } catch (operationError) {
+        throw mapSupabaseError(operationError, 'Não foi possível consultar o usuário no Supabase Auth.');
+      }
+
+      if (error) {
+        throw mapSupabaseError(error, 'Não foi possível consultar o usuário no Supabase Auth.');
+      }
+
+      const matchedUser = Array.isArray(data?.users)
+        ? data.users.find((candidate) => normalizeEmail(candidate?.email || '') === normalizedEmail)
+        : null;
+
+      if (matchedUser) {
+        const user = mapSupabaseUser(matchedUser, normalizedEmail);
+
+        return {
+          ...user,
+          emailVerified: isSupabaseUserEmailConfirmed(user),
+        };
+      }
+
+      if (!data?.nextPage || !Array.isArray(data?.users) || data.users.length < perPage) {
+        break;
+      }
+
+      page = data.nextPage;
+    }
+
+    return null;
   },
 
   async resendVerificationEmail(email) {
@@ -634,8 +742,17 @@ export const supabaseAuthService = {
       'Supabase Auth: reenvio de verificacao concluido'
     );
 
+    const summary = summarizeSupabaseResendResult(data);
+    const classification =
+      summary?.hasUser && summary?.userId && summary?.email && summary?.actionLinkHost
+        ? 'accepted'
+        : 'ambiguous';
+
     return {
-      delivered: true,
+      accepted: true,
+      deliveryConfirmed: false,
+      classification,
+      summary,
       redirectTo,
     };
   },
@@ -678,6 +795,7 @@ export const supabaseAuthService = {
           email: normalizeEmail(data.user.email),
           userId: data.user.id || null,
           verifiedAt: new Date().toISOString(),
+          user: mapSupabaseUser(data.user),
         };
       }
 
@@ -722,6 +840,7 @@ export const supabaseAuthService = {
     return {
       userId: data?.user?.id || userId,
       email: normalizeEmail(data?.user?.email || normalizedEmail),
+      user: mapSupabaseUser(data?.user, normalizedEmail),
     };
   },
 
@@ -756,6 +875,7 @@ export const supabaseAuthService = {
 
     return {
       userId: data?.user?.id || userId,
+      user: mapSupabaseUser(data?.user),
     };
   },
 };

@@ -306,6 +306,40 @@ export const authRepository = {
     return result.rows[0] || null;
   },
 
+  async findUserBySupabaseUserIdForUpdate(client, supabaseUserId) {
+    try {
+      const result = await client.query(
+        `SELECT id, email, barbershop_id, supabase_user_id
+         FROM users
+         WHERE supabase_user_id = $1
+         LIMIT 1
+         FOR UPDATE`,
+        [supabaseUserId]
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code === '42703') {
+        return null;
+      }
+
+      throw error;
+    }
+  },
+
+  async findBarbershopByEmailForUpdate(client, email) {
+    const result = await client.query(
+      `SELECT id, email, name, owner_name, plan, desired_plan, active
+       FROM barbershops
+       WHERE LOWER(email) = LOWER($1)
+       LIMIT 1
+       FOR UPDATE`,
+      [email]
+    );
+
+    return result.rows[0] || null;
+  },
+
   async createBarbershop(client, {
     name,
     ownerName,
@@ -614,6 +648,110 @@ export const authRepository = {
     }
   },
 
+  async findPendingRegistrationForReconciliation(client, { email, supabaseUserId = null }) {
+    try {
+      const filters = [];
+      const values = [];
+
+      if (email) {
+        values.push(email);
+        filters.push(`LOWER(email) = LOWER($${values.length})`);
+      }
+
+      if (supabaseUserId) {
+        values.push(supabaseUserId);
+        filters.push(`supabase_user_id = $${values.length}`);
+      }
+
+      if (filters.length === 0) {
+        return null;
+      }
+
+      const result = await client.query(
+        `SELECT id,
+                email,
+                supabase_user_id,
+                barbershop_name,
+                owner_name,
+                whatsapp,
+                cpf_cnpj,
+                desired_plan,
+                password_hash,
+                auth_provider,
+                status,
+                verification_sent_at,
+                confirmed_at
+         FROM pending_registrations
+         WHERE (${filters.join(' OR ')})
+           AND status <> 'canceled'
+         ORDER BY CASE status
+             WHEN 'pending' THEN 0
+             WHEN 'completed' THEN 1
+             ELSE 2
+           END
+         LIMIT 1
+         FOR UPDATE`,
+        values
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code === '42P01') {
+        return null;
+      }
+
+      if (error?.code === '42703') {
+        const filters = [];
+        const values = [];
+
+        if (email) {
+          values.push(email);
+          filters.push(`LOWER(email) = LOWER($${values.length})`);
+        }
+
+        if (supabaseUserId) {
+          values.push(supabaseUserId);
+          filters.push(`supabase_user_id = $${values.length}`);
+        }
+
+        if (filters.length === 0) {
+          return null;
+        }
+
+        const result = await client.query(
+          `SELECT id,
+                  email,
+                  supabase_user_id,
+                  barbershop_name,
+                  owner_name,
+                  whatsapp,
+                  NULL::VARCHAR AS cpf_cnpj,
+                  desired_plan,
+                  password_hash,
+                  auth_provider,
+                  status,
+                  verification_sent_at,
+                  confirmed_at
+           FROM pending_registrations
+           WHERE (${filters.join(' OR ')})
+             AND status <> 'canceled'
+           ORDER BY CASE status
+             WHEN 'pending' THEN 0
+             WHEN 'completed' THEN 1
+             ELSE 2
+           END
+           LIMIT 1
+           FOR UPDATE`,
+          values
+        );
+
+        return result.rows[0] || null;
+      }
+
+      throw error;
+    }
+  },
+
   async markPendingRegistrationCompleted(client, pendingRegistrationId) {
     try {
       const result = await client.query(
@@ -649,6 +787,49 @@ export const authRepository = {
     } catch (error) {
       if (error?.code === '42P01') {
         return;
+      }
+
+      throw error;
+    }
+  },
+
+  async completePendingRegistration(client, {
+    pendingRegistrationId,
+    confirmedAt = null,
+    supabaseUserId = null,
+  }) {
+    try {
+      const result = await client.query(
+        `UPDATE pending_registrations
+         SET status = 'completed',
+             confirmed_at = COALESCE($2::timestamp, confirmed_at, NOW()),
+             supabase_user_id = COALESCE($3, supabase_user_id),
+             updated_at = NOW()
+         WHERE id = $1
+           AND status <> 'canceled'
+         RETURNING id, status, confirmed_at, supabase_user_id`,
+        [pendingRegistrationId, confirmedAt, supabaseUserId]
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code === '42P01') {
+        return null;
+      }
+
+      if (error?.code === '42703') {
+        const legacyResult = await client.query(
+          `UPDATE pending_registrations
+           SET status = 'completed',
+               confirmed_at = COALESCE($2::timestamp, confirmed_at, NOW()),
+               supabase_user_id = COALESCE($3, supabase_user_id)
+           WHERE id = $1
+             AND status <> 'canceled'
+           RETURNING id, status, confirmed_at, supabase_user_id`,
+          [pendingRegistrationId, confirmedAt, supabaseUserId]
+        );
+
+        return legacyResult.rows[0] || null;
       }
 
       throw error;

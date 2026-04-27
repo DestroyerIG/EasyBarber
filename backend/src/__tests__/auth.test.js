@@ -53,13 +53,17 @@ const mockAuthRepository = {
   findUserBySupabaseUserId: jest.fn(),
   findAnyUserByEmail: jest.fn(),
   findUserByEmailForSync: jest.fn(),
+  findUserBySupabaseUserIdForUpdate: jest.fn(),
+  findBarbershopByEmailForUpdate: jest.fn(),
   createBarbershop: jest.fn(),
   createUser: jest.fn(),
   upsertPendingRegistration: jest.fn(),
   findPendingRegistrationByEmail: jest.fn(),
   findPendingRegistrationByEmailForUpdate: jest.fn(),
+  findPendingRegistrationForReconciliation: jest.fn(),
   markPendingRegistrationCompleted: jest.fn(),
   markPendingRegistrationCompletedByEmail: jest.fn(),
+  completePendingRegistration: jest.fn(),
   touchPendingRegistrationVerificationSentAt: jest.fn(),
   setEmailVerificationToken: jest.fn(),
   findUserByEmailVerificationTokenHash: jest.fn(),
@@ -94,6 +98,8 @@ const mockSupabaseAuthService = {
   resendVerificationEmail: jest.fn(),
   verifyEmailToken: jest.fn(),
   getVerifiedIdentityFromAccessToken: jest.fn(),
+  getUserByEmail: jest.fn(),
+  getUserById: jest.fn(),
 };
 
 jest.unstable_mockModule('../services/supabaseAuthService.js', () => ({
@@ -131,18 +137,42 @@ const resetMocks = () => {
     email: 'joao@teste.com',
     verificationEmailSent: true,
   });
-  mockSupabaseAuthService.resendVerificationEmail.mockResolvedValue({ delivered: true });
+  mockSupabaseAuthService.resendVerificationEmail.mockResolvedValue({
+    accepted: true,
+    deliveryConfirmed: false,
+    classification: 'accepted',
+    summary: {
+      hasUser: true,
+      userId: 'supabase-user-uuid',
+      email: 'joao@teste.com',
+      actionLinkHost: 'localhost:3000',
+    },
+  });
   mockSupabaseAuthService.verifyEmailToken.mockResolvedValue({
     email: 'joao@teste.com',
     userId: 'supabase-user-uuid',
     verifiedAt: new Date().toISOString(),
+    user: {
+      id: 'supabase-user-uuid',
+      email: 'joao@teste.com',
+      email_confirmed_at: new Date().toISOString(),
+      confirmed_at: new Date().toISOString(),
+    },
   });
   mockSupabaseAuthService.getVerifiedIdentityFromAccessToken.mockResolvedValue({
     userId: 'supabase-user-uuid',
     email: 'joao@teste.com',
     emailVerified: true,
     verifiedAt: new Date().toISOString(),
+    user: {
+      id: 'supabase-user-uuid',
+      email: 'joao@teste.com',
+      email_confirmed_at: new Date().toISOString(),
+      confirmed_at: new Date().toISOString(),
+    },
   });
+  mockSupabaseAuthService.getUserByEmail.mockResolvedValue(null);
+  mockSupabaseAuthService.getUserById.mockResolvedValue(null);
 };
 
 // ===================== TESTS =====================
@@ -428,12 +458,35 @@ describe('Auth API — /api/v1/auth', () => {
         emailVerified: true,
         emailVerifiedAt: new Date().toISOString(),
         sessionExpiresAt: null,
+        user: {
+          id: 'supabase-user-uuid',
+          email: 'joao@teste.com',
+          email_confirmed_at: new Date().toISOString(),
+          confirmed_at: new Date().toISOString(),
+        },
       });
 
+      mockAuthRepository.findUserBySupabaseUserIdForUpdate.mockResolvedValue(null);
       mockAuthRepository.updateUserIdentitySync.mockResolvedValue({
         id: 'user-uuid',
         supabase_user_id: 'supabase-user-uuid',
         auth_provider: 'supabase',
+      });
+      mockAuthRepository.findUserByEmailForSync.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        barbershop_id: 'barbershop-uuid',
+      });
+      mockAuthRepository.findPendingRegistrationForReconciliation.mockResolvedValue({
+        id: 'pending-uuid',
+        email: 'joao@teste.com',
+        supabase_user_id: 'supabase-user-uuid',
+        password_hash: 'hash-local-compat',
+        status: 'pending',
+      });
+      mockAuthRepository.completePendingRegistration.mockResolvedValue({
+        id: 'pending-uuid',
+        status: 'completed',
       });
       mockAuthRepository.markEmailAsVerifiedWithSupabaseIdentity.mockResolvedValue({
         id: 'user-uuid',
@@ -441,6 +494,33 @@ describe('Auth API — /api/v1/auth', () => {
         email_verified: true,
         email_verified_at: new Date().toISOString(),
       });
+      mockAuthRepository.findUserByEmailIncludingBlocked
+        .mockResolvedValueOnce({
+          id: 'user-uuid',
+          email: 'joao@teste.com',
+          password_hash: 'hash-local-compat',
+          email_verified: false,
+          barbershop_id: 'barbershop-uuid',
+          barbershop_name: 'Barbearia Teste',
+          plan: 'premium',
+          role: 'tenant_admin',
+          auth_provider: 'supabase',
+          supabase_user_id: 'supabase-user-uuid',
+          blocked: false,
+        })
+        .mockResolvedValueOnce({
+          id: 'user-uuid',
+          email: 'joao@teste.com',
+          password_hash: 'hash-local-compat',
+          email_verified: true,
+          barbershop_id: 'barbershop-uuid',
+          barbershop_name: 'Barbearia Teste',
+          plan: 'premium',
+          role: 'tenant_admin',
+          auth_provider: 'supabase',
+          supabase_user_id: 'supabase-user-uuid',
+          blocked: false,
+        });
       mockAuthRepository.revokeUserRefreshTokens.mockResolvedValue();
       mockAuthRepository.saveRefreshToken.mockResolvedValue();
       mockClientQuery.mockResolvedValue({ rows: [] });
@@ -460,6 +540,114 @@ describe('Auth API — /api/v1/auth', () => {
           authProvider: 'supabase',
         })
       );
+      expect(mockAuthRepository.completePendingRegistration).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          pendingRegistrationId: 'pending-uuid',
+          supabaseUserId: 'supabase-user-uuid',
+        })
+      );
+    });
+
+    it('deve reconciliar usuário confirmado no Supabase sem public.users e permitir login', async () => {
+      const bcrypt = await import('bcryptjs');
+      const pendingPasswordHash = await bcrypt.default.hash('Senha123!', 12);
+
+      mockAuthRepository.findUserByEmailIncludingBlocked
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          id: 'user-uuid',
+          email: 'joao@teste.com',
+          password_hash: pendingPasswordHash,
+          email_verified: true,
+          barbershop_id: 'barbershop-uuid',
+          barbershop_name: 'JoseBarber',
+          plan: 'basico',
+          role: 'tenant_admin',
+          auth_provider: 'supabase',
+          supabase_user_id: 'supabase-user-uuid',
+          blocked: false,
+        });
+      mockAuthRepository.findPendingRegistrationByEmail.mockResolvedValue({
+        id: 'pending-uuid',
+        email: 'joao@teste.com',
+        supabase_user_id: 'supabase-user-uuid',
+        barbershop_name: 'JoseBarber',
+        owner_name: 'Jose',
+        whatsapp: '83996311811',
+        desired_plan: 'premium',
+        password_hash: pendingPasswordHash,
+        status: 'pending',
+      });
+      mockSupabaseAuthService.signInWithPassword.mockResolvedValue({
+        userId: 'supabase-user-uuid',
+        email: 'joao@teste.com',
+        emailVerified: true,
+        emailVerifiedAt: new Date().toISOString(),
+        sessionExpiresAt: null,
+        user: {
+          id: 'supabase-user-uuid',
+          email: 'joao@teste.com',
+          email_confirmed_at: new Date().toISOString(),
+          confirmed_at: new Date().toISOString(),
+        },
+      });
+      mockAuthRepository.findUserBySupabaseUserIdForUpdate.mockResolvedValue(null);
+      mockAuthRepository.findUserByEmailForSync.mockResolvedValue(null);
+      mockAuthRepository.findPendingRegistrationForReconciliation.mockResolvedValue({
+        id: 'pending-uuid',
+        email: 'joao@teste.com',
+        supabase_user_id: 'supabase-user-uuid',
+        barbershop_name: 'JoseBarber',
+        owner_name: 'Jose',
+        whatsapp: '83996311811',
+        desired_plan: 'premium',
+        password_hash: pendingPasswordHash,
+        status: 'pending',
+      });
+      mockAuthRepository.findBarbershopByEmailForUpdate.mockResolvedValue({
+        id: 'barbershop-uuid',
+        email: 'joao@teste.com',
+      });
+      mockAuthRepository.upsertTenantAdminUser.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        barbershop_id: 'barbershop-uuid',
+      });
+      mockAuthRepository.markEmailAsVerifiedWithSupabaseIdentity.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        email_verified: true,
+      });
+      mockAuthRepository.completePendingRegistration.mockResolvedValue({
+        id: 'pending-uuid',
+        status: 'completed',
+      });
+      mockAuthRepository.revokeUserRefreshTokens.mockResolvedValue();
+      mockAuthRepository.saveRefreshToken.mockResolvedValue();
+      mockClientQuery.mockResolvedValue({ rows: [] });
+      process.env.AUTH_PROVIDER_MODE = 'supabase';
+
+      const res = await request.post('/api/v1/auth/login').send({
+        email: 'joao@teste.com',
+        password: 'Senha123!',
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(mockAuthRepository.findBarbershopByEmailForUpdate).toHaveBeenCalledWith(
+        expect.anything(),
+        'joao@teste.com'
+      );
+      expect(mockAuthRepository.upsertTenantAdminUser).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          email: 'joao@teste.com',
+          supabaseUserId: 'supabase-user-uuid',
+          emailVerified: true,
+        })
+      );
+      expect(mockAuthRepository.completePendingRegistration).toHaveBeenCalled();
     });
 
     it('deve retornar 403 quando o provedor informar e-mail não confirmado', async () => {
@@ -663,11 +851,22 @@ describe('Auth API — /api/v1/auth', () => {
         verifiedAt: new Date().toISOString(),
       });
 
+      mockAuthRepository.findUserBySupabaseUserIdForUpdate.mockResolvedValue(null);
       mockAuthRepository.findUserByEmailForSync.mockResolvedValue({
         id: 'user-uuid',
         email: 'joao@teste.com',
+        barbershop_id: 'barbershop-uuid',
       });
-      mockAuthRepository.markPendingRegistrationCompletedByEmail.mockResolvedValue();
+      mockAuthRepository.findPendingRegistrationForReconciliation.mockResolvedValue({
+        id: 'pending-uuid',
+        email: 'joao@teste.com',
+        supabase_user_id: 'supabase-user-uuid',
+        status: 'pending',
+      });
+      mockAuthRepository.completePendingRegistration.mockResolvedValue({
+        id: 'pending-uuid',
+        status: 'completed',
+      });
       mockAuthRepository.markEmailAsVerifiedWithSupabaseIdentity.mockResolvedValue({
         id: 'user-uuid',
         email: 'joao@teste.com',
@@ -758,6 +957,65 @@ describe('Auth API — /api/v1/auth', () => {
       expect(mockSupabaseAuthService.resendVerificationEmail).toHaveBeenCalledWith('joao@teste.com');
       expect(mockEmailService.sendAccountVerificationEmail).not.toHaveBeenCalled();
       expect(mockAuthRepository.setEmailVerificationToken).not.toHaveBeenCalled();
+    });
+
+    it('não deve reenviar quando o usuário já estiver confirmado no Supabase e deve reconciliar o local', async () => {
+      process.env.AUTH_PROVIDER_MODE = 'supabase';
+
+      mockAuthRepository.findPendingRegistrationByEmail.mockResolvedValue({
+        id: 'pending-uuid',
+        email: 'joao@teste.com',
+        supabase_user_id: 'supabase-user-uuid',
+      });
+      mockAuthRepository.findUserByEmail.mockResolvedValue(null);
+      mockSupabaseAuthService.getUserByEmail.mockResolvedValue({
+        id: 'supabase-user-uuid',
+        email: 'joao@teste.com',
+        emailVerified: true,
+        email_confirmed_at: new Date().toISOString(),
+        confirmed_at: new Date().toISOString(),
+      });
+      mockAuthRepository.findUserBySupabaseUserIdForUpdate.mockResolvedValue(null);
+      mockAuthRepository.findUserByEmailForSync.mockResolvedValue(null);
+      mockAuthRepository.findPendingRegistrationForReconciliation.mockResolvedValue({
+        id: 'pending-uuid',
+        email: 'joao@teste.com',
+        supabase_user_id: 'supabase-user-uuid',
+        barbershop_name: 'JoseBarber',
+        owner_name: 'Jose',
+        whatsapp: '83996311811',
+        desired_plan: 'premium',
+        password_hash: 'hash',
+        status: 'pending',
+      });
+      mockAuthRepository.findBarbershopByEmailForUpdate.mockResolvedValue({
+        id: 'barbershop-uuid',
+        email: 'joao@teste.com',
+      });
+      mockAuthRepository.upsertTenantAdminUser.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        barbershop_id: 'barbershop-uuid',
+      });
+      mockAuthRepository.markEmailAsVerifiedWithSupabaseIdentity.mockResolvedValue({
+        id: 'user-uuid',
+        email: 'joao@teste.com',
+        email_verified: true,
+      });
+      mockAuthRepository.completePendingRegistration.mockResolvedValue({
+        id: 'pending-uuid',
+        status: 'completed',
+      });
+      mockClientQuery.mockResolvedValue({ rows: [] });
+
+      const res = await request.post('/api/v1/auth/resend-verification').send({
+        email: 'joao@teste.com',
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(mockSupabaseAuthService.resendVerificationEmail).not.toHaveBeenCalled();
+      expect(mockAuthRepository.completePendingRegistration).toHaveBeenCalled();
     });
 
     it('deve retornar 503 controlado quando o Supabase estiver indisponível', async () => {

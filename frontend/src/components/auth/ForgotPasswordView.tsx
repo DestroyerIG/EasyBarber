@@ -8,8 +8,27 @@ import {
   getMissingSupabasePublicEnvVars,
   isSupabaseClientConfigured,
 } from '@/lib/supabase/client';
+import { resolveResetPasswordRedirectUrl } from '@/lib/appUrl';
 
-export function ForgotPasswordView() {
+type ForgotPasswordViewProps = {
+  appUrl?: string;
+};
+
+const maskEmail = (email: string) => {
+  const [localPart, domainPart = ''] = email.split('@');
+
+  if (!localPart || !domainPart) {
+    return 'email-invalido';
+  }
+
+  if (localPart.length <= 2) {
+    return `${localPart[0] || '*'}***@${domainPart}`;
+  }
+
+  return `${localPart.slice(0, 2)}***${localPart.slice(-1)}@${domainPart}`;
+};
+
+export function ForgotPasswordView({ appUrl }: ForgotPasswordViewProps) {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -30,22 +49,24 @@ export function ForgotPasswordView() {
     setMessage('');
 
     try {
-      const redirectTo = `${window.location.origin}/auth/redefinir-senha`;
+      const redirectTo = resolveResetPasswordRedirectUrl(appUrl);
+      const maskedEmail = maskEmail(normalizedEmail);
       const diagnostics = getSupabaseClientDiagnostics();
 
-      console.info('[forgot-password] submit iniciado', {
-        email: normalizedEmail,
+      console.info('[forgot-password] operação iniciada', {
+        operation: 'resetPasswordForEmail',
+        email: maskedEmail,
+        redirectTo,
+        currentOrigin: window.location.origin,
+        supabaseUrlHost: diagnostics.supabaseUrlHost,
+        hasSupabaseUrl: diagnostics.hasSupabaseUrl,
+        hasSupabaseAnonKey: diagnostics.hasSupabaseAnonKey,
+        anonKeyPrefix: diagnostics.anonKeyPrefix,
+        supabaseUrlProjectRef: diagnostics.supabaseUrlProjectRef,
+        anonKeyProjectRef: diagnostics.anonKeyProjectRef,
+        canCompareProjectRef: diagnostics.canCompareProjectRef,
+        isProjectRefMismatch: diagnostics.isProjectRefMismatch,
       });
-      console.info('[forgot-password] origin atual', window.location.origin);
-      console.info('[forgot-password] host do Supabase URL', diagnostics.supabaseUrlHost);
-      console.info('[forgot-password] supabase url presente?', diagnostics.hasSupabaseUrl);
-      console.info('[forgot-password] anon key presente?', diagnostics.hasSupabaseAnonKey);
-      console.info('[forgot-password] prefixo seguro da key', diagnostics.anonKeyPrefix);
-      console.info('[forgot-password] project ref da URL', diagnostics.supabaseUrlProjectRef);
-      console.info('[forgot-password] project ref extraido da key', diagnostics.anonKeyProjectRef);
-      console.info('[forgot-password] mismatch detectavel?', diagnostics.canCompareProjectRef);
-      console.info('[forgot-password] mismatch entre URL e key?', diagnostics.isProjectRefMismatch);
-      console.info('[forgot-password] redirectTo', redirectTo);
 
       if (!isSupabaseClientConfigured()) {
         throw new Error(
@@ -59,9 +80,17 @@ export function ForgotPasswordView() {
         redirectTo,
       });
 
-      console.info('[forgot-password] resposta', {
-        hasError: Boolean(response.error),
-        errorMessage: response.error?.message || null,
+      console.info('[forgot-password] operação concluída', {
+        operation: 'resetPasswordForEmail',
+        email: maskedEmail,
+        redirectTo,
+        supabaseError: response.error
+          ? {
+              message: response.error.message,
+              name: response.error.name,
+              status: 'status' in response.error ? response.error.status : undefined,
+            }
+          : null,
       });
 
       if (response.error) {
@@ -71,8 +100,11 @@ export function ForgotPasswordView() {
       setStatus('success');
       setMessage('Link de redefinição enviado. Confira seu e-mail para continuar.');
     } catch (error) {
-      console.error('[forgot-password] erro detalhado', {
-        message: error instanceof Error ? error.message : 'Erro desconhecido',
+      console.error('[forgot-password] operação falhou', {
+        operation: 'resetPasswordForEmail',
+        email: maskEmail(normalizedEmail),
+        redirectTo: resolveResetPasswordRedirectUrl(appUrl),
+        supabaseError: error instanceof Error ? error.message : 'Erro desconhecido',
         error,
       });
       setStatus('error');

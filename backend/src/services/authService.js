@@ -184,6 +184,15 @@ const buildResendVerificationResponse = () => ({
   message: 'Se existir uma conta pendente para este e-mail, um novo link de verificação foi enviado.',
 });
 
+const isSupabaseUserConfirmed = (supabaseUser) => Boolean(
+  supabaseUser?.email_confirmed_at ||
+  supabaseUser?.confirmed_at
+);
+
+const resolveSupabaseConfirmedAt = (supabaseUser, fallbackValue = null) => {
+  return supabaseUser?.email_confirmed_at || supabaseUser?.confirmed_at || fallbackValue || null;
+};
+
 const mapResendVerificationSupabaseError = (error) => {
   if (error instanceof AppError) {
     if (error.code === 'INVALID_VERIFICATION_TOKEN') {
@@ -356,11 +365,12 @@ const registerWithSupabasePrimaryFlow = async ({
 
   let supabaseUserId = null;
   let verificationEmailSent = false;
+  let existingConfirmedSupabaseUser = null;
 
   try {
     currentStage = 'supabase_signup';
 
-    const signUpResult = await supabaseAuthService.signUpForEmailVerification(normalizedEmail);
+    const signUpResult = await supabaseAuthService.signUpForEmailVerification(normalizedEmail, password);
     supabaseUserId = signUpResult.userId;
     verificationEmailSent = signUpResult.verificationEmailSent !== false;
   } catch (error) {
@@ -379,9 +389,18 @@ const registerWithSupabasePrimaryFlow = async ({
     }
 
     try {
-      currentStage = 'supabase_resend_after_user_exists';
-      await supabaseAuthService.resendVerificationEmail(normalizedEmail);
-      verificationEmailSent = true;
+      currentStage = 'supabase_lookup_after_user_exists';
+      const existingSupabaseUser = await supabaseAuthService.getUserByEmail(normalizedEmail);
+      supabaseUserId = existingSupabaseUser?.id || null;
+
+      if (existingSupabaseUser?.emailVerified) {
+        existingConfirmedSupabaseUser = existingSupabaseUser;
+        verificationEmailSent = false;
+      } else {
+        currentStage = 'supabase_resend_after_user_exists';
+        await supabaseAuthService.resendVerificationEmail(normalizedEmail);
+        verificationEmailSent = true;
+      }
     } catch (resendError) {
       verificationEmailSent = false;
       logger.error(
@@ -450,6 +469,14 @@ const registerWithSupabasePrimaryFlow = async ({
 
   currentStage = 'completed';
 
+  if (existingConfirmedSupabaseUser) {
+    await reconcileSupabaseConfirmedUser({
+      email: normalizedEmail,
+      supabaseUser: existingConfirmedSupabaseUser,
+      reason: 'register_existing_confirmed_supabase_user',
+    });
+  }
+
   logger.info(
     {
       mode: getAuthProviderMode(),
@@ -476,6 +503,172 @@ const registerWithSupabasePrimaryFlow = async ({
       ? 'Cadastro realizado com sucesso. Verifique seu e-mail para ativar a conta.'
       : 'Cadastro iniciado, mas não foi possível enviar o e-mail de verificação no momento. Solicite o reenvio para ativar a conta.',
   });
+};
+
+const reconcileSupabaseConfirmedUser = async ({
+  email,
+  supabaseUser,
+  reason = 'unspecified',
+  client: providedClient = null,
+}) => {
+  const normalizedEmail = normalizeEmail(email || supabaseUser?.email || '');
+  const supabaseUserId = supabaseUser?.id || null;
+  const supabaseEmailConfirmed = isSupabaseUserConfirmed(supabaseUser);
+  const emailVerifiedAt = resolveSupabaseConfirmedAt(supabaseUser, new Date().toISOString());
+  const summary = {
+    email: normalizedEmail,
+    supabaseUserId,
+    supabaseEmailConfirmed,
+    localUserFound: false,
+    pendingRegistrationFound: false,
+    localUserCreated: false,
+    localUserUpdated: false,
+    barbershopCreated: false,
+    barbershopReused: false,
+    pendingRegistrationCompleted: false,
+    syncApplied: false,
+    reason,
+  };
+
+  if (!normalizedEmail || !supabaseUserId || !supabaseEmailConfirmed) {
+    logger.info(summary, 'Reconciliação Supabase ignorada');
+    return summary;
+  }
+
+  const client = providedClient || await authRepository.getClient();
+  const ownsTransaction = !providedClient;
+  let transactionCommitted = false;
+
+  try {
+    if (ownsTransaction) {
+      await client.query('BEGIN');
+    }
+
+    const [userBySupabaseId, userByEmail, pendingRegistration] = await Promise.all([
+      authRepository.findUserBySupabaseUserIdForUpdate(client, supabaseUserId),
+      authRepository.findUserByEmailForSync(client, normalizedEmail),
+      authRepository.findPendingRegistrationForReconciliation(client, {
+        email: normalizedEmail,
+        supabaseUserId,
+      }),
+    ]);
+
+    summary.pendingRegistrationFound = Boolean(pendingRegistration);
+
+    if (userBySupabaseId && userByEmail && userBySupabaseId.id !== userByEmail.id) {
+      logger.error(
+        {
+          ...summary,
+          localUserBySupabaseId: userBySupabaseId.id,
+          localUserByEmail: userByEmail.id,
+          reason: 'local_user_conflict',
+        },
+        'Reconciliação Supabase encontrou conflito de usuários locais'
+      );
+
+      throw new ConflictError('Conflito de identidade local detectado para este e-mail.');
+    }
+
+    let localUser = userBySupabaseId || userByEmail || null;
+    summary.localUserFound = Boolean(localUser);
+
+    let barbershopId = localUser?.barbershop_id || null;
+
+    if (!barbershopId && pendingRegistration) {
+      const reusableBarbershop = await authRepository.findBarbershopByEmailForUpdate(
+        client,
+        pendingRegistration.email
+      );
+
+      if (reusableBarbershop) {
+        barbershopId = reusableBarbershop.id;
+        summary.barbershopReused = true;
+      } else {
+        const createdBarbershop = await authRepository.createBarbershop(client, {
+          name: pendingRegistration.barbershop_name,
+          ownerName: pendingRegistration.owner_name,
+          email: pendingRegistration.email,
+          whatsapp: pendingRegistration.whatsapp,
+          cpfCnpj: pendingRegistration.cpf_cnpj,
+          plan: DEFAULT_PLAN,
+          desiredPlan: pendingRegistration.desired_plan || DEFAULT_PLAN,
+        });
+
+        barbershopId = createdBarbershop.id;
+        summary.barbershopCreated = true;
+      }
+    }
+
+    if (!localUser && pendingRegistration && barbershopId) {
+      localUser = await authRepository.upsertTenantAdminUser(client, {
+        barbershopId,
+        email: pendingRegistration.email,
+        passwordHash: pendingRegistration.password_hash,
+        supabaseUserId,
+        emailVerified: true,
+      });
+      summary.localUserCreated = Boolean(localUser);
+      summary.localUserFound = Boolean(localUser);
+    } else if (localUser) {
+      const syncedUser = await authRepository.updateUserIdentitySync(client, {
+        userId: localUser.id,
+        supabaseUserId,
+        authProvider: 'supabase',
+      });
+
+      if (syncedUser) {
+        summary.localUserUpdated = true;
+      }
+    }
+
+    if (localUser?.id) {
+      const verifiedUser = await authRepository.markEmailAsVerifiedWithSupabaseIdentity(client, {
+        userId: localUser.id,
+        supabaseUserId,
+        emailVerifiedAt,
+        authProvider: 'supabase',
+      });
+
+      summary.localUserUpdated = summary.localUserUpdated || Boolean(verifiedUser);
+    }
+
+    if (pendingRegistration?.id) {
+      const completedPending = await authRepository.completePendingRegistration(client, {
+        pendingRegistrationId: pendingRegistration.id,
+        confirmedAt: emailVerifiedAt,
+        supabaseUserId,
+      });
+
+      summary.pendingRegistrationCompleted = Boolean(completedPending);
+    }
+
+    if (ownsTransaction) {
+      await client.query('COMMIT');
+      transactionCommitted = true;
+    }
+
+    summary.syncApplied = Boolean(localUser?.id || summary.pendingRegistrationCompleted);
+
+    logger.info(summary, 'Reconciliação Supabase concluída');
+    return summary;
+  } catch (error) {
+    if (ownsTransaction && !transactionCommitted) {
+      await client.query('ROLLBACK');
+    }
+
+    logger.error(
+      {
+        err: error,
+        ...summary,
+      },
+      'Reconciliação Supabase falhou'
+    );
+    throw error;
+  } finally {
+    if (ownsTransaction) {
+      client.release();
+    }
+  }
 };
 
 const verifyEmailWithLegacyToken = async (token) => {
@@ -551,92 +744,22 @@ const verifyEmailWithLegacyToken = async (token) => {
   }
 };
 
-const syncSupabaseVerifiedIdentity = async ({ email, userId, verifiedAt }) => {
-  const normalizedEmail = normalizeEmail(email);
-  const client = await authRepository.getClient();
-  let transactionCommitted = false;
+const verifyEmailWithSupabaseToken = async ({ tokenHash, type }) => {
+  const verification = await supabaseAuthService.verifyEmailToken({ tokenHash, type });
+  const supabaseUser = verification.user || {
+    id: verification.userId,
+    email: verification.email,
+    email_confirmed_at: verification.verifiedAt,
+    confirmed_at: verification.verifiedAt,
+  };
 
   try {
-    await client.query('BEGIN');
-
-    let user = await authRepository.findUserByEmailForSync(client, normalizedEmail);
-
-    if (!user) {
-      const pendingRegistration = await authRepository.findPendingRegistrationByEmailForUpdate(
-        client,
-        normalizedEmail
-      );
-
-      if (!pendingRegistration) {
-        throw new AppError(
-          'Cadastro pendente não encontrado para este e-mail.',
-          404,
-          'PENDING_REGISTRATION_NOT_FOUND'
-        );
-      }
-
-      const plan = DEFAULT_PLAN;
-      const desiredPlan = pendingRegistration.desired_plan || plan;
-
-      const barbershop = await authRepository.createBarbershop(client, {
-        name: pendingRegistration.barbershop_name,
-        ownerName: pendingRegistration.owner_name,
-        email: pendingRegistration.email,
-        whatsapp: pendingRegistration.whatsapp,
-        cpfCnpj: pendingRegistration.cpf_cnpj,
-        plan,
-        desiredPlan,
-      });
-
-      const createdUser = await authRepository.createUser(client, {
-        barbershopId: barbershop.id,
-        email: pendingRegistration.email,
-        passwordHash: pendingRegistration.password_hash,
-        role: 'tenant_admin',
-        emailVerified: false,
-        supabaseUserId: userId || pendingRegistration.supabase_user_id || null,
-        authProvider: 'supabase',
-      });
-
-      user = {
-        id: createdUser.id,
-        email: pendingRegistration.email,
-      };
-
-      await authRepository.markPendingRegistrationCompleted(client, pendingRegistration.id);
-    } else {
-      await authRepository.markPendingRegistrationCompletedByEmail(client, normalizedEmail);
-    }
-
-    const verifiedUser = await authRepository.markEmailAsVerifiedWithSupabaseIdentity(client, {
-      userId: user.id,
-      supabaseUserId: userId,
-      emailVerifiedAt: verifiedAt,
-      authProvider: 'supabase',
-    });
-
-    await client.query('COMMIT');
-    transactionCommitted = true;
-
-    logger.info(
-      {
-        mode: getAuthProviderMode(),
-        userId: user.id,
-        email: normalizedEmail,
-        supabaseUserId: userId,
-      },
-      'E-mail confirmado via Supabase e sincronizado no banco interno'
-    );
-
-    return buildVerificationResponse({
-      email: verifiedUser?.email || normalizedEmail,
-      emailVerifiedAt: verifiedUser?.email_verified_at || verifiedAt || new Date().toISOString(),
+    await reconcileSupabaseConfirmedUser({
+      email: verification.email,
+      supabaseUser,
+      reason: 'verify_email_token',
     });
   } catch (error) {
-    if (!transactionCommitted) {
-      await client.query('ROLLBACK');
-    }
-
     if (error.code === '23505') {
       throw new ConflictError('Email já cadastrado');
     }
@@ -645,20 +768,13 @@ const syncSupabaseVerifiedIdentity = async ({ email, userId, verifiedAt }) => {
       throw error;
     }
 
-    logger.error({ err: error, email: normalizedEmail }, 'Erro ao sincronizar confirmação de e-mail via Supabase');
+    logger.error({ err: error, email: verification.email }, 'Erro ao sincronizar confirmação de e-mail via token Supabase');
     throw new AppError('Não foi possível confirmar o e-mail. Tente novamente.', 500, 'VERIFY_EMAIL_ERROR');
-  } finally {
-    client.release();
   }
-};
 
-const verifyEmailWithSupabaseToken = async ({ tokenHash, type }) => {
-  const verification = await supabaseAuthService.verifyEmailToken({ tokenHash, type });
-
-  return syncSupabaseVerifiedIdentity({
+  return buildVerificationResponse({
     email: verification.email,
-    userId: verification.userId,
-    verifiedAt: verification.verifiedAt,
+    emailVerifiedAt: verification.verifiedAt || new Date().toISOString(),
   });
 };
 
@@ -673,10 +789,33 @@ const verifyEmailWithSupabaseSession = async ({ accessToken }) => {
     );
   }
 
-  return syncSupabaseVerifiedIdentity({
+  try {
+    await reconcileSupabaseConfirmedUser({
+      email: identity.email,
+      supabaseUser: identity.user || {
+        id: identity.userId,
+        email: identity.email,
+        email_confirmed_at: identity.verifiedAt,
+        confirmed_at: identity.verifiedAt,
+      },
+      reason: 'verify_email_session',
+    });
+  } catch (error) {
+    if (error.code === '23505') {
+      throw new ConflictError('Email já cadastrado');
+    }
+
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    logger.error({ err: error, email: identity.email }, 'Erro ao sincronizar confirmação de e-mail via sessão Supabase');
+    throw new AppError('Não foi possível confirmar o e-mail. Tente novamente.', 500, 'VERIFY_EMAIL_ERROR');
+  }
+
+  return buildVerificationResponse({
     email: identity.email,
-    userId: identity.userId,
-    verifiedAt: identity.verifiedAt,
+    emailVerifiedAt: identity.verifiedAt || new Date().toISOString(),
   });
 };
 
@@ -723,7 +862,7 @@ export const authService = {
     let refreshTransactionStarted = false;
 
     try {
-      const user = await authRepository.findUserByEmailIncludingBlocked(normalizedEmail);
+      let user = await authRepository.findUserByEmailIncludingBlocked(normalizedEmail);
 
       if (!user) {
         if (isSupabasePrimaryAuthProviderMode()) {
@@ -733,24 +872,67 @@ export const authService = {
             const pendingPasswordMatches = await bcrypt.compare(password, pendingRegistration.password_hash);
 
             if (pendingPasswordMatches) {
-              throw new AppError(
-                'Conta não verificada. Verifique seu e-mail antes de fazer login.',
-                403,
-                'EMAIL_NOT_VERIFIED'
-              );
+              let supabaseIdentity;
+
+              try {
+                supabaseIdentity = await supabaseAuthService.signInWithPassword(normalizedEmail, password);
+              } catch (error) {
+                if (error instanceof AppError && error.code === 'EMAIL_NOT_VERIFIED') {
+                  throw error;
+                }
+
+                if (error instanceof UnauthorizedError) {
+                  logger.warn(
+                    {
+                      email: normalizedEmail,
+                      authMode: getAuthProviderMode(),
+                      reason: 'pending_registration_invalid_supabase_password',
+                    },
+                    'Login negado: credenciais inválidas para pendência Supabase'
+                  );
+                  throw new UnauthorizedError('Email ou senha incorretos');
+                }
+
+                throw error;
+              }
+
+              if (supabaseIdentity.emailVerified) {
+                await reconcileSupabaseConfirmedUser({
+                  email: normalizedEmail,
+                  supabaseUser: supabaseIdentity.user || {
+                    id: supabaseIdentity.userId,
+                    email: supabaseIdentity.email,
+                    email_confirmed_at: supabaseIdentity.emailVerifiedAt,
+                    confirmed_at: supabaseIdentity.emailVerifiedAt,
+                  },
+                  reason: 'login_without_local_user',
+                });
+
+                user = await authRepository.findUserByEmailIncludingBlocked(normalizedEmail);
+              }
+
+              if (!user && !supabaseIdentity.emailVerified) {
+                throw new AppError(
+                  'Conta não verificada. Verifique seu e-mail antes de fazer login.',
+                  403,
+                  'EMAIL_NOT_VERIFIED'
+                );
+              }
             }
           }
         }
 
-        logger.warn(
-          {
-            email: normalizedEmail,
-            authMode: getAuthProviderMode(),
-            reason: 'user_not_found',
-          },
-          'Login negado: usuário não encontrado'
-        );
-        throw new UnauthorizedError('Email ou senha incorretos');
+        if (!user) {
+          logger.warn(
+            {
+              email: normalizedEmail,
+              authMode: getAuthProviderMode(),
+              reason: 'user_not_found',
+            },
+            'Login negado: usuário não encontrado'
+          );
+          throw new UnauthorizedError('Email ou senha incorretos');
+        }
       }
 
       const authProvider = (
@@ -843,14 +1025,22 @@ export const authService = {
         );
 
         if (!resolvedEmailVerified && supabaseIdentity.emailVerified) {
-          const syncedVerification = await authRepository.markEmailAsVerifiedWithSupabaseIdentity(client, {
-            userId: user.id,
-            supabaseUserId: supabaseIdentity.userId,
-            emailVerifiedAt: supabaseIdentity.emailVerifiedAt || new Date().toISOString(),
-            authProvider: 'supabase',
+          await reconcileSupabaseConfirmedUser({
+            email: normalizedEmail,
+            supabaseUser: supabaseIdentity.user || {
+              id: supabaseIdentity.userId,
+              email: supabaseIdentity.email,
+              email_confirmed_at: supabaseIdentity.emailVerifiedAt,
+              confirmed_at: supabaseIdentity.emailVerifiedAt,
+            },
+            reason: 'login_confirmed_user',
           });
 
-          resolvedEmailVerified = Boolean(syncedVerification?.email_verified);
+          const refreshedUser = await authRepository.findUserByEmailIncludingBlocked(normalizedEmail);
+          if (refreshedUser) {
+            user = refreshedUser;
+            resolvedEmailVerified = Boolean(refreshedUser.email_verified);
+          }
         }
 
         if (!resolvedEmailVerified && !supabaseIdentity.emailVerified) {
@@ -1145,6 +1335,36 @@ export const authService = {
       }
 
       try {
+        const supabaseUser = await supabaseAuthService.getUserByEmail(normalizedEmail);
+
+        if (supabaseUser?.emailVerified) {
+          logger.info(
+            {
+              mode,
+              email: normalizedEmail,
+              userId: user?.id || null,
+              pendingRegistrationId: pendingRegistration?.id || null,
+              supabaseUserId: supabaseUser.id,
+              supabaseEmailConfirmed: true,
+              localUserFound: Boolean(user),
+              pendingRegistrationFound: Boolean(pendingRegistration),
+              classification: 'already_confirmed',
+              accepted: false,
+              deliveryConfirmed: false,
+              reason: 'USER_ALREADY_CONFIRMED_IN_SUPABASE',
+            },
+            'Reenvio de verificacao ignorado para usuário já confirmado no Supabase'
+          );
+
+          await reconcileSupabaseConfirmedUser({
+            email: normalizedEmail,
+            supabaseUser,
+            reason: 'resend_already_confirmed',
+          });
+
+          return safeResponse;
+        }
+
         const resendResult = await supabaseAuthService.resendVerificationEmail(normalizedEmail);
 
         logger.info(
@@ -1153,8 +1373,13 @@ export const authService = {
             email: normalizedEmail,
             userId: user?.id || null,
             pendingRegistrationId: pendingRegistration?.id || null,
+            supabaseUserId: supabaseUser?.id || pendingRegistration?.supabase_user_id || null,
+            supabaseEmailConfirmed: Boolean(supabaseUser?.emailVerified),
             redirectTo: resendResult?.redirectTo || null,
-            delivered: resendResult?.delivered === true,
+            accepted: resendResult?.accepted === true,
+            deliveryConfirmed: resendResult?.deliveryConfirmed === true,
+            classification: resendResult?.classification || 'ambiguous',
+            resendSummary: resendResult?.summary || null,
             status: 'success',
           },
           'Reenvio de verificacao concluido no Supabase'
