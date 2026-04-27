@@ -56,33 +56,22 @@ const STATUS_ALLOWLIST: Record<SubscriptionStatus, Set<FeatureKey> | null> = {
   active: null,
   trialing: null,
   pending: new Set([
-    'dashboard',
     'billing',
     'subscription_status',
   ]),
   past_due: new Set([
-    'dashboard',
-    'appointments',
-    'clients',
-    'services',
     'billing',
     'subscription_status',
   ]),
   unpaid: new Set([
-    'dashboard',
-    'appointments',
-    'clients',
-    'services',
     'billing',
     'subscription_status',
   ]),
   incomplete: new Set([
-    'dashboard',
     'billing',
     'subscription_status',
   ]),
   canceled: new Set([
-    'dashboard',
     'billing',
     'subscription_status',
   ]),
@@ -111,6 +100,7 @@ const normalizePlan = (value: string | null | undefined): PlanId => {
 const normalizeStatus = (value: string | null | undefined): SubscriptionStatus => {
   const normalized = (value || '').toLowerCase();
   if (
+    normalized === 'active' ||
     normalized === 'trialing' ||
     normalized === 'pending' ||
     normalized === 'past_due' ||
@@ -120,7 +110,7 @@ const normalizeStatus = (value: string | null | undefined): SubscriptionStatus =
   ) {
     return normalized;
   }
-  return 'active';
+  return 'incomplete';
 };
 
 export const evaluateFeatureAccess = ({

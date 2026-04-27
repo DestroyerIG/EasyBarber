@@ -62,6 +62,50 @@ const resolvePostAuthRoute = (role: string | undefined, redirectTo?: string) => 
   return redirectTo || '/dashboard';
 };
 
+const ACCESS_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing']);
+
+const hasPaymentEvidence = (billingStatus: Record<string, unknown>) => {
+  const status = typeof billingStatus.subscriptionStatus === 'string'
+    ? billingStatus.subscriptionStatus
+    : null;
+  const provider = typeof billingStatus.provider === 'string' ? billingStatus.provider : null;
+  const paymentMethod = typeof billingStatus.paymentMethod === 'string'
+    ? billingStatus.paymentMethod
+    : null;
+
+  if (!ACCESS_SUBSCRIPTION_STATUSES.has(status || '')) {
+    return false;
+  }
+
+  if (status === 'trialing') {
+    return Boolean(billingStatus.providerSubscriptionId);
+  }
+
+  if (provider === 'asaas' || paymentMethod === 'pix') {
+    return Boolean(billingStatus.providerPaymentId && billingStatus.lastPaymentDate);
+  }
+
+  if (provider === 'stripe' || paymentMethod === 'card') {
+    return Boolean(billingStatus.providerSubscriptionId);
+  }
+
+  return false;
+};
+
+const resolveTenantPostLoginRoute = async (redirectTo?: string) => {
+  try {
+    const response = await api.get('/billing/status');
+
+    if (!response.data || typeof response.data !== 'object' || !hasPaymentEvidence(response.data)) {
+      return '/planos';
+    }
+  } catch {
+    return '/planos';
+  }
+
+  return redirectTo || '/dashboard';
+};
+
 const isUser = (value: unknown): value is User => {
   if (!value || typeof value !== 'object') {
     return false;
@@ -177,7 +221,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         setUser(userData);
-        router.replace(resolvePostAuthRoute(userData.role, options?.redirectTo));
+        const postAuthRoute = userData.role === 'platform_admin'
+          ? resolvePostAuthRoute(userData.role, options?.redirectTo)
+          : await resolveTenantPostLoginRoute(options?.redirectTo);
+        router.replace(postAuthRoute);
         router.refresh();
       } catch (error) {
         setUser(null);

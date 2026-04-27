@@ -32,12 +32,50 @@ const shouldSkipRefreshByUrl = (url: string) => {
   return (
     url.includes('/auth/login') ||
     url.includes('/auth/register') ||
+    url.includes('/auth/confirm') ||
     url.includes('/auth/verify-email') ||
     url.includes('/auth/verify-email-session') ||
     url.includes('/auth/resend-verification') ||
     url.includes('/auth/refresh') ||
     url.includes('/auth/logout')
   );
+};
+
+const getErrorCode = (data: unknown) => {
+  if (!data || typeof data !== 'object') {
+    return null;
+  }
+
+  const payload = data as {
+    error?: string | { code?: unknown };
+    errorCode?: unknown;
+  };
+
+  if (typeof payload.errorCode === 'string') {
+    return payload.errorCode;
+  }
+
+  if (payload.error && typeof payload.error === 'object' && typeof payload.error.code === 'string') {
+    return payload.error.code;
+  }
+
+  return null;
+};
+
+const shouldRedirectToBilling = (url: string) => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const pathname = window.location.pathname;
+  const isBillingPage = pathname === '/planos' || pathname === '/dashboard/planos';
+  const isBillingRequest =
+    url.includes('/billing/status') ||
+    url.includes('/billing/checkout/session') ||
+    url.includes('/billing/pix/') ||
+    url.includes('/barbershop/account-profile');
+
+  return !isBillingPage && !isBillingRequest;
 };
 
 const notifySessionExpired = () => {
@@ -116,6 +154,15 @@ api.interceptors.response.use(
 
     const status = error.response?.status;
     const url = originalRequest?.url || '';
+
+    if (
+      status === 402 &&
+      getErrorCode(error.response?.data) === 'SUBSCRIPTION_REQUIRED' &&
+      shouldRedirectToBilling(url)
+    ) {
+      window.location.replace('/planos');
+      return Promise.reject(error);
+    }
 
     if (!originalRequest || status !== 401) {
       return Promise.reject(error);

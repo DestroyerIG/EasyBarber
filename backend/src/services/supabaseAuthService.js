@@ -5,6 +5,7 @@ import logger from '../utils/logger.js';
 let supabaseClient;
 let supabaseAdminClient;
 const DEFAULT_SUPABASE_AUTH_TIMEOUT_MS = 12000;
+const DEFAULT_PRODUCTION_APP_URL = 'https://barberpro-saas-2-0.vercel.app';
 
 const resolveSupabaseConfig = () => {
   const url = String(process.env.SUPABASE_URL || '').trim();
@@ -183,10 +184,9 @@ const ensureAbsoluteUrl = (value, envName) => {
 
 const resolveFrontendBaseUrl = () => {
   const candidates = [
+    ['APP_URL', process.env.APP_URL],
     ['NEXT_PUBLIC_APP_URL', process.env.NEXT_PUBLIC_APP_URL],
     ['FRONTEND_URL', process.env.FRONTEND_URL],
-    ['APP_URL', process.env.APP_URL],
-    ['VERCEL_URL', process.env.VERCEL_URL],
   ];
 
   for (const [envName, envValue] of candidates) {
@@ -195,6 +195,15 @@ const resolveFrontendBaseUrl = () => {
     if (resolved) {
       return resolved;
     }
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    return DEFAULT_PRODUCTION_APP_URL;
+  }
+
+  const vercelUrl = ensureAbsoluteUrl(process.env.VERCEL_URL, 'VERCEL_URL');
+  if (vercelUrl) {
+    return vercelUrl;
   }
 
   return 'http://localhost:3000';
@@ -549,6 +558,17 @@ export const supabaseAuthService = {
     }
 
     const client = getSupabaseClient();
+    const redirectTo = resolveEmailRedirectTo();
+
+    logger.info(
+      {
+        operation: 'confirmSignup',
+        email: normalizedEmail,
+        redirectTo,
+        reason: 'signup_redirect_configured',
+      },
+      'Supabase Auth: redirect de confirmação configurado'
+    );
 
     let data;
     let error;
@@ -557,13 +577,13 @@ export const supabaseAuthService = {
       ({ data, error } = await runSupabaseOperation(
         {
           operation: 'signUpForEmailVerification',
-          context: { email: normalizedEmail },
+          context: { email: normalizedEmail, redirectTo },
         },
         () => client.auth.signUp({
           email: normalizedEmail,
           password: normalizedPassword,
           options: {
-            emailRedirectTo: resolveEmailRedirectTo(),
+            emailRedirectTo: redirectTo,
             data: {
               source: 'easybarber',
               provider: 'supabase',

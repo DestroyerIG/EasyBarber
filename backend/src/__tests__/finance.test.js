@@ -93,10 +93,28 @@ const createAuthHeader = ({
 
 const authHeader = createAuthHeader();
 
+const mockActiveSubscriptionContext = () => {
+  mockQuery.mockResolvedValue({
+    rows: [{
+      id: 'bbshop-uuid',
+      subscription_status: 'active',
+      provider: 'stripe',
+      payment_method: 'card',
+      provider_subscription_id: 'sub_test',
+      stripe_subscription_id: 'sub_test',
+      provider_payment_id: null,
+      last_payment_date: null,
+    }],
+  });
+};
+
 // ===================== TESTS =====================
 
 describe('Finance API — /api/v1/finance', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockActiveSubscriptionContext();
+  });
 
   describe('GET /api/v1/finance/summary', () => {
     it('deve retornar 401 sem autenticação', async () => {
@@ -171,14 +189,27 @@ describe('Finance API — /api/v1/finance', () => {
     });
 
     it('deve bloquear financeiro quando assinatura está past_due', async () => {
+      mockQuery.mockResolvedValueOnce({
+        rows: [{
+          id: 'bbshop-uuid',
+          subscription_status: 'past_due',
+          provider: 'stripe',
+          payment_method: 'card',
+          provider_subscription_id: 'sub_test',
+          stripe_subscription_id: 'sub_test',
+          provider_payment_id: null,
+          last_payment_date: null,
+        }],
+      });
+
       const res = await request
         .get('/api/v1/finance/summary')
         .set(createAuthHeader({ plan: 'premium', subscriptionStatus: 'past_due' }));
 
       expect(res.status).toBe(402);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.code).toBe('FEATURE_BLOCKED');
-      expect(res.body.error.reason).toBe('subscription_status_restricted');
+      expect(res.body.error.code).toBe('SUBSCRIPTION_REQUIRED');
+      expect(res.body.error.reason).toBe('subscription_status_not_active');
       expect(res.body.error.billingActionRequired).toBe(true);
     });
   });

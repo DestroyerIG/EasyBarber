@@ -299,6 +299,66 @@ describe('Auth API — Supabase only', () => {
     });
   });
 
+  describe('bloqueio por assinatura', () => {
+    const buildTenantToken = () => jwt.sign(
+      {
+        userId: 'user-uuid',
+        barbershopId: 'barbershop-uuid',
+        email: 'joao@teste.com',
+        plan: 'premium',
+        role: 'tenant_admin',
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+
+    it('bloqueia dashboard quando assinatura está incompleta', async () => {
+      mockQuery.mockResolvedValueOnce({
+        rows: [{
+          id: 'barbershop-uuid',
+          subscription_status: 'incomplete',
+          provider: null,
+          payment_method: null,
+          provider_payment_id: null,
+          provider_subscription_id: null,
+          stripe_subscription_id: null,
+          last_payment_date: null,
+        }],
+      });
+
+      const res = await request
+        .get('/api/v1/dashboard')
+        .set('Authorization', `Bearer ${buildTenantToken()}`);
+
+      expect(res.status).toBe(402);
+      expect(res.body.error.code).toBe('SUBSCRIPTION_REQUIRED');
+      expect(res.body.message).toBe('Finalize o pagamento para acessar o sistema.');
+    });
+
+    it('bloqueia status active sem evidência de pagamento', async () => {
+      mockQuery.mockResolvedValueOnce({
+        rows: [{
+          id: 'barbershop-uuid',
+          subscription_status: 'active',
+          provider: null,
+          payment_method: null,
+          provider_payment_id: null,
+          provider_subscription_id: null,
+          stripe_subscription_id: null,
+          last_payment_date: null,
+        }],
+      });
+
+      const res = await request
+        .get('/api/v1/dashboard')
+        .set('Authorization', `Bearer ${buildTenantToken()}`);
+
+      expect(res.status).toBe(402);
+      expect(res.body.error.code).toBe('SUBSCRIPTION_REQUIRED');
+      expect(res.body.error.reason).toBe('missing_payment_evidence');
+    });
+  });
+
   describe('POST /api/v1/auth/refresh', () => {
     it('continua renovando access/refresh tokens via cookie httpOnly', async () => {
       mockAuthRepository.findValidRefreshToken.mockResolvedValue({

@@ -137,7 +137,7 @@ const buildRegisterResponse = ({
     barbershopName,
     plan,
     emailVerified: false,
-    subscriptionStatus: 'active',
+    subscriptionStatus: 'incomplete',
     subscriptionCurrentPeriodEnd: null,
   }),
   barbershop: {
@@ -148,13 +148,14 @@ const buildRegisterResponse = ({
   },
 });
 
-const buildVerificationResponse = ({ email, emailVerifiedAt }) => ({
-  message: 'E-mail verificado com sucesso. Você já pode fazer login.',
+const buildVerificationResponse = ({ email, emailVerifiedAt, confirmation = null }) => ({
+  message: 'E-mail confirmado com sucesso',
   user: {
     email,
     emailVerified: true,
     emailVerifiedAt,
   },
+  ...(confirmation ? { confirmation } : {}),
 });
 
 const buildResendVerificationResponse = () => ({
@@ -380,6 +381,7 @@ const reconcileSupabaseConfirmedUser = async ({
   const supabaseEmailConfirmed = isSupabaseUserConfirmed(supabaseUser);
   const emailVerifiedAt = resolveSupabaseConfirmedAt(supabaseUser, new Date().toISOString());
   const summary = {
+    operation: 'confirmSignup',
     email: normalizedEmail,
     supabaseUserId,
     supabaseEmailConfirmed,
@@ -513,7 +515,19 @@ const reconcileSupabaseConfirmedUser = async ({
 
     summary.syncApplied = Boolean(localUser?.id || summary.pendingRegistrationCompleted);
 
-    logger.info(summary, 'Reconciliação Supabase concluída');
+    logger.info(
+      {
+        operation: 'confirmSignup',
+        supabaseUserId,
+        email: normalizedEmail,
+        localSyncApplied: summary.syncApplied,
+        pendingRegistrationCompleted: summary.pendingRegistrationCompleted,
+        localUserCreatedOrUpdated: summary.localUserCreated || summary.localUserUpdated,
+        reason,
+        summary,
+      },
+      'Reconciliação Supabase concluída'
+    );
     return summary;
   } catch (error) {
     if (ownsTransaction && !transactionCommitted) {
@@ -543,9 +557,10 @@ const verifyEmailWithSupabaseToken = async ({ tokenHash, type }) => {
     email_confirmed_at: verification.verifiedAt,
     confirmed_at: verification.verifiedAt,
   };
+  let confirmation = null;
 
   try {
-    await reconcileSupabaseConfirmedUser({
+    confirmation = await reconcileSupabaseConfirmedUser({
       email: verification.email,
       supabaseUser,
       reason: 'verify_email_token',
@@ -566,6 +581,7 @@ const verifyEmailWithSupabaseToken = async ({ tokenHash, type }) => {
   return buildVerificationResponse({
     email: verification.email,
     emailVerifiedAt: verification.verifiedAt || new Date().toISOString(),
+    confirmation,
   });
 };
 
@@ -579,9 +595,10 @@ const verifyEmailWithSupabaseSession = async ({ accessToken }) => {
       'EMAIL_NOT_VERIFIED'
     );
   }
+  let confirmation = null;
 
   try {
-    await reconcileSupabaseConfirmedUser({
+    confirmation = await reconcileSupabaseConfirmedUser({
       email: identity.email,
       supabaseUser: identity.user || {
         id: identity.userId,
@@ -607,6 +624,7 @@ const verifyEmailWithSupabaseSession = async ({ accessToken }) => {
   return buildVerificationResponse({
     email: identity.email,
     emailVerifiedAt: identity.verifiedAt || new Date().toISOString(),
+    confirmation,
   });
 };
 

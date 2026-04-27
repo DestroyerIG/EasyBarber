@@ -18,6 +18,7 @@ import {
 const router = express.Router();
 
 router.post('/webhooks/asaas', asaasWebhook);
+router.post('/webhook/asaas', asaasWebhook);
 
 router.post(
   '/checkout/session',

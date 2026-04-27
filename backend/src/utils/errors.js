@@ -89,3 +89,19 @@ export class SubscriptionStatusError extends AppError {
     this.subscriptionStatus = subscriptionStatus;
   }
 }
+
+export class SubscriptionRequiredError extends AppError {
+  constructor({
+    subscriptionStatus = 'incomplete',
+    reason = 'subscription_required',
+  } = {}) {
+    super(
+      'Finalize o pagamento para acessar o sistema.',
+      402,
+      'SUBSCRIPTION_REQUIRED'
+    );
+    this.subscriptionStatus = subscriptionStatus;
+    this.reason = reason;
+    this.billingActionRequired = true;
+  }
+}

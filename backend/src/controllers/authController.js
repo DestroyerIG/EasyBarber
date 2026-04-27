@@ -99,6 +99,17 @@ export const verifyEmailSession = async (req, res, next) => {
   }
 };
 
+export const confirmSignup = async (req, res, next) => {
+  try {
+    const data = await authService.verifyEmail({
+      accessToken: req.body.accessToken,
+    });
+    return sendSuccess(res, data);
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const resendVerification = async (req, res, next) => {
   try {
     const data = await authService.resendVerificationEmail(req.body.email);

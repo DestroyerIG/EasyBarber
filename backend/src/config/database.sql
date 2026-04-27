@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS barbershops (
         CHECK (provider IN ('stripe', 'asaas')),
     CONSTRAINT check_barbershops_payment_method
         CHECK (payment_method IN ('card', 'pix', 'boleto')),
-    subscription_status VARCHAR(50) NOT NULL DEFAULT 'active'
+    subscription_status VARCHAR(50) NOT NULL DEFAULT 'incomplete'
         CHECK (subscription_status IN ('active', 'trialing', 'pending', 'past_due', 'unpaid', 'canceled', 'incomplete')),
     subscription_current_period_start TIMESTAMP,
     subscription_current_period_end TIMESTAMP,

@@ -353,8 +353,18 @@ export const authRepository = {
 
     try {
       const result = await client.query(
-        `INSERT INTO barbershops (name, owner_name, email, whatsapp, plan, desired_plan, cpf_cnpj) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        `INSERT INTO barbershops (
+           name,
+           owner_name,
+           email,
+           whatsapp,
+           plan,
+           desired_plan,
+           cpf_cnpj,
+           subscription_status
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'incomplete')
+         RETURNING id`,
         [name, ownerName, email, whatsapp, plan, desiredPlan, normalizedCpfCnpj]
       );
       return result.rows[0];

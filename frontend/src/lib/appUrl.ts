@@ -36,7 +36,7 @@ export const resolveAppUrl = () => {
   if (typeof window === 'undefined') {
     const serverConfiguredUrl =
       ensureAbsoluteUrl(process.env.FRONTEND_URL)
-      || ensureAbsoluteUrl(process.env.VERCEL_URL);
+      || (process.env.NODE_ENV === 'production' ? '' : ensureAbsoluteUrl(process.env.VERCEL_URL));
 
     if (serverConfiguredUrl) {
       return serverConfiguredUrl;

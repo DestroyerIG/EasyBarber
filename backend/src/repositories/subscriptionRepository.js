@@ -39,7 +39,7 @@ export const subscriptionRepository = {
       [barbershopId]
     );
 
-    return result.rows[0] || null;
+    return result?.rows?.[0] || null;
   },
 
   async findByStripeCustomerId(stripeCustomerId, client = null) {

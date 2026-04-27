@@ -11,6 +11,7 @@ import { LoadingSkeleton } from '@/components/LoadingSkeleton';
 import { useToast } from '@/components/Toast';
 import { billingApi, type CheckoutPaymentMethod } from '@/lib/billing';
 import { isPlanId } from '@/lib/plans';
+import { getApiErrorCode } from '@/utils/handleApiError';
 import type { DashboardData } from '@/types';
 
 const PIX_STORAGE_KEY = 'easybarber:pixCheckout';
@@ -35,7 +36,13 @@ export default function DashboardPage() {
     try {
       const response = await api.get('/dashboard');
       setData(response.data);
-    } catch {
+    } catch (error: unknown) {
+      if (getApiErrorCode(error) === 'SUBSCRIPTION_REQUIRED') {
+        showToast('Finalize o pagamento para acessar o sistema.', 'info');
+        router.replace('/planos');
+        return;
+      }
+
       showToast('Erro ao carregar dashboard. Redirecionando...', 'error');
       setTimeout(() => router.push('/login'), 2000);
     } finally {

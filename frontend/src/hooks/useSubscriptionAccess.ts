@@ -8,7 +8,7 @@ export const useSubscriptionAccess = (statusOverride?: string | null) => {
   const { user } = useAuth();
 
   const plan = user?.plan || 'basico';
-  const subscriptionStatus = statusOverride || user?.subscriptionStatus || 'active';
+  const subscriptionStatus = statusOverride || user?.subscriptionStatus || 'incomplete';
 
   const evaluate = useCallback((feature: FeatureKey): FeatureAccessDecision => {
     return evaluateFeatureAccess({

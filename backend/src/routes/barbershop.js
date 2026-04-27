@@ -42,8 +42,8 @@ router.put('/settings', authMiddleware, requireTenantRoles, requireFeature('adva
 
 router.get('/profile', authMiddleware, requireTenantRoles, requireFeature('billing'), getBarbershopProfile);
 router.put('/profile', authMiddleware, requireTenantRoles, requireFeature('billing'), validate({ body: updateBarbershopProfileSchema }), updateBarbershopProfile);
-router.get('/account-profile', authMiddleware, requireRole(['tenant_admin']), requireFeature('advanced_admin'), getAccountProfile);
-router.put('/account-profile', authMiddleware, requireRole(['tenant_admin']), requireFeature('advanced_admin'), validate({ body: updateAccountProfileSchema }), updateAccountProfile);
+router.get('/account-profile', authMiddleware, requireRole(['tenant_admin']), getAccountProfile);
+router.put('/account-profile', authMiddleware, requireRole(['tenant_admin']), validate({ body: updateAccountProfileSchema }), updateAccountProfile);
 router.put('/account-password', authMiddleware, requireRole(['tenant_admin']), requireFeature('advanced_admin'), validate({ body: updateAccountPasswordSchema }), updateAccountPassword);
 
 export default router;

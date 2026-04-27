@@ -34,33 +34,22 @@ export const STATUS_FEATURE_ALLOWLIST = Object.freeze({
   active: null,
   trialing: null,
   pending: createFeatureSet([
-    'dashboard',
     'billing',
     'subscription_status',
   ]),
   past_due: createFeatureSet([
-    'dashboard',
-    'appointments',
-    'clients',
-    'services',
     'billing',
     'subscription_status',
   ]),
   unpaid: createFeatureSet([
-    'dashboard',
-    'appointments',
-    'clients',
-    'services',
     'billing',
     'subscription_status',
   ]),
   incomplete: createFeatureSet([
-    'dashboard',
     'billing',
     'subscription_status',
   ]),
   canceled: createFeatureSet([
-    'dashboard',
     'billing',
     'subscription_status',
   ]),
@@ -81,7 +70,7 @@ export const normalizePlan = (value) => {
 
 export const normalizeSubscriptionStatus = (value) => {
   if (typeof value !== 'string') {
-    return 'active';
+    return 'incomplete';
   }
 
   const normalized = value.toLowerCase();
@@ -89,7 +78,7 @@ export const normalizeSubscriptionStatus = (value) => {
     return normalized;
   }
 
-  return 'active';
+  return 'incomplete';
 };
 
 export const getRequiredPlanForFeature = (feature) => {

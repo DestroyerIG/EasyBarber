@@ -150,6 +150,12 @@ app.post(
   stripeWebhook
 );
 
+app.post(
+  `${API_V1}/billing/webhook/stripe`,
+  express.raw({ type: 'application/json' }),
+  stripeWebhook
+);
+
 app.post(`${API_V1}/whatsapp/webhook/:event`, (req, res, next) => {
   const eventName = normalizeWebhookEventName(req.params.event || '');
 
@@ -221,7 +227,9 @@ const apiLimiter = rateLimit({
   skip: (req) =>
     req.method === 'OPTIONS' ||
     req.originalUrl.startsWith(`${API_V1}/subscriptions/webhook`) ||
-    req.originalUrl.startsWith(`${API_V1}/billing/webhooks/asaas`),
+    req.originalUrl.startsWith(`${API_V1}/billing/webhook/stripe`) ||
+    req.originalUrl.startsWith(`${API_V1}/billing/webhooks/asaas`) ||
+    req.originalUrl.startsWith(`${API_V1}/billing/webhook/asaas`),
   message: {
     success: false,
     error: {

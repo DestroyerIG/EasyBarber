@@ -22,6 +22,8 @@ interface CallbackParams {
   refreshToken: string | null;
   email: string | null;
   legacyToken: string | null;
+  error: string | null;
+  errorCode: string | null;
 }
 
 const SUCCESS_REDIRECT_URL = '/login?confirmed=1';
@@ -89,9 +91,27 @@ const getBackendMessage = (payload: unknown, fallback: string) => {
   return fallback;
 };
 
+const logConfirmSignup = (context: Record<string, unknown>) => {
+  console.info('Auth confirm', {
+    operation: 'confirmSignup',
+    ...context,
+  });
+};
+
+const getSyncSummary = (payload: unknown) => {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const confirmation = (payload as { confirmation?: unknown }).confirmation;
+  return confirmation && typeof confirmation === 'object'
+    ? confirmation as Record<string, unknown>
+    : null;
+};
+
 export function AuthConfirmView() {
   const [status, setStatus] = useState<ConfirmationStatus>('loading');
-  const [message, setMessage] = useState('Validando a confirmação do seu e-mail...');
+  const [message, setMessage] = useState('Confirmando seu e-mail...');
   const [email, setEmail] = useState('');
   const [resending, setResending] = useState(false);
 
@@ -103,7 +123,7 @@ export function AuthConfirmView() {
 
     const confirmEmail = async () => {
       setStatus('loading');
-      setMessage('Validando a confirmação do seu e-mail...');
+      setMessage('Confirmando seu e-mail...');
 
       try {
         if (!isSupabaseClientConfigured()) {
@@ -142,6 +162,8 @@ export function AuthConfirmView() {
             ),
             email: firstValue(hashParams.get('email'), searchParams.get('email')),
             legacyToken: firstValue(searchParams.get('token')),
+            error: firstValue(hashParams.get('error'), searchParams.get('error')),
+            errorCode: firstValue(hashParams.get('error_code'), searchParams.get('error_code')),
           };
         };
 
@@ -158,13 +180,30 @@ export function AuthConfirmView() {
         const callbackParams = readCallbackParams();
         scrubSensitiveUrlParams(callbackParams.email);
 
+        logConfirmSignup({
+          codePresent: Boolean(callbackParams.code),
+          tokenHashPresent: Boolean(callbackParams.tokenHash),
+          type: callbackParams.type,
+          email: callbackParams.email,
+          reason: callbackParams.errorCode || callbackParams.error || 'callback_received',
+        });
+
         if (callbackParams.email && active) {
           setEmail(callbackParams.email);
+        }
+
+        if (callbackParams.error || callbackParams.errorCode) {
+          throw new Error(
+            callbackParams.errorCode === 'otp_expired'
+              ? 'Link expirado ou inválido'
+              : 'Link de confirmação inválido ou incompleto. Solicite um novo e-mail.'
+          );
         }
 
         const supabase = getSupabaseClient();
         let accessToken = callbackParams.accessToken;
         let supabaseConfirmed = false;
+        let supabaseUserId: string | null = null;
 
         if (callbackParams.code) {
           const { data, error } = await supabase.auth.exchangeCodeForSession(callbackParams.code);
@@ -175,6 +214,7 @@ export function AuthConfirmView() {
 
           supabaseConfirmed = true;
           accessToken = data.session?.access_token || accessToken;
+          supabaseUserId = data.user?.id || null;
 
           if (active && data.user?.email) {
             setEmail(data.user.email);
@@ -196,6 +236,7 @@ export function AuthConfirmView() {
 
             supabaseConfirmed = true;
             accessToken = data.session?.access_token || accessToken;
+            supabaseUserId = data.user?.id || null;
 
             if (active && data.user?.email) {
               setEmail(data.user.email);
@@ -220,6 +261,7 @@ export function AuthConfirmView() {
 
           supabaseConfirmed = true;
           accessToken = data.session?.access_token || callbackParams.accessToken;
+          supabaseUserId = data.user?.id || null;
 
           if (active && data.user?.email) {
             setEmail(data.user.email);
@@ -244,28 +286,39 @@ export function AuthConfirmView() {
           throw new Error('Link de confirmação inválido ou incompleto. Solicite um novo e-mail.');
         }
 
+        if (supabaseConfirmed && !accessToken) {
+          const { data } = await supabase.auth.getSession();
+          accessToken = data.session?.access_token || null;
+        }
+
         try {
           let syncResponse = null;
 
           if (accessToken) {
-            syncResponse = await api.post('/auth/verify-email-session', {
+            syncResponse = await api.post('/auth/confirm', {
               accessToken,
             });
-          } else if (callbackParams.tokenHash) {
-            syncResponse = await api.get('/auth/verify-email', {
-              params: {
-                token_hash: callbackParams.tokenHash,
-                ...(callbackParams.type ? { type: callbackParams.type } : {}),
-              },
-            });
+          } else {
+            throw new Error('Falha ao finalizar cadastro');
           }
 
           if (!active) return;
 
           const successMessage = getBackendMessage(
             syncResponse?.data,
-            'E-mail confirmado com sucesso. Agora você já pode entrar.'
+            'E-mail confirmado com sucesso'
           );
+          const syncSummary = getSyncSummary(syncResponse?.data);
+
+          logConfirmSignup({
+            supabaseUserId: syncSummary?.supabaseUserId || supabaseUserId,
+            email: syncSummary?.email || callbackParams.email || null,
+            localSyncApplied: syncSummary?.syncApplied === true,
+            pendingRegistrationCompleted: syncSummary?.pendingRegistrationCompleted === true,
+            localUserCreatedOrUpdated:
+              syncSummary?.localUserCreated === true || syncSummary?.localUserUpdated === true,
+            reason: syncSummary?.reason || 'confirmation_completed',
+          });
 
           setStatus('success');
           setMessage(successMessage);
@@ -274,7 +327,7 @@ export function AuthConfirmView() {
           if (!active) return;
 
           const fallbackMessage = supabaseConfirmed
-            ? 'Seu e-mail foi confirmado no provedor de autenticação, mas não foi possível sincronizar tudo agora. Tente entrar novamente em instantes.'
+            ? 'Falha ao finalizar cadastro'
             : 'Não foi possível finalizar a confirmação do seu e-mail.';
 
           setStatus('error');
@@ -286,7 +339,7 @@ export function AuthConfirmView() {
 
         const errorMessage = getApiErrorMessage(
           error,
-          'Não foi possível confirmar seu e-mail. O link pode estar inválido ou expirado.'
+          'Link expirado ou inválido'
         );
 
         setStatus('error');
@@ -360,13 +413,13 @@ export function AuthConfirmView() {
 
         {status === 'loading' && (
           <div className="mt-6 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-gray-300">
-            Aguarde enquanto finalizamos a confirmação da sua conta...
+            Confirmando seu e-mail...
           </div>
         )}
 
         {status === 'success' && (
           <div className="mt-6 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
-            Conta validada com sucesso. Você será redirecionado para o login em instantes.
+            E-mail confirmado com sucesso. Você será redirecionado para o login em instantes.
           </div>
         )}
 
@@ -398,7 +451,7 @@ export function AuthConfirmView() {
               disabled={resending}
               className="btn-primary w-full text-sm disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {resending ? 'Reenviando...' : 'Reenviar e-mail de verificação'}
+              {resending ? 'Reenviando...' : 'Reenviar e-mail de confirmação'}
             </button>
           </form>
         )}
