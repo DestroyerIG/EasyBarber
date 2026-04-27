@@ -181,6 +181,20 @@ const extractAsaasErrors = (responseBody) => {
   return [];
 };
 
+const hasInvalidAccessTokenError = (providerContext = {}, error = null) => {
+  if (String(error?.code || '').toUpperCase() === 'ASAAS_INVALID_ACCESS_TOKEN') {
+    return true;
+  }
+
+  const responseErrors = Array.isArray(providerContext?.responseErrors)
+    ? providerContext.responseErrors
+    : [];
+
+  return responseErrors.some(
+    (item) => String(item?.code || '').toLowerCase() === 'invalid_access_token'
+  );
+};
+
 const buildAsaasErrorContext = (
   error,
   { method = null, path = null, requestPayload = null } = {}
@@ -617,6 +631,30 @@ const rethrowAsaasError = (
   contextOptions = {}
 ) => {
   const providerContext = buildAsaasErrorContext(error, contextOptions);
+  if (hasInvalidAccessTokenError(providerContext, error)) {
+    const appError = new AppError(
+      'Configuração Asaas inválida. Verifique ASAAS_API_KEY no Render.',
+      503,
+      'ASAAS_INVALID_ACCESS_TOKEN'
+    );
+    appError.providerStatus = providerContext.statusCode || null;
+    appError.providerData = {
+      provider: providerContext.provider,
+      method: providerContext.method || contextOptions.method || null,
+      path: providerContext.path || contextOptions.path || null,
+      url: providerContext.url || null,
+      statusCode: providerContext.statusCode || null,
+      requestBody: maskSensitiveData(providerContext.requestPayload),
+      payload: maskSensitiveData(providerContext.responseBody),
+      responseBodyRaw: maskSensitiveText(providerContext.responseText),
+      responseJson: maskSensitiveData(providerContext.responseJson),
+      errors: maskSensitiveData(providerContext.responseErrors),
+      responseHeaders: providerContext.responseHeaders || null,
+    };
+    appError.providerHeaders = providerContext.responseHeaders || null;
+    throw appError;
+  }
+
   const responseData =
     providerContext.responseBody ||
     (providerContext.responseText ? { rawBody: providerContext.responseText } : null);
@@ -815,6 +853,19 @@ export const asaasService = {
         path: '/customers',
         requestPayload: payload,
       });
+
+      if (hasInvalidAccessTokenError(providerContext, error)) {
+        rethrowAsaasError(
+          error,
+          'Configuração Asaas inválida. Verifique ASAAS_API_KEY no Render.',
+          'ASAAS_INVALID_ACCESS_TOKEN',
+          {
+            method: 'POST',
+            path: '/customers',
+            requestPayload: payload,
+          }
+        );
+      }
 
       logger.error(
         {

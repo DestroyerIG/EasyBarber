@@ -22,16 +22,58 @@ const maskApiKey = (value) => {
   return `${normalized.slice(0, 8)}...${normalized.slice(-4)}`;
 };
 
+const stripWrappingQuotes = (value) => {
+  const normalized = String(value || '').trim();
+  if (normalized.length < 2) {
+    return normalized;
+  }
+
+  const first = normalized[0];
+  const last = normalized[normalized.length - 1];
+  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+    return normalized.slice(1, -1).trim();
+  }
+
+  return normalized;
+};
+
+export const normalizeAsaasApiKey = (value) => {
+  let normalized = stripWrappingQuotes(value);
+  normalized = normalized.replace(/^Bearer\s+/i, '').trim();
+  normalized = stripWrappingQuotes(normalized);
+  normalized = normalized.replace(/^\$+/, '').trim();
+  normalized = stripWrappingQuotes(normalized);
+
+  return normalized;
+};
+
+export const getAsaasApiKeyDiagnostics = (value = process.env.ASAAS_API_KEY) => {
+  const rawValue = value === undefined || value === null ? '' : String(value);
+  const trimmedValue = rawValue.trim();
+  const comparableValue = stripWrappingQuotes(trimmedValue)
+    .replace(/^Bearer\s+/i, '')
+    .trim();
+  const normalizedApiKey = normalizeAsaasApiKey(rawValue);
+
+  return {
+    startsWithAact: normalizedApiKey.startsWith('aact_'),
+    startsWithDollar: comparableValue.startsWith('$'),
+    hasWhitespace: rawValue !== trimmedValue || /\s/.test(trimmedValue),
+    length: normalizedApiKey.length,
+    maskedPrefix: normalizedApiKey ? maskApiKey(normalizedApiKey) : null,
+  };
+};
+
 const inferEnvironmentFromApiKey = (apiKey) => {
   if (typeof apiKey !== 'string') {
     return 'unknown';
   }
 
-  if (apiKey.startsWith('$aact_prod_')) {
+  if (apiKey.startsWith('aact_prod_')) {
     return 'production';
   }
 
-  if (apiKey.startsWith('$aact_hmlg_')) {
+  if (apiKey.startsWith('aact_hmlg_')) {
     return 'sandbox';
   }
 
@@ -67,7 +109,7 @@ const serializeHeaders = (headers) => {
 };
 
 const getConfig = () => {
-  const apiKey = String(process.env.ASAAS_API_KEY || '').trim();
+  const apiKey = normalizeAsaasApiKey(process.env.ASAAS_API_KEY);
 
   if (!apiKey) {
     throw new AppError(
@@ -360,8 +402,18 @@ const buildAsaasError = ({
         ? { rawBody: responseText }
         : null;
   const apiMessage = responseBody?.errors?.[0]?.description || responseBody?.message || null;
-  const message = apiMessage || responseText || `Erro Asaas (${method} ${path})`;
-  const error = new AppError(message, statusCode || 502, 'ASAAS_API_ERROR');
+  const errorCodes = Array.isArray(responseBody?.errors)
+    ? responseBody.errors.map((item) => String(item?.code || '').toLowerCase())
+    : [];
+  const invalidAccessToken = errorCodes.includes('invalid_access_token');
+  const message = invalidAccessToken
+    ? 'Configuração Asaas inválida. Verifique ASAAS_API_KEY no Render.'
+    : apiMessage || responseText || `Erro Asaas (${method} ${path})`;
+  const error = new AppError(
+    message,
+    invalidAccessToken ? 503 : statusCode || 502,
+    invalidAccessToken ? 'ASAAS_INVALID_ACCESS_TOKEN' : 'ASAAS_API_ERROR'
+  );
   error.response = {
     status: statusCode || 502,
     data: responseBody,

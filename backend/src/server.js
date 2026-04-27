@@ -21,6 +21,7 @@ import adminRoutes from './routes/admin.js';
 import { stripeWebhook } from './controllers/subscriptionController.js';
 import { startReminderCron } from './services/cronService.js';
 import { initWhatsApp } from './services/whatsappClient.js';
+import { getAsaasApiKeyDiagnostics } from './integrations/asaas/client.js';
 
 dotenv.config();
 
@@ -76,6 +77,16 @@ if (stripeBillingEnabled) {
 if (process.env.ASAAS_BASE_URL && !process.env.ASAAS_API_KEY) {
   logger.fatal('ASAAS_BASE_URL definido sem ASAAS_API_KEY');
   process.exit(1);
+}
+
+if (process.env.ASAAS_API_KEY) {
+  logger.info(
+    {
+      event: 'asaas_api_key_diagnostics',
+      ...getAsaasApiKeyDiagnostics(),
+    },
+    'Diagnóstico da chave Asaas no boot'
+  );
 }
 
 const app = express();

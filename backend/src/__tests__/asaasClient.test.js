@@ -12,7 +12,11 @@ jest.unstable_mockModule('../utils/logger.js', () => ({
   default: mockLogger,
 }));
 
-const { asaasClient } = await import('../integrations/asaas/client.js');
+const {
+  asaasClient,
+  getAsaasApiKeyDiagnostics,
+  normalizeAsaasApiKey,
+} = await import('../integrations/asaas/client.js');
 
 describe('asaasClient', () => {
   const originalEnv = { ...process.env };
@@ -22,7 +26,7 @@ describe('asaasClient', () => {
     jest.clearAllMocks();
     process.env = {
       ...originalEnv,
-      ASAAS_API_KEY: '$aact_prod_test_key_123456',
+      ASAAS_API_KEY: 'aact_prod_test_key_123456',
       ASAAS_BASE_URL: 'https://api.asaas.com/v3',
       ASAAS_TIMEOUT_MS: '12000',
     };
@@ -105,7 +109,7 @@ describe('asaasClient', () => {
         headers: expect.objectContaining({
           accept: 'application/json',
           'content-type': 'application/json',
-          access_token: '$aact_prod_test_key_123456',
+          access_token: 'aact_prod_test_key_123456',
           'user-agent': 'EasyBarber/1.0',
           'idempotency-key': 'pix-checkout:test-client-1',
           'Idempotency-Key': 'pix-checkout:test-client-1',
@@ -117,6 +121,93 @@ describe('asaasClient', () => {
         }),
       })
     );
+  });
+
+  it('normalizes Asaas API key before sending access_token header', async () => {
+    process.env.ASAAS_API_KEY = '  "Bearer $aact_prod_test_key_quoted"  ';
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        'content-type': 'application/json',
+      }),
+      text: async () => JSON.stringify({ data: [] }),
+    });
+
+    await asaasClient.get('/customers', {
+      query: {
+        cpfCnpj: '70596090404',
+      },
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      new URL('https://api.asaas.com/v3/customers?cpfCnpj=70596090404'),
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          access_token: 'aact_prod_test_key_quoted',
+        }),
+      })
+    );
+    expect(global.fetch.mock.calls[0][1].headers.Authorization).toBeUndefined();
+  });
+
+  it('exposes safe Asaas API key diagnostics for boot logs', () => {
+    expect(normalizeAsaasApiKey('  "$aact_prod_test_key_123456" ')).toBe(
+      'aact_prod_test_key_123456'
+    );
+    expect(getAsaasApiKeyDiagnostics('  "$aact_prod_test_key_123456" ')).toEqual({
+      startsWithAact: true,
+      startsWithDollar: true,
+      hasWhitespace: true,
+      length: 'aact_prod_test_key_123456'.length,
+      maskedPrefix: 'aact_pro...3456',
+    });
+    expect(getAsaasApiKeyDiagnostics('$aact_prod_test_key_123456')).toEqual(
+      expect.objectContaining({
+        startsWithAact: true,
+        startsWithDollar: true,
+      })
+    );
+  });
+
+  it('maps invalid_access_token to administrative configuration error', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      headers: new Headers({
+        'content-type': 'application/json',
+        'x-request-id': 'req_invalid_token_1',
+      }),
+      text: async () =>
+        JSON.stringify({
+          errors: [
+            {
+              code: 'invalid_access_token',
+              description: 'A chave de API fornecida é inválida',
+            },
+          ],
+        }),
+    });
+
+    await expect(asaasClient.get('/customers')).rejects.toThrow(
+      'Configuração Asaas inválida. Verifique ASAAS_API_KEY no Render.'
+    );
+    await expect(asaasClient.get('/customers')).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'ASAAS_INVALID_ACCESS_TOKEN',
+      response: {
+        status: 401,
+        data: {
+          errors: [
+            {
+              code: 'invalid_access_token',
+              description: 'A chave de API fornecida é inválida',
+            },
+          ],
+        },
+      },
+    });
   });
 
   it('preserves raw response text and headers when Asaas returns non-json errors', async () => {
