@@ -224,7 +224,7 @@ describe('billingService', () => {
       billingService.createCheckoutSession('tenant-asaas-error-1', 'profissional', 'pix')
     ).rejects.toMatchObject({
       statusCode: 400,
-      code: 'ASAAS_CUSTOMER_CREATE_FAILED',
+      code: 'ASAAS_CUSTOMER_CREATE_ERROR',
       message:
         'Não foi possível criar o cliente no Asaas. Verifique os dados cadastrais e tente novamente.',
       details: {

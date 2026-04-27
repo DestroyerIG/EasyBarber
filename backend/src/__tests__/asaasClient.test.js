@@ -156,4 +156,68 @@ describe('asaasClient', () => {
       }),
     });
   });
+
+  it('normalizes axios-like errors preserving json payload and responseText', async () => {
+    global.fetch = jest.fn().mockRejectedValue({
+      message: 'Request failed with status code 400',
+      response: {
+        status: 400,
+        headers: {
+          'content-type': 'application/json',
+          'x-request-id': 'req_asaas_axios_1',
+        },
+        data: {
+          errors: [
+            {
+              code: 'invalid_cpf',
+              description: 'CPF inválido',
+            },
+          ],
+        },
+      },
+    });
+
+    await expect(
+      asaasClient.post('/customers', {
+        name: 'Cliente Teste',
+        cpfCnpj: '12345678901',
+        mobilePhone: '83999998888',
+      })
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      response: {
+        status: 400,
+        data: {
+          errors: [
+            {
+              code: 'invalid_cpf',
+              description: 'CPF inválido',
+            },
+          ],
+        },
+        headers: {
+          'content-type': 'application/json',
+          'x-request-id': 'req_asaas_axios_1',
+        },
+      },
+      details: expect.objectContaining({
+        payload: {
+          errors: [
+            {
+              code: 'invalid_cpf',
+              description: 'CPF inválido',
+            },
+          ],
+        },
+        responseText: JSON.stringify({
+          errors: [
+            {
+              code: 'invalid_cpf',
+              description: 'CPF inválido',
+            },
+          ],
+        }),
+      }),
+    });
+  });
 });

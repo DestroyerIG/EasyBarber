@@ -53,6 +53,14 @@ const parseJsonSafely = (value) => {
   }
 };
 
+const safeJSONStringify = (value) => {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+};
+
 const normalizeText = (value) => {
   if (typeof value !== 'string') {
     return '';
@@ -94,20 +102,12 @@ const maskEmail = (value) => {
   const domain = normalized.slice(atIndex + 1);
 
   if (!domain) {
-    return `${local.slice(0, 1)}***`;
+    return `${local.slice(0, 1) || '*'}***`;
   }
 
-  const maskedLocal = local.length <= 2
-    ? `${local.slice(0, 1)}*`
-    : `${local.slice(0, 2)}***`;
+  const maskedLocal = `${local.slice(0, 1) || '*'}***`;
 
-  const [domainName, ...domainTailParts] = domain.split('.');
-  const domainTail = domainTailParts.length > 0 ? `.${domainTailParts.join('.')}` : '';
-  const maskedDomainName = domainName
-    ? `${domainName.slice(0, 1)}***`
-    : '***';
-
-  return `${maskedLocal}@${maskedDomainName}${domainTail}`;
+  return `${maskedLocal}@${domain}`;
 };
 
 const maskSensitiveByKey = (key, value) => {
@@ -183,13 +183,39 @@ const buildAsaasErrorContext = (
 ) => {
   const details = error?.details || {};
   const providerData = error?.providerData || null;
-  const responsePayloadFromString = parseJsonSafely(details?.responseText);
+  const responseTextFromProvider =
+    typeof providerData?.responseText === 'string'
+      ? providerData.responseText
+      : null;
+  const responseTextFromDetails =
+    typeof details?.responseText === 'string'
+      ? details.responseText
+      : null;
+  const responseTextFromResponseData =
+    typeof error?.response?.data === 'string'
+      ? error.response.data
+      : null;
+  const responseText =
+    responseTextFromProvider ||
+    responseTextFromDetails ||
+    responseTextFromResponseData ||
+    null;
+  const responsePayloadFromString = parseJsonSafely(responseText);
   const responseBody =
     providerData?.payload ||
     error?.response?.data ||
     details?.payload ||
     responsePayloadFromString ||
-    (details?.responseText ? { rawBody: details.responseText } : null);
+    (responseText ? { rawBody: responseText } : null);
+  const responseJson =
+    providerData?.responseJson ||
+    (responseBody && typeof responseBody === 'object' && !Object.prototype.hasOwnProperty.call(responseBody, 'rawBody')
+      ? responseBody
+      : responsePayloadFromString) ||
+    null;
+  const responseBodyRaw =
+    responseText ||
+    (responseJson ? safeJSONStringify(responseJson) : null);
   const responseHeaders =
     providerData?.responseHeaders ||
     error?.response?.headers ||
@@ -200,9 +226,11 @@ const buildAsaasErrorContext = (
     requestPayload ||
     providerData?.requestPayload ||
     parsedRequestBody ||
+    details?.requestBody ||
     null;
 
   return {
+    provider: 'asaas',
     statusCode:
       error?.providerStatus ||
       error?.response?.status ||
@@ -211,10 +239,13 @@ const buildAsaasErrorContext = (
       null,
     method: providerData?.method || details?.method || method,
     path: providerData?.path || details?.path || path,
+    url: providerData?.url || details?.url || null,
     requestPayload: resolvedRequestPayload,
+    responseText: responseBodyRaw,
     responseBody,
+    responseJson,
     responseHeaders,
-    responseErrors: providerData?.errors || extractAsaasErrors(responseBody),
+    responseErrors: providerData?.errors || extractAsaasErrors(responseJson || responseBody),
   };
 };
 
@@ -553,7 +584,7 @@ const validateCustomerCpfCnpjOrThrow = (cpfCnpj) => {
   const length = cpfCnpj.length;
   if (length !== 11 && length !== 14) {
     throw new AppError(
-      'CPF/CNPJ inválido. Informe um CPF com 11 dígitos ou CNPJ com 14 dígitos.',
+      'CPF/CNPJ inválido. Verifique os dados cadastrais.',
       400,
       'INVALID_CPF_CNPJ'
     );
@@ -561,7 +592,7 @@ const validateCustomerCpfCnpjOrThrow = (cpfCnpj) => {
 
   if (!isValidCpfCnpj(cpfCnpj)) {
     throw new AppError(
-      'CPF/CNPJ inválido. Informe um CPF com 11 dígitos ou CNPJ com 14 dígitos.',
+      'CPF/CNPJ inválido. Verifique os dados cadastrais.',
       400,
       'INVALID_CPF_CNPJ'
     );
@@ -605,9 +636,9 @@ const buildCustomerPayload = (barbershop) => {
 
   if (!mobilePhone) {
     throw new AppError(
-      'Telefone/WhatsApp obrigatório para pagamento via Pix.',
+      'Telefone/WhatsApp inválido. Verifique os dados cadastrais.',
       400,
-      'MOBILE_PHONE_REQUIRED'
+      'MOBILE_PHONE_INVALID'
     );
   }
 
@@ -630,7 +661,9 @@ const rethrowAsaasError = (
   contextOptions = {}
 ) => {
   const providerContext = buildAsaasErrorContext(error, contextOptions);
-  const responseData = providerContext.responseBody;
+  const responseData =
+    providerContext.responseBody ||
+    (providerContext.responseText ? { rawBody: providerContext.responseText } : null);
   const responseHeaders = providerContext.responseHeaders || null;
   const responseErrors = providerContext.responseErrors || [];
   const asaasMessage =
@@ -649,11 +682,16 @@ const rethrowAsaasError = (
   appError.details = maskSensitiveData(responseData) || null;
   appError.providerStatus = providerContext.statusCode || null;
   appError.providerData = {
+    provider: providerContext.provider,
     method: providerContext.method || contextOptions.method || null,
     path: providerContext.path || contextOptions.path || null,
+    url: providerContext.url || null,
     statusCode: providerContext.statusCode || null,
+    requestBody: maskSensitiveData(providerContext.requestPayload),
     requestPayload: maskSensitiveData(providerContext.requestPayload),
     payload: maskSensitiveData(responseData),
+    responseText: providerContext.responseText || null,
+    responseJson: maskSensitiveData(providerContext.responseJson),
     errors: maskSensitiveData(responseErrors),
     responseHeaders: providerContext.responseHeaders || null,
   };
@@ -695,11 +733,16 @@ const syncExistingCustomer = async ({
     logger.error(
       {
         message: error?.message,
+        provider: providerContext.provider,
         statusCode,
         method: providerContext.method,
         path: providerContext.path,
+        url: providerContext.url,
         providerStatus: statusCode,
+        requestBody: maskSensitiveData(payload),
         requestPayload: maskSensitiveData(payload),
+        responseBodyRaw: providerContext.responseText,
+        responseJson: maskSensitiveData(providerContext.responseJson),
         responseBody: maskSensitiveData(providerContext.responseBody),
         responseErrors: maskSensitiveData(providerContext.responseErrors),
         providerHeaders: providerContext.responseHeaders,
@@ -935,10 +978,15 @@ export const asaasService = {
           event: 'asaas_customer_create_error',
           barbershopId: barbershop.id,
           message: error?.message,
+          provider: providerContext.provider,
           statusCode: providerContext.statusCode,
           method: providerContext.method,
           path: providerContext.path,
+          url: providerContext.url,
+          requestBody: maskSensitiveData(providerContext.requestPayload),
           requestPayload: maskSensitiveData(providerContext.requestPayload),
+          responseBodyRaw: providerContext.responseText,
+          responseJson: maskSensitiveData(providerContext.responseJson),
           responseBody: maskSensitiveData(providerContext.responseBody),
           responseErrors: maskSensitiveData(providerContext.responseErrors),
           providerHeaders: providerContext.responseHeaders,
@@ -1023,10 +1071,15 @@ export const asaasService = {
       logger.error(
         {
           message: error?.message,
+          provider: providerContext.provider,
           statusCode: providerContext.statusCode,
           method: providerContext.method,
           path: providerContext.path,
+          url: providerContext.url,
+          requestBody: maskSensitiveData(providerContext.requestPayload),
           requestPayload: maskSensitiveData(providerContext.requestPayload),
+          responseBodyRaw: providerContext.responseText,
+          responseJson: maskSensitiveData(providerContext.responseJson),
           responseBody: maskSensitiveData(providerContext.responseBody),
           responseErrors: maskSensitiveData(providerContext.responseErrors),
           providerHeaders: providerContext.responseHeaders,

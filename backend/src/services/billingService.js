@@ -427,7 +427,7 @@ export const billingService = {
         const controlledError = new AppError(
           'Não foi possível criar o cliente no Asaas. Verifique os dados cadastrais e tente novamente.',
           400,
-          'ASAAS_CUSTOMER_CREATE_FAILED'
+          'ASAAS_CUSTOMER_CREATE_ERROR'
         );
 
         controlledError.details = {

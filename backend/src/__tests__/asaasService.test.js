@@ -178,7 +178,7 @@ describe('asaasService', () => {
     ).rejects.toMatchObject({
       statusCode: 400,
       code: 'INVALID_CPF_CNPJ',
-      message: 'CPF/CNPJ inválido. Informe um CPF com 11 dígitos ou CNPJ com 14 dígitos.',
+      message: 'CPF/CNPJ inválido. Verifique os dados cadastrais.',
     });
   });
 
@@ -193,8 +193,8 @@ describe('asaasService', () => {
       })
     ).rejects.toMatchObject({
       statusCode: 400,
-      code: 'MOBILE_PHONE_REQUIRED',
-      message: 'Telefone/WhatsApp obrigatório para pagamento via Pix.',
+      code: 'MOBILE_PHONE_INVALID',
+      message: 'Telefone/WhatsApp inválido. Verifique os dados cadastrais.',
     });
   });
 

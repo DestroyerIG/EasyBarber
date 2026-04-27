@@ -164,6 +164,14 @@ const parseJsonSafely = (text) => {
   }
 };
 
+const safeJSONStringify = (value) => {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+};
+
 const maskDigitsTail = (value, visibleDigits = 4) => {
   if (value === undefined || value === null) {
     return null;
@@ -197,20 +205,12 @@ const maskEmail = (value) => {
   const domain = normalized.slice(atIndex + 1);
 
   if (!domain) {
-    return `${local.slice(0, 1)}***`;
+    return `${local.slice(0, 1) || '*'}***`;
   }
 
-  const maskedLocal = local.length <= 2
-    ? `${local.slice(0, 1)}*`
-    : `${local.slice(0, 2)}***`;
+  const maskedLocal = `${local.slice(0, 1) || '*'}***`;
 
-  const [domainName, ...domainTailParts] = domain.split('.');
-  const domainTail = domainTailParts.length > 0 ? `.${domainTailParts.join('.')}` : '';
-  const maskedDomainName = domainName
-    ? `${domainName.slice(0, 1)}***`
-    : '***';
-
-  return `${maskedLocal}@${maskedDomainName}${domainTail}`;
+  return `${maskedLocal}@${domain}`;
 };
 
 const maskSensitiveByKey = (key, value) => {
@@ -261,6 +261,86 @@ const sanitizeBodyForLog = (serializedBody) => {
   }
 
   return serializedBody;
+};
+
+const isResponseLikeError = (error) => {
+  const response = error?.response;
+
+  if (!response) {
+    return false;
+  }
+
+  return (
+    typeof response?.status === 'number' ||
+    typeof response?.text === 'function' ||
+    response?.data !== undefined
+  );
+};
+
+const normalizeErrorResponseContext = async (error) => {
+  const response = error?.response;
+
+  if (!response) {
+    return null;
+  }
+
+  const statusCode =
+    (typeof response?.status === 'number' ? response.status : null) ||
+    (typeof error?.statusCode === 'number' ? error.statusCode : null) ||
+    (typeof error?.status === 'number' ? error.status : null) ||
+    null;
+
+  let responseText = null;
+  if (typeof response?.text === 'function') {
+    try {
+      responseText = await response.text();
+    } catch {
+      responseText = null;
+    }
+  }
+
+  const responseData = response?.data;
+  const responseHeaders = serializeHeaders(response?.headers || error?.headers || {});
+
+  if (!responseText && typeof responseData === 'string') {
+    responseText = responseData;
+  }
+
+  const responseJsonFromText = parseJsonSafely(responseText);
+  const responseJson =
+    (responseData && typeof responseData === 'object' ? responseData : null) ||
+    responseJsonFromText ||
+    null;
+
+  let payload = null;
+  if (responseData !== undefined && responseData !== null) {
+    if (typeof responseData === 'object') {
+      payload = responseData;
+    } else if (typeof responseData === 'string') {
+      payload = responseJsonFromText || { rawBody: responseData };
+    } else {
+      payload = { rawBody: String(responseData) };
+    }
+  }
+
+  if (!payload && responseJson) {
+    payload = responseJson;
+  }
+
+  if (!payload && responseText) {
+    payload = { rawBody: responseText };
+  }
+
+  if (!responseText && responseJson) {
+    responseText = safeJSONStringify(responseJson);
+  }
+
+  return {
+    statusCode,
+    responseHeaders,
+    responseText,
+    payload,
+  };
 };
 
 const buildAsaasError = ({
@@ -416,13 +496,28 @@ const request = async (method, path, options = {}) => {
         throw error;
       }
 
+      if (isResponseLikeError(error)) {
+        const normalizedErrorContext = await normalizeErrorResponseContext(error);
+
+        throw buildAsaasError({
+          statusCode: normalizedErrorContext?.statusCode,
+          payload: normalizedErrorContext?.payload,
+          responseHeaders: normalizedErrorContext?.responseHeaders,
+          responseText: normalizedErrorContext?.responseText,
+          method,
+          path,
+          url: url.toString(),
+          requestBody: serializedBody,
+        });
+      }
+
       logger.error(
         {
           err: error,
           method,
           path,
           url: url.toString(),
-          requestBody: serializedBody,
+          requestBody: sanitizeBodyForLog(serializedBody),
         },
         'Falha ao comunicar com Asaas'
       );
