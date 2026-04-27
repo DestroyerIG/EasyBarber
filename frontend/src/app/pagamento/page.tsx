@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import { CreditCard, Loader2, QrCode, RefreshCw, ShieldCheck } from 'lucide-react';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -45,7 +45,7 @@ const resolvePlan = (
   return 'basico';
 };
 
-export default function PagamentoPage() {
+function PagamentoContent() {
   const [billingStatus, setBillingStatus] = useState<SubscriptionStatusResponse | null>(null);
   const [pixCheckout, setPixCheckout] = useState<PixCheckoutSessionResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -309,5 +309,13 @@ export default function PagamentoPage() {
         </div>
       </section>
     </main>
+  );
+}
+
+export default function PagamentoPage() {
+  return (
+    <Suspense fallback={<div>Carregando pagamento...</div>}>
+      <PagamentoContent />
+    </Suspense>
   );
 }
