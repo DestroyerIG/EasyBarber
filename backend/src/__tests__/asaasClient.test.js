@@ -145,7 +145,7 @@ describe('asaasClient', () => {
       expect.objectContaining({
         method: 'GET',
         headers: expect.objectContaining({
-          access_token: 'aact_prod_test_key_quoted',
+          access_token: '$aact_prod_test_key_quoted',
         }),
       })
     );
@@ -154,20 +154,45 @@ describe('asaasClient', () => {
 
   it('exposes safe Asaas API key diagnostics for boot logs', () => {
     expect(normalizeAsaasApiKey('  "$aact_prod_test_key_123456" ')).toBe(
-      'aact_prod_test_key_123456'
+      '$aact_prod_test_key_123456'
     );
     expect(getAsaasApiKeyDiagnostics('  "$aact_prod_test_key_123456" ')).toEqual({
       startsWithAact: true,
       startsWithDollar: true,
       hasWhitespace: true,
-      length: 'aact_prod_test_key_123456'.length,
-      maskedPrefix: 'aact_pro...3456',
+      length: '$aact_prod_test_key_123456'.length,
+      maskedPrefix: '$aact_pr...3456',
     });
     expect(getAsaasApiKeyDiagnostics('$aact_prod_test_key_123456')).toEqual(
       expect.objectContaining({
         startsWithAact: true,
         startsWithDollar: true,
       })
+    );
+  });
+
+  it('infers Asaas environment from keys that preserve the dollar prefix', async () => {
+    process.env.ASAAS_API_KEY = '$aact_hmlg_test_key_123456';
+    process.env.ASAAS_BASE_URL = 'https://api.asaas.com/v3';
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        'content-type': 'application/json',
+      }),
+      text: async () => JSON.stringify({ data: [] }),
+    });
+
+    await asaasClient.get('/customers');
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 'ASAAS_ENVIRONMENT_MISMATCH',
+        keyEnvironment: 'sandbox',
+        urlEnvironment: 'production',
+        maskedApiKey: '$aact_hm...3456',
+      }),
+      'Ambiente da chave Asaas difere da URL configurada'
     );
   });
 

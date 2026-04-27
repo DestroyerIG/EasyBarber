@@ -41,8 +41,6 @@ export const normalizeAsaasApiKey = (value) => {
   let normalized = stripWrappingQuotes(value);
   normalized = normalized.replace(/^Bearer\s+/i, '').trim();
   normalized = stripWrappingQuotes(normalized);
-  normalized = normalized.replace(/^\$+/, '').trim();
-  normalized = stripWrappingQuotes(normalized);
 
   return normalized;
 };
@@ -54,9 +52,10 @@ export const getAsaasApiKeyDiagnostics = (value = process.env.ASAAS_API_KEY) => 
     .replace(/^Bearer\s+/i, '')
     .trim();
   const normalizedApiKey = normalizeAsaasApiKey(rawValue);
+  const apiKeyWithoutDollarPrefix = normalizedApiKey.replace(/^\$+/, '');
 
   return {
-    startsWithAact: normalizedApiKey.startsWith('aact_'),
+    startsWithAact: apiKeyWithoutDollarPrefix.startsWith('aact_'),
     startsWithDollar: comparableValue.startsWith('$'),
     hasWhitespace: rawValue !== trimmedValue || /\s/.test(trimmedValue),
     length: normalizedApiKey.length,
@@ -69,11 +68,11 @@ const inferEnvironmentFromApiKey = (apiKey) => {
     return 'unknown';
   }
 
-  if (apiKey.startsWith('aact_prod_')) {
+  if (apiKey.startsWith('$aact_prod_') || apiKey.startsWith('aact_prod_')) {
     return 'production';
   }
 
-  if (apiKey.startsWith('aact_hmlg_')) {
+  if (apiKey.startsWith('$aact_hmlg_') || apiKey.startsWith('aact_hmlg_')) {
     return 'sandbox';
   }
 
