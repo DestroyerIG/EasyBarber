@@ -6,11 +6,24 @@ import { mapAsaasStatusToInternalStatus } from '../statusMapper.js';
 export const asaasBillingProvider = {
   provider: 'asaas',
 
-  async createCustomer({ barbershop, idempotencyKey = null }) {
-    return asaasService.createOrGetCustomer({ barbershop, idempotencyKey });
+  async createCustomer({
+    barbershop,
+    idempotencyKey = null,
+    onCustomerResolved = null,
+  }) {
+    return asaasService.getOrCreateAsaasCustomer({
+      barbershop,
+      idempotencyKey,
+      onCustomerResolved,
+    });
   },
 
-  async createSubscription({ barbershop, plan, idempotencyKey = null }) {
+  async createSubscription({
+    barbershop,
+    plan,
+    idempotencyKey = null,
+    onCustomerResolved = null,
+  }) {
     if (!barbershop) {
       throw new AppError('Barbearia inválida para checkout Pix', 400, 'INVALID_BARBERSHOP');
     }
@@ -19,6 +32,7 @@ export const asaasBillingProvider = {
       barbershop,
       plan,
       idempotencyKey,
+      onCustomerResolved,
     });
   },
 

@@ -79,6 +79,8 @@ if (process.env.ASAAS_BASE_URL && !process.env.ASAAS_API_KEY) {
 }
 
 const app = express();
+app.set('trust proxy', 1);
+
 const PORT = process.env.PORT || 5000;
 const API_V1 = '/api/v1';
 const API_JSON_BODY_LIMIT = process.env.API_JSON_BODY_LIMIT || '1mb';

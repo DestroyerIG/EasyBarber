@@ -353,6 +353,8 @@ export const billingService = {
         barbershop,
         plan: checkoutPlan,
         idempotencyKey,
+        onCustomerResolved: (customerId) =>
+          subscriptionRepository.setAsaasCustomerId(barbershopId, customerId),
       });
 
       const payment = pixCheckout.payment || null;

@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS barbershops (
     stripe_price_id VARCHAR(255),
     stripe_payment_mode VARCHAR(20),
     provider VARCHAR(20),
+    asaas_customer_id VARCHAR(255),
     provider_customer_id VARCHAR(255),
     provider_subscription_id VARCHAR(255),
     provider_payment_id VARCHAR(255),
@@ -341,6 +342,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_barbershops_whatsapp_instance_name_norm
 CREATE INDEX IF NOT EXISTS idx_barbershops_stripe_customer ON barbershops(stripe_customer_id);
 CREATE INDEX IF NOT EXISTS idx_subscription_events_created_at ON subscription_events(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_barbershops_provider ON barbershops(provider);
+CREATE INDEX IF NOT EXISTS idx_barbershops_asaas_customer ON barbershops(asaas_customer_id);
 CREATE INDEX IF NOT EXISTS idx_barbershops_provider_customer ON barbershops(provider_customer_id);
 CREATE INDEX IF NOT EXISTS idx_barbershops_provider_subscription ON barbershops(provider_subscription_id);
 CREATE INDEX IF NOT EXISTS idx_barbershops_provider_payment ON barbershops(provider_payment_id);

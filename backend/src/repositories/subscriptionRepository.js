@@ -15,6 +15,7 @@ export const subscriptionRepository = {
     const result = await db(client).query(
       `SELECT id, name, owner_name, email, whatsapp, plan, desired_plan,
               cpf_cnpj,
+              asaas_customer_id,
               stripe_customer_id,
               stripe_subscription_id,
               stripe_price_id,
@@ -85,6 +86,53 @@ export const subscriptionRepository = {
     );
 
     return result.rows[0] || null;
+  },
+
+  async setAsaasCustomerId(barbershopId, asaasCustomerId, client = null) {
+    if (!barbershopId || !asaasCustomerId) {
+      return null;
+    }
+
+    const metadataPatchQuery = `jsonb_set(
+      COALESCE(metadata, '{}'::jsonb),
+      '{asaas,customerId}',
+      to_jsonb($2::text),
+      true
+    )`;
+
+    try {
+      const result = await db(client).query(
+        `UPDATE barbershops
+         SET asaas_customer_id = $2::text,
+             metadata = ${metadataPatchQuery},
+             subscription_updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1::uuid
+         RETURNING id, asaas_customer_id, provider_customer_id, metadata`,
+        [barbershopId, asaasCustomerId]
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code !== '42703') {
+        throw error;
+      }
+
+      const fallback = await db(client).query(
+        `UPDATE barbershops
+         SET metadata = ${metadataPatchQuery},
+             provider_customer_id = CASE
+               WHEN provider = 'asaas' OR payment_method = 'pix'
+                 THEN $2::text
+               ELSE provider_customer_id
+             END,
+             subscription_updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1::uuid
+         RETURNING id, provider_customer_id, metadata`,
+        [barbershopId, asaasCustomerId]
+      );
+
+      return fallback.rows[0] || null;
+    }
   },
 
   async findByProviderCustomerId(provider, providerCustomerId, client = null) {
@@ -296,6 +344,7 @@ export const subscriptionRepository = {
     const result = await db(client).query(
       `SELECT plan,
               desired_plan,
+              asaas_customer_id,
               stripe_customer_id,
               stripe_subscription_id,
               stripe_payment_mode,

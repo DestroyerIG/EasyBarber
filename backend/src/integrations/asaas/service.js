@@ -22,20 +22,6 @@ const GENERIC_CUSTOMER_NAMES = new Set([
   'easy barber',
 ]);
 
-const DUPLICATE_CUSTOMER_ERROR_HINTS = [
-  'already exists',
-  'já existe',
-  'ja existe',
-  'duplic',
-  'cpf já cadastrado',
-  'cpf ja cadastrado',
-  'cnpj já cadastrado',
-  'cnpj ja cadastrado',
-  'external reference',
-  'documento já cadastrado',
-  'documento ja cadastrado',
-];
-
 const parseJsonSafely = (value) => {
   if (typeof value !== 'string') {
     return null;
@@ -147,6 +133,24 @@ const maskSensitiveData = (value, key = '') => {
   return maskSensitiveByKey(key, value);
 };
 
+const maskSensitiveText = (value) => {
+  if (typeof value !== 'string') {
+    return value || null;
+  }
+
+  const parsed = parseJsonSafely(value);
+  if (parsed && typeof parsed === 'object') {
+    return safeJSONStringify(maskSensitiveData(parsed));
+  }
+
+  const maskedEmails = value.replace(
+    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+    (email) => maskEmail(email)
+  );
+
+  return maskedEmails.replace(/\d{10,14}/g, (digits) => maskDigitsTail(digits));
+};
+
 const removeEmptyFields = (payload = {}) => {
   return Object.fromEntries(
     Object.entries(payload)
@@ -247,42 +251,6 @@ const buildAsaasErrorContext = (
     responseHeaders,
     responseErrors: providerData?.errors || extractAsaasErrors(responseJson || responseBody),
   };
-};
-
-const isDuplicateCustomerError = (errorContext) => {
-  const statusCode = Number(errorContext?.statusCode || 0);
-  if (statusCode !== 400 && statusCode !== 409) {
-    return false;
-  }
-
-  const responseErrors = Array.isArray(errorContext?.responseErrors)
-    ? errorContext.responseErrors
-    : [];
-  const errorCodes = responseErrors
-    .map((item) => String(item?.code || '').toLowerCase())
-    .filter(Boolean);
-
-  if (
-    errorCodes.some(
-      (code) =>
-        code.includes('already') ||
-        code.includes('exists') ||
-        code.includes('duplicate') ||
-        code.includes('document')
-    )
-  ) {
-    return true;
-  }
-
-  const messageChunks = [
-    errorContext?.responseBody?.message,
-    ...responseErrors.map((item) => item?.description || item?.message || null),
-  ]
-    .filter(Boolean)
-    .join(' | ')
-    .toLowerCase();
-
-  return DUPLICATE_CUSTOMER_ERROR_HINTS.some((hint) => messageChunks.includes(hint));
 };
 
 const onlyNumbers = (value) => {
@@ -394,18 +362,6 @@ const addMonths = (value, months = 1) => {
 
   date.setUTCMonth(date.getUTCMonth() + months);
   return date;
-};
-
-const findCustomerByExternalReference = async (externalReference) => {
-  const response = await asaasClient.get('/customers', {
-    query: {
-      externalReference,
-      limit: 1,
-      offset: 0,
-    },
-  });
-
-  return response?.data?.[0] || null;
 };
 
 const findCustomerByCpfCnpj = async (cpfCnpj) => {
@@ -533,9 +489,9 @@ const resolveSavedAsaasCustomerId = (barbershop) => {
     normalizedProvider === 'asaas' || normalizedPaymentMethod === 'pix';
 
   const candidates = [
-    canTrustProviderCustomerId ? barbershop?.provider_customer_id : null,
     barbershop?.asaas_customer_id,
     barbershop?.asaasCustomerId,
+    canTrustProviderCustomerId ? barbershop?.provider_customer_id : null,
     barbershop?.customer_id,
     barbershop?.customerId,
     barbershop?.metadata?.asaas?.customerId,
@@ -690,79 +646,14 @@ const rethrowAsaasError = (
     requestBody: maskSensitiveData(providerContext.requestPayload),
     requestPayload: maskSensitiveData(providerContext.requestPayload),
     payload: maskSensitiveData(responseData),
-    responseText: providerContext.responseText || null,
+    responseBodyRaw: maskSensitiveText(providerContext.responseText),
+    responseText: maskSensitiveText(providerContext.responseText),
     responseJson: maskSensitiveData(providerContext.responseJson),
     errors: maskSensitiveData(responseErrors),
     responseHeaders: providerContext.responseHeaders || null,
   };
   appError.providerHeaders = responseHeaders || null;
   throw appError;
-};
-
-const syncExistingCustomer = async ({
-  customerId,
-  payload,
-  idempotencyKey,
-  allowNotFound = false,
-}) => {
-  logger.debug(
-    {
-      code: 'ASAAS_CUSTOMER_UPDATE_REQUEST',
-      customerId,
-      payload: maskSensitiveData(payload),
-    },
-    'ASAAS CUSTOMER PAYLOAD'
-  );
-
-  try {
-    return await asaasClient.put(`/customers/${customerId}`, payload, {
-      idempotencyKey,
-    });
-  } catch (error) {
-    const providerContext = buildAsaasErrorContext(error, {
-      method: 'PUT',
-      path: '/customers/:id',
-      requestPayload: payload,
-    });
-    const statusCode = providerContext.statusCode;
-
-    if (allowNotFound && statusCode === 404) {
-      return null;
-    }
-
-    logger.error(
-      {
-        message: error?.message,
-        provider: providerContext.provider,
-        statusCode,
-        method: providerContext.method,
-        path: providerContext.path,
-        url: providerContext.url,
-        providerStatus: statusCode,
-        requestBody: maskSensitiveData(payload),
-        requestPayload: maskSensitiveData(payload),
-        responseBodyRaw: providerContext.responseText,
-        responseJson: maskSensitiveData(providerContext.responseJson),
-        responseBody: maskSensitiveData(providerContext.responseBody),
-        responseErrors: maskSensitiveData(providerContext.responseErrors),
-        providerHeaders: providerContext.responseHeaders,
-        code: error?.code || 'ASAAS_CUSTOMER_UPDATE_ERROR',
-        customerId,
-      },
-      'ASAAS CUSTOMER SYNC ERROR'
-    );
-
-    rethrowAsaasError(
-      error,
-      'Erro Asaas (PUT /customers/:id)',
-      'ASAAS_CUSTOMER_UPDATE_ERROR',
-      {
-        method: 'PUT',
-        path: '/customers/:id',
-        requestPayload: payload,
-      }
-    );
-  }
 };
 
 export const asaasService = {
@@ -774,13 +665,68 @@ export const asaasService = {
   isValidCpfCnpj,
   resolvePlanValue,
 
-  async createOrGetCustomer({ barbershop, idempotencyKey = null }) {
+  async getOrCreateAsaasCustomer({
+    barbershop,
+    idempotencyKey = null,
+    onCustomerResolved = null,
+  }) {
     if (!barbershop?.id) {
       throw new AppError(
         'Barbearia inválida para criação de cliente Asaas',
         400,
         'INVALID_BARBERSHOP'
       );
+    }
+
+    const persistResolvedCustomer = async (customerId, source) => {
+      if (!customerId || typeof onCustomerResolved !== 'function') {
+        return;
+      }
+
+      try {
+        await onCustomerResolved(customerId, {
+          source,
+          barbershopId: barbershop.id,
+        });
+      } catch (persistError) {
+        logger.warn(
+          {
+            event: 'asaas_customer_persist_warning',
+            barbershopId: barbershop.id,
+            source,
+            customerId,
+            message: persistError?.message,
+          },
+          'Falha ao persistir customer Asaas localmente'
+        );
+      }
+    };
+
+    logger.info(
+      {
+        event: 'asaas_customer_lookup_db_start',
+        barbershopId: barbershop.id,
+      },
+      'Buscando customer Asaas salvo no banco'
+    );
+
+    const savedCustomerId = resolveSavedAsaasCustomerId(barbershop);
+
+    if (savedCustomerId) {
+      logger.info(
+        {
+          event: 'asaas_customer_reuse_from_db',
+          barbershopId: barbershop.id,
+          customerId: savedCustomerId,
+        },
+        'Customer Asaas reutilizado a partir do banco'
+      );
+
+      await persistResolvedCustomer(savedCustomerId, 'db');
+
+      return {
+        id: savedCustomerId,
+      };
     }
 
     const payload = buildCustomerPayload(barbershop);
@@ -794,94 +740,31 @@ export const asaasService = {
       'Payload de cliente Asaas preparado'
     );
 
-    const savedCustomerId = resolveSavedAsaasCustomerId(barbershop);
-
-    if (savedCustomerId) {
-      const syncedCustomer = await syncExistingCustomer({
-        customerId: savedCustomerId,
-        payload,
-        idempotencyKey,
-        allowNotFound: true,
-      });
-
-      if (syncedCustomer?.id) {
-        logger.info(
-          {
-            event: 'asaas_customer_reuse',
-            source: 'saved_customer_id',
-            barbershopId: barbershop.id,
-            customerId: syncedCustomer.id,
-          },
-          'Cliente Asaas reutilizado'
-        );
-
-        return syncedCustomer;
-      }
-    }
-
-    const externalReference = payload.externalReference || resolveCustomerExternalReference(barbershop);
-
-    if (externalReference) {
-      try {
-        const existingByReference = await findCustomerByExternalReference(externalReference);
-        if (existingByReference?.id) {
-          const syncedCustomer = await syncExistingCustomer({
-            customerId: existingByReference.id,
-            payload,
-            idempotencyKey,
-          });
-
-          const reusedCustomer = syncedCustomer || existingByReference;
-
-          logger.info(
-            {
-              event: 'asaas_customer_reuse',
-              source: 'external_reference',
-              barbershopId: barbershop.id,
-              customerId: reusedCustomer.id,
-            },
-            'Cliente Asaas reutilizado'
-          );
-
-          return reusedCustomer;
-        }
-      } catch (lookupError) {
-        logger.warn(
-          {
-            event: 'asaas_customer_lookup_warning',
-            source: 'external_reference',
-            barbershopId: barbershop.id,
-            externalReference,
-            message: lookupError?.message,
-          },
-          'Falha ao buscar cliente Asaas por externalReference'
-        );
-      }
-    }
+    logger.info(
+      {
+        event: 'asaas_customer_lookup_asaas_start',
+        barbershopId: barbershop.id,
+        cpfCnpj: maskDigitsTail(payload.cpfCnpj),
+      },
+      'Buscando customer Asaas por CPF/CNPJ antes de criar'
+    );
 
     if (payload.cpfCnpj) {
       try {
         const existingByDocument = await findCustomerByCpfCnpj(payload.cpfCnpj);
         if (existingByDocument?.id) {
-          const syncedCustomer = await syncExistingCustomer({
-            customerId: existingByDocument.id,
-            payload,
-            idempotencyKey,
-          });
-
-          const reusedCustomer = syncedCustomer || existingByDocument;
+          await persistResolvedCustomer(existingByDocument.id, 'asaas_lookup_before_create');
 
           logger.info(
             {
-              event: 'asaas_customer_reuse',
-              source: 'cpf_cnpj',
+              event: 'asaas_customer_reuse_from_asaas_by_cpfcnpj',
               barbershopId: barbershop.id,
-              customerId: reusedCustomer.id,
+              customerId: existingByDocument.id,
             },
-            'Cliente Asaas reutilizado'
+            'Customer Asaas localizado por CPF/CNPJ'
           );
 
-          return reusedCustomer;
+          return existingByDocument;
         }
       } catch (lookupError) {
         logger.warn(
@@ -923,6 +806,8 @@ export const asaasService = {
         'Cliente Asaas criado com sucesso'
       );
 
+      await persistResolvedCustomer(createdCustomer?.id || null, 'asaas_create_success');
+
       return createdCustomer;
     } catch (error) {
       const providerContext = buildAsaasErrorContext(error, {
@@ -930,48 +815,6 @@ export const asaasService = {
         path: '/customers',
         requestPayload: payload,
       });
-
-      if (isDuplicateCustomerError(providerContext)) {
-        let duplicatedCustomer = null;
-
-        if (externalReference) {
-          try {
-            duplicatedCustomer = await findCustomerByExternalReference(externalReference);
-          } catch {
-            duplicatedCustomer = null;
-          }
-        }
-
-        if (!duplicatedCustomer?.id && payload.cpfCnpj) {
-          try {
-            duplicatedCustomer = await findCustomerByCpfCnpj(payload.cpfCnpj);
-          } catch {
-            duplicatedCustomer = null;
-          }
-        }
-
-        if (duplicatedCustomer?.id) {
-          const syncedCustomer = await syncExistingCustomer({
-            customerId: duplicatedCustomer.id,
-            payload,
-            idempotencyKey,
-          });
-
-          const reusedCustomer = syncedCustomer || duplicatedCustomer;
-
-          logger.info(
-            {
-              event: 'asaas_customer_reuse',
-              source: 'duplicate_error_recovery',
-              barbershopId: barbershop.id,
-              customerId: reusedCustomer.id,
-            },
-            'Cliente Asaas reutilizado apos erro de duplicidade'
-          );
-
-          return reusedCustomer;
-        }
-      }
 
       logger.error(
         {
@@ -985,7 +828,7 @@ export const asaasService = {
           url: providerContext.url,
           requestBody: maskSensitiveData(providerContext.requestPayload),
           requestPayload: maskSensitiveData(providerContext.requestPayload),
-          responseBodyRaw: providerContext.responseText,
+          responseBodyRaw: maskSensitiveText(providerContext.responseText),
           responseJson: maskSensitiveData(providerContext.responseJson),
           responseBody: maskSensitiveData(providerContext.responseBody),
           responseErrors: maskSensitiveData(providerContext.responseErrors),
@@ -994,6 +837,87 @@ export const asaasService = {
         },
         'Falha ao criar cliente Asaas'
       );
+
+      if (Number(providerContext.statusCode) === 400) {
+        logger.info(
+          {
+            event: 'asaas_customer_lookup_after_create_error_start',
+            barbershopId: barbershop.id,
+            cpfCnpj: maskDigitsTail(payload.cpfCnpj),
+          },
+          'Iniciando fallback de lookup de customer apos erro 400 no create'
+        );
+
+        try {
+          const recoveredCustomer = await findCustomerByCpfCnpj(payload.cpfCnpj);
+
+          if (recoveredCustomer?.id) {
+            await persistResolvedCustomer(recoveredCustomer.id, 'asaas_lookup_after_create_error');
+
+            logger.info(
+              {
+                event: 'asaas_customer_recovered_after_create_error',
+                barbershopId: barbershop.id,
+                customerId: recoveredCustomer.id,
+              },
+              'Customer Asaas recuperado apos falha no create'
+            );
+
+            return recoveredCustomer;
+          }
+        } catch (lookupAfterCreateError) {
+          logger.warn(
+            {
+              event: 'asaas_customer_lookup_warning',
+              source: 'lookup_after_create_error',
+              barbershopId: barbershop.id,
+              message: lookupAfterCreateError?.message,
+              cpfCnpj: maskDigitsTail(payload.cpfCnpj),
+            },
+            'Falha ao buscar customer Asaas apos erro no create'
+          );
+        }
+
+        logger.error(
+          {
+            event: 'asaas_customer_failed_after_fallback',
+            barbershopId: barbershop.id,
+            provider: providerContext.provider,
+            statusCode: providerContext.statusCode,
+            method: providerContext.method,
+            path: providerContext.path,
+            url: providerContext.url,
+            requestBody: maskSensitiveData(providerContext.requestPayload),
+            responseBodyRaw: maskSensitiveText(providerContext.responseText),
+            responseJson: maskSensitiveData(providerContext.responseJson),
+            responseErrors: maskSensitiveData(providerContext.responseErrors),
+          },
+          'Falha definitiva ao resolver customer Asaas apos fallback'
+        );
+
+        const controlledError = new AppError(
+          'Não foi possível criar o cliente no Asaas. Verifique os dados cadastrais e tente novamente.',
+          400,
+          'ASAAS_CUSTOMER_CREATE_ERROR'
+        );
+        controlledError.providerStatus = providerContext.statusCode || 400;
+        controlledError.providerData = {
+          provider: providerContext.provider,
+          method: providerContext.method,
+          path: providerContext.path,
+          url: providerContext.url,
+          statusCode: providerContext.statusCode || 400,
+          requestBody: maskSensitiveData(providerContext.requestPayload),
+          payload: maskSensitiveData(providerContext.responseBody),
+          responseBodyRaw: maskSensitiveText(providerContext.responseText),
+          responseJson: maskSensitiveData(providerContext.responseJson),
+          errors: maskSensitiveData(providerContext.responseErrors),
+          responseHeaders: providerContext.responseHeaders || null,
+        };
+        controlledError.providerHeaders = providerContext.responseHeaders || null;
+
+        throw controlledError;
+      }
 
       rethrowAsaasError(
         error,
@@ -1006,6 +930,18 @@ export const asaasService = {
         }
       );
     }
+  },
+
+  async createOrGetCustomer({
+    barbershop,
+    idempotencyKey = null,
+    onCustomerResolved = null,
+  }) {
+    return this.getOrCreateAsaasCustomer({
+      barbershop,
+      idempotencyKey,
+      onCustomerResolved,
+    });
   },
 
   async createPixCharge({
@@ -1078,7 +1014,7 @@ export const asaasService = {
           url: providerContext.url,
           requestBody: maskSensitiveData(providerContext.requestPayload),
           requestPayload: maskSensitiveData(providerContext.requestPayload),
-          responseBodyRaw: providerContext.responseText,
+          responseBodyRaw: maskSensitiveText(providerContext.responseText),
           responseJson: maskSensitiveData(providerContext.responseJson),
           responseBody: maskSensitiveData(providerContext.responseBody),
           responseErrors: maskSensitiveData(providerContext.responseErrors),
@@ -1107,14 +1043,16 @@ export const asaasService = {
     nextDueDate,
     amount,
     idempotencyKey = null,
+    onCustomerResolved = null,
   }) {
     const payerCpfCnpj = resolveCustomerCpfCnpjInput(barbershop);
 
     validateCustomerCpfCnpjOrThrow(payerCpfCnpj);
 
-    const customer = await this.createOrGetCustomer({
+    const customer = await this.getOrCreateAsaasCustomer({
       barbershop,
       idempotencyKey,
+      onCustomerResolved,
     });
 
     const resolvedAmount = typeof amount === 'number' ? amount : resolvePlanValue(plan);
