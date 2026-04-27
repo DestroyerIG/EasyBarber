@@ -14,7 +14,7 @@ Também há suporte a execução via Docker Compose com PostgreSQL.
 ## Principais Funcionalidades
 
 - Autenticação com JWT (access + refresh token em cookies httpOnly).
-- Cadastro com verificação obrigatória de e-mail, com Supabase Auth como fonte primária em modo `dual/supabase` e fallback legado em `legacy`.
+- Cadastro com verificação obrigatória de e-mail usando apenas Supabase Auth como provedor de autenticação.
 - Gestão de agendamentos, clientes, serviços e barbeiros.
 - Módulo financeiro com resumo diário/mensal e despesas.
 - Bot de WhatsApp via Evolution API v1 (serviço externo) com configuração de mensagens e menu dinâmico.
@@ -30,7 +30,7 @@ Também há suporte a execução via Docker Compose com PostgreSQL.
 - Express 4
 - PostgreSQL (driver pg)
 - Zod (validação)
-- jsonwebtoken + bcryptjs
+- jsonwebtoken
 - @supabase/supabase-js (cadastro/verificação de e-mail)
 - nodemailer (SMTP)
 - Pino (logs)
@@ -115,16 +115,14 @@ DATABASE_URL=postgresql://postgres:senha@localhost:5432/barberpro
 JWT_SECRET=troque_esta_chave
 FRONTEND_URL=http://localhost:3000
 APP_URL=http://localhost:3000
-AUTH_PROVIDER_MODE=dual
-EMAIL_VERIFICATION_TTL_MINUTES=60
 
-# Supabase Auth (cadastro/verificação)
+# Supabase Auth obrigatório (cadastro/verificação/login)
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_ANON_KEY=<anon-key>
 SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 AUTH_SUPABASE_REDIRECT_TO=http://localhost:3000/auth/confirm
 
-# SMTP (fallback legado em AUTH_PROVIDER_MODE=legacy)
+# SMTP (opcional; não é usado para verificação de autenticação)
 SMTP_HOST=smtp.seudominio.com
 SMTP_PORT=587
 SMTP_USER=usuario_smtp
@@ -224,6 +222,10 @@ A sequência recomendada para banco novo é:
 9. backend/src/config/migration_v10.sql
 10. backend/src/config/migration_v11.sql
 11. backend/src/config/migration_v12.sql
+12. backend/src/config/migration_v13.sql
+13. backend/src/config/migration_v14.sql
+14. backend/src/config/migration_v15.sql
+15. backend/src/config/migration_v16_supabase_only_auth.sql
 
 Observação: migration_v2.sql é voltada a upgrade legado e normalmente não é necessária em ambiente novo.
 
@@ -307,10 +309,10 @@ Acesso liberado:
 ## Fluxo Básico de Autenticação
 
 1. Usuário cadastra tenant em /api/v1/auth/register.
-2. Em `AUTH_PROVIDER_MODE=dual|supabase`, o cadastro é iniciado primeiro no Supabase Auth e salvo como pendência interna.
+2. O cadastro é iniciado no Supabase Auth e salvo como pendência interna.
 3. Usuário confirma no link do Supabase (callback em /auth/confirm), que aciona /api/auth/verify-email.
 4. A API valida `token_hash` no Supabase, sincroniza `email_verified_at`, `supabase_user_id`, `auth_provider='supabase'` e cria/sincroniza usuário interno.
-5. Somente após verificação, login em /api/v1/auth/login segue fluxo hibrido: `auth_provider='legacy'` valida via bcrypt local, `auth_provider='supabase'` valida no Supabase Auth e sincroniza identidade local (`supabase_user_id`, `last_identity_sync_at`).
+5. Somente após verificação, login em /api/v1/auth/login valida exclusivamente no Supabase Auth e sincroniza identidade local (`supabase_user_id`, `last_identity_sync_at`).
 6. Frontend consulta /api/v1/auth/me para montar sessão e usa /api/v1/auth/refresh em expiração do access token.
 7. Rotas protegidas exigem auth, role e feature permission.
 
@@ -387,6 +389,10 @@ Arquivos SQL em backend/src/config:
 - migration_v10.sql (vínculo de identidade Supabase + pendências de cadastro)
 - migration_v11.sql (billing híbrido Stripe: modo e método de pagamento)
 - migration_v12.sql (billing híbrido Stripe + Asaas: provider abstrato, eventos idempotentes e snapshots de pagamentos)
+- migration_v13.sql (CPF/CNPJ da barbearia para billing Pix)
+- migration_v14.sql (normalização/validação de CPF/CNPJ em pendências e barbearias)
+- migration_v15.sql (vínculo de instância WhatsApp por barbearia)
+- migration_v16_supabase_only_auth.sql (autenticação somente Supabase)
 
 A documentação completa de migrations manuais, validação, rollback e troubleshooting está em POSTGRESQL_SETUP.md.
 
@@ -469,9 +475,9 @@ npm run lint
 As inconsistências operacionais críticas foram corrigidas no estado atual do projeto:
 
 - backend/.env.example usa DB_CONNECT_TIMEOUT.
-- backend/.env.example inclui AUTH_PROVIDER_MODE, SUPABASE_* (incluindo SERVICE_ROLE para scripts administrativos) e SMTP_* (fallback legado).
+- backend/.env.example marca Supabase Auth como obrigatório e `AUTH_PROVIDER_MODE` como obsoleto.
 - docker-compose.yml usa FRONTEND_URL no backend e NEXT_PUBLIC_API_URL com /api/v1 no frontend.
-- setup.ps1 aplica database.sql + migration_v3..v12.
+- setup.ps1 deve aplicar database.sql + migrations até migration_v16_supabase_only_auth.sql.
 - fix-env.ps1 remove variáveis legadas WHATSAPP_API_* e mantém defaults compatíveis com o backend atual.
 
 Observação:

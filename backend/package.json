@@ -11,6 +11,7 @@
     "seed:test-users": "node src/scripts/seedSystemUsers.js",
     "seed:auth-admin": "node src/scripts/seedSystemUsers.js --only=platform-admin",
     "seed:system-users": "node src/scripts/seedSystemUsers.js",
+    "migrate:legacy-auth": "node src/scripts/migrate-legacy-users-to-supabase.js",
     "test": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --detectOpenHandles",
     "test:watch": "node --experimental-vm-modules node_modules/.bin/jest --watch --forceExit"
   },

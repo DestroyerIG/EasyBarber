@@ -1,12 +1,12 @@
-import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import pool from '../config/database.js';
 import { authRepository } from '../repositories/authRepository.js';
 import { subscriptionRepository } from '../repositories/subscriptionRepository.js';
 
-const BCRYPT_ROUNDS = 12;
 const SUPABASE_PAGE_SIZE = 200;
 const SUPABASE_MAX_PAGES = 20;
+const PASSWORD_HASH_PLACEHOLDER_PREFIX = 'supabase:';
 
 const ACCOUNTS = {
   platformAdmin: {
@@ -38,6 +38,10 @@ const ACCOUNTS = {
 };
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+
+const generateSupabasePasswordHashPlaceholder = () => {
+  return `${PASSWORD_HASH_PLACEHOLDER_PREFIX}${crypto.randomBytes(64).toString('hex').slice(0, 51)}`;
+};
 
 const parseExecutionScope = () => {
   const onlyArg = process.argv.find((arg) => arg.startsWith('--only='));
@@ -288,7 +292,7 @@ const ensureInternalUser = async (client, {
   barbershopId,
   supabaseUserId,
 }) => {
-  const passwordHash = await bcrypt.hash(account.password, BCRYPT_ROUNDS);
+  const passwordHash = generateSupabasePasswordHashPlaceholder();
 
   const payload = {
     barbershopId,

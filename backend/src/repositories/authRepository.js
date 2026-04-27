@@ -379,7 +379,7 @@ export const authRepository = {
     role,
     emailVerified = true,
     supabaseUserId = null,
-    authProvider = 'legacy',
+    authProvider = 'supabase',
   }) {
     try {
       const result = await client.query(

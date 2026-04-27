@@ -12,7 +12,8 @@
     "start:frontend": "cd frontend && npm start",
     "seed:test-users": "cd backend && npm run seed:test-users",
     "seed:auth-admin": "cd backend && npm run seed:auth-admin",
-    "seed:system-users": "cd backend && npm run seed:system-users"
+    "seed:system-users": "cd backend && npm run seed:system-users",
+    "migrate:legacy-auth": "cd backend && npm run migrate:legacy-auth"
   },
   "keywords": [
     "barbershop",

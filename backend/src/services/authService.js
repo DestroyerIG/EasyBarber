@@ -1,16 +1,11 @@
-import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { authRepository } from '../repositories/authRepository.js';
 import { AppError, ConflictError, UnauthorizedError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 import { normalizeRole } from '../utils/roles.js';
-import { emailService } from './emailService.js';
 import {
-  allowsLegacyVerificationFlow,
   getAuthProviderMode,
-  isLegacyAuthProviderMode,
-  isSupabasePrimaryAuthProviderMode,
 } from '../config/authProviderMode.js';
 import { supabaseAuthService } from './supabaseAuthService.js';
 
@@ -20,8 +15,8 @@ const COMMON_PASSWORDS = new Set([
   'admin123', 'welcome', 'letmein', 'monkey', 'master', 'dragon',
 ]);
 
-const DEFAULT_EMAIL_VERIFICATION_TTL_MINUTES = 60;
 const DEFAULT_PLAN = 'basico';
+const PASSWORD_HASH_PLACEHOLDER_PREFIX = 'supabase:';
 
 const resolveJwtSecret = () => {
   if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
@@ -35,26 +30,8 @@ const generateAccessToken = (payload) => {
 
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
-const resolveEmailVerificationTtlMinutes = () => {
-  const ttl = Number.parseInt(process.env.EMAIL_VERIFICATION_TTL_MINUTES || '', 10);
-
-  if (!Number.isFinite(ttl) || ttl <= 0) {
-    return DEFAULT_EMAIL_VERIFICATION_TTL_MINUTES;
-  }
-
-  return ttl;
-};
-
-const generateEmailVerificationToken = () => {
-  const token = crypto.randomBytes(32).toString('hex');
-  const tokenHash = hashToken(token);
-  const expiresAt = new Date(Date.now() + resolveEmailVerificationTtlMinutes() * 60 * 1000);
-
-  return {
-    token,
-    tokenHash,
-    expiresAt,
-  };
+const generateSupabasePasswordHashPlaceholder = () => {
+  return `${PASSWORD_HASH_PLACEHOLDER_PREFIX}${crypto.randomBytes(64).toString('hex').slice(0, 51)}`;
 };
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
@@ -221,119 +198,6 @@ const mapResendVerificationSupabaseError = (error) => {
   );
 };
 
-const registerWithLegacyFlow = async ({
-  barbershopName,
-  ownerName,
-  email,
-  whatsapp,
-  cpfCnpj,
-  password,
-  desiredPlan,
-}) => {
-  const normalizedEmail = normalizeEmail(email);
-  const client = await authRepository.getClient();
-  let transactionCommitted = false;
-
-  try {
-    await client.query('BEGIN');
-
-    const plan = DEFAULT_PLAN;
-    const onboardingDesiredPlan = desiredPlan || plan;
-
-    const barbershop = await authRepository.createBarbershop(client, {
-      name: barbershopName,
-      ownerName,
-      email: normalizedEmail,
-      whatsapp,
-      cpfCnpj,
-      plan,
-      desiredPlan: onboardingDesiredPlan,
-    });
-
-    const passwordHash = await bcrypt.hash(password, 12);
-
-    const user = await authRepository.createUser(client, {
-      barbershopId: barbershop.id,
-      email: normalizedEmail,
-      passwordHash,
-      role: 'tenant_admin',
-      emailVerified: false,
-      authProvider: 'legacy',
-    });
-
-    const { token: verificationToken, tokenHash, expiresAt } = generateEmailVerificationToken();
-
-    await authRepository.setEmailVerificationToken(client, {
-      userId: user.id,
-      tokenHash,
-      expiresAt,
-    });
-
-    await client.query('COMMIT');
-    transactionCommitted = true;
-
-    let verificationEmailSent = true;
-
-    try {
-      const emailResult = await emailService.sendAccountVerificationEmail({
-        to: normalizedEmail,
-        token: verificationToken,
-        barbershopName,
-        ownerName,
-      });
-
-      verificationEmailSent = emailResult.delivered !== false;
-    } catch (mailError) {
-      verificationEmailSent = false;
-      logger.error(
-        { err: mailError, email: normalizedEmail, userId: user.id },
-        'Falha ao enviar e-mail de verificação no cadastro'
-      );
-    }
-
-    logger.info(
-      {
-        mode: 'legacy',
-        barbershopId: barbershop.id,
-        email: normalizedEmail,
-        desiredPlan: onboardingDesiredPlan,
-        verificationEmailSent,
-      },
-      'Nova barbearia registrada'
-    );
-
-    return buildRegisterResponse({
-      email: normalizedEmail,
-      role: normalizeRole('tenant_admin'),
-      barbershopName,
-      plan,
-      desiredPlan: onboardingDesiredPlan,
-      verificationEmailSent,
-      barbershopId: barbershop.id,
-      message: verificationEmailSent
-        ? 'Cadastro realizado com sucesso. Verifique seu e-mail para ativar a conta.'
-        : 'Cadastro realizado, mas não foi possível enviar o e-mail de verificação no momento. Solicite o reenvio para ativar a conta.',
-    });
-  } catch (error) {
-    if (!transactionCommitted) {
-      await client.query('ROLLBACK');
-    }
-
-    if (error.code === '23505') {
-      throw new ConflictError('Email já cadastrado');
-    }
-
-    if (error instanceof AppError) {
-      throw error;
-    }
-
-    logger.error({ err: error, email: normalizedEmail }, 'Erro ao registrar barbearia (legacy)');
-    throw new AppError('Erro ao registrar barbearia. Tente novamente.', 500, 'REGISTER_ERROR');
-  } finally {
-    client.release();
-  }
-};
-
 const registerWithSupabasePrimaryFlow = async ({
   barbershopName,
   ownerName,
@@ -416,8 +280,8 @@ const registerWithSupabasePrimaryFlow = async ({
     }
   }
 
-  currentStage = 'hash_password';
-  const passwordHash = await bcrypt.hash(password, 12);
+  currentStage = 'prepare_local_supabase_placeholder';
+  const passwordHash = generateSupabasePasswordHashPlaceholder();
   const client = await authRepository.getClient();
   let transactionCommitted = false;
   let pendingRegistration = null;
@@ -671,79 +535,6 @@ const reconcileSupabaseConfirmedUser = async ({
   }
 };
 
-const verifyEmailWithLegacyToken = async (token) => {
-  if (!token || typeof token !== 'string') {
-    throw new AppError('Token de verificação inválido.', 400, 'INVALID_VERIFICATION_TOKEN');
-  }
-
-  const tokenHash = hashToken(token);
-  const user = await authRepository.findUserByEmailVerificationTokenHash(tokenHash);
-
-  if (!user) {
-    throw new AppError(
-      'Link de verificação inválido ou já utilizado. Solicite um novo e-mail.',
-      400,
-      'INVALID_VERIFICATION_TOKEN'
-    );
-  }
-
-  const providedHashBuffer = Buffer.from(tokenHash, 'hex');
-  const storedHashBuffer = Buffer.from(user.email_verification_token_hash || '', 'hex');
-
-  if (
-    storedHashBuffer.length !== providedHashBuffer.length ||
-    !crypto.timingSafeEqual(storedHashBuffer, providedHashBuffer)
-  ) {
-    throw new AppError('Link de verificação inválido.', 400, 'INVALID_VERIFICATION_TOKEN');
-  }
-
-  const expiresAt = user.email_verification_expires_at
-    ? new Date(user.email_verification_expires_at)
-    : null;
-
-  if (!expiresAt || Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
-    const expiryClient = await authRepository.getClient();
-
-    try {
-      await expiryClient.query('BEGIN');
-      await authRepository.clearEmailVerificationToken(expiryClient, user.id);
-      await expiryClient.query('COMMIT');
-    } catch (error) {
-      await expiryClient.query('ROLLBACK');
-      logger.error({ err: error, userId: user.id }, 'Erro ao invalidar token expirado de verificação de e-mail');
-    } finally {
-      expiryClient.release();
-    }
-
-    throw new AppError(
-      'Link de verificação expirado. Solicite um novo e-mail de verificação.',
-      400,
-      'EXPIRED_VERIFICATION_TOKEN'
-    );
-  }
-
-  const client = await authRepository.getClient();
-
-  try {
-    await client.query('BEGIN');
-    const verifiedUser = await authRepository.markEmailAsVerified(client, user.id);
-    await client.query('COMMIT');
-
-    logger.info({ mode: 'legacy', userId: user.id, email: user.email }, 'E-mail verificado com sucesso');
-
-    return buildVerificationResponse({
-      email: verifiedUser?.email || user.email,
-      emailVerifiedAt: verifiedUser?.email_verified_at || new Date().toISOString(),
-    });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error({ err: error, userId: user.id }, 'Erro ao confirmar verificação de e-mail (legacy)');
-    throw new AppError('Não foi possível confirmar o e-mail. Tente novamente.', 500, 'VERIFY_EMAIL_ERROR');
-  } finally {
-    client.release();
-  }
-};
-
 const verifyEmailWithSupabaseToken = async ({ tokenHash, type }) => {
   const verification = await supabaseAuthService.verifyEmailToken({ tokenHash, type });
   const supabaseUser = verification.user || {
@@ -833,18 +624,6 @@ export const authService = {
     password,
     desiredPlan,
   }) {
-    if (isLegacyAuthProviderMode()) {
-      return registerWithLegacyFlow({
-        barbershopName,
-        ownerName,
-        email,
-        whatsapp,
-        cpfCnpj,
-        password,
-        desiredPlan,
-      });
-    }
-
     return registerWithSupabasePrimaryFlow({
       barbershopName,
       ownerName,
@@ -862,85 +641,82 @@ export const authService = {
     let refreshTransactionStarted = false;
 
     try {
-      let user = await authRepository.findUserByEmailIncludingBlocked(normalizedEmail);
+      let supabaseIdentity;
 
-      if (!user) {
-        if (isSupabasePrimaryAuthProviderMode()) {
-          const pendingRegistration = await authRepository.findPendingRegistrationByEmail(normalizedEmail);
-
-          if (pendingRegistration?.password_hash) {
-            const pendingPasswordMatches = await bcrypt.compare(password, pendingRegistration.password_hash);
-
-            if (pendingPasswordMatches) {
-              let supabaseIdentity;
-
-              try {
-                supabaseIdentity = await supabaseAuthService.signInWithPassword(normalizedEmail, password);
-              } catch (error) {
-                if (error instanceof AppError && error.code === 'EMAIL_NOT_VERIFIED') {
-                  throw error;
-                }
-
-                if (error instanceof UnauthorizedError) {
-                  logger.warn(
-                    {
-                      email: normalizedEmail,
-                      authMode: getAuthProviderMode(),
-                      reason: 'pending_registration_invalid_supabase_password',
-                    },
-                    'Login negado: credenciais inválidas para pendência Supabase'
-                  );
-                  throw new UnauthorizedError('Email ou senha incorretos');
-                }
-
-                throw error;
-              }
-
-              if (supabaseIdentity.emailVerified) {
-                await reconcileSupabaseConfirmedUser({
-                  email: normalizedEmail,
-                  supabaseUser: supabaseIdentity.user || {
-                    id: supabaseIdentity.userId,
-                    email: supabaseIdentity.email,
-                    email_confirmed_at: supabaseIdentity.emailVerifiedAt,
-                    confirmed_at: supabaseIdentity.emailVerifiedAt,
-                  },
-                  reason: 'login_without_local_user',
-                });
-
-                user = await authRepository.findUserByEmailIncludingBlocked(normalizedEmail);
-              }
-
-              if (!user && !supabaseIdentity.emailVerified) {
-                throw new AppError(
-                  'Conta não verificada. Verifique seu e-mail antes de fazer login.',
-                  403,
-                  'EMAIL_NOT_VERIFIED'
-                );
-              }
-            }
-          }
+      try {
+        supabaseIdentity = await supabaseAuthService.signInWithPassword(normalizedEmail, password);
+      } catch (error) {
+        if (error instanceof AppError && error.code === 'EMAIL_NOT_VERIFIED') {
+          throw error;
         }
 
-        if (!user) {
+        if (error instanceof UnauthorizedError) {
           logger.warn(
             {
               email: normalizedEmail,
               authMode: getAuthProviderMode(),
-              reason: 'user_not_found',
+              reason: 'invalid_supabase_credentials',
             },
-            'Login negado: usuário não encontrado'
+            'Login negado: credenciais inválidas no Supabase Auth'
           );
           throw new UnauthorizedError('Email ou senha incorretos');
         }
+
+        throw error;
       }
 
-      const authProvider = (
-        String(user.auth_provider || '').trim().toLowerCase() === 'supabase' ||
-        Boolean(user.supabase_user_id)
-      )
-        ? 'supabase'
-        : 'legacy';
+      if (!supabaseIdentity.emailVerified) {
+        logger.warn(
+          {
+            email: normalizedEmail,
+            supabaseUserId: supabaseIdentity.userId,
+            reason: 'email_not_verified_provider',
+          },
+          'Login negado: e-mail não verificado no provedor Supabase'
+        );
+        throw new AppError(
+          'Conta não verificada. Verifique seu e-mail antes de fazer login.',
+          403,
+          'EMAIL_NOT_VERIFIED'
+        );
+      }
+
+      let user = await authRepository.findUserBySupabaseUserId(supabaseIdentity.userId);
+
+      if (!user) {
+        user = await authRepository.findUserByEmailIncludingBlocked(normalizedEmail);
+      }
+
+      if (!user) {
+        await reconcileSupabaseConfirmedUser({
+          email: normalizedEmail,
+          supabaseUser: supabaseIdentity.user || {
+            id: supabaseIdentity.userId,
+            email: supabaseIdentity.email,
+            email_confirmed_at: supabaseIdentity.emailVerifiedAt,
+            confirmed_at: supabaseIdentity.emailVerifiedAt,
+          },
+          reason: 'login_without_local_user',
+        });
+
+        user = await authRepository.findUserBySupabaseUserId(supabaseIdentity.userId)
+          || await authRepository.findUserByEmailIncludingBlocked(normalizedEmail);
+      }
+
+      if (!user) {
+        logger.warn(
+          {
+            email: normalizedEmail,
+            authMode: getAuthProviderMode(),
+            supabaseUserId: supabaseIdentity.userId,
+            reason: 'local_user_not_found',
+          },
+          'Login negado: usuário local não encontrado após autenticação Supabase'
+        );
+        throw new UnauthorizedError('Email ou senha incorretos');
+      }
+
+      const authProvider = 'supabase';
       const normalizedRole = normalizeRole(user.role);
       let resolvedEmailVerified = Boolean(user.email_verified);
 
@@ -957,131 +733,55 @@ export const authService = {
         throw new UnauthorizedError('Email ou senha incorretos');
       }
 
-      if (authProvider === 'supabase') {
-        logger.info(
+      if (user.supabase_user_id && user.supabase_user_id !== supabaseIdentity.userId) {
+        logger.error(
           {
             email: normalizedEmail,
             userId: user.id,
             authProvider,
+            reason: 'identity_mismatch',
+            expectedSupabaseUserId: user.supabase_user_id,
+            providedSupabaseUserId: supabaseIdentity.userId,
           },
-          'Login em modo Supabase'
+          'Login negado: divergência de identidade Supabase'
         );
+        throw new UnauthorizedError('Email ou senha incorretos');
+      }
 
-        let supabaseIdentity;
+      await authRepository.updateUserIdentitySync(client, {
+        userId: user.id,
+        supabaseUserId: supabaseIdentity.userId,
+        authProvider: 'supabase',
+      });
 
-        try {
-          supabaseIdentity = await supabaseAuthService.signInWithPassword(normalizedEmail, password);
-        } catch (error) {
-          if (error instanceof AppError && error.code === 'EMAIL_NOT_VERIFIED') {
-            throw error;
-          }
-
-          if (error instanceof UnauthorizedError) {
-            logger.warn(
-              {
-                email: normalizedEmail,
-                userId: user.id,
-                authProvider,
-                reason: 'invalid_password',
-              },
-              'Login negado: senha inválida no provedor Supabase'
-            );
-            throw new UnauthorizedError('Email ou senha incorretos');
-          }
-
-          throw error;
-        }
-
-        if (user.supabase_user_id && user.supabase_user_id !== supabaseIdentity.userId) {
-          logger.error(
-            {
-              email: normalizedEmail,
-              userId: user.id,
-              authProvider,
-              reason: 'identity_mismatch',
-              expectedSupabaseUserId: user.supabase_user_id,
-              providedSupabaseUserId: supabaseIdentity.userId,
-            },
-            'Login negado: divergência de identidade Supabase'
-          );
-          throw new UnauthorizedError('Email ou senha incorretos');
-        }
-
-        await authRepository.updateUserIdentitySync(client, {
+      logger.info(
+        {
+          email: normalizedEmail,
           userId: user.id,
+          authProvider,
           supabaseUserId: supabaseIdentity.userId,
-          authProvider: 'supabase',
+          identityLinked: !user.supabase_user_id,
+        },
+        'Sincronização de identidade Supabase atualizada no login'
+      );
+
+      if (!resolvedEmailVerified) {
+        await reconcileSupabaseConfirmedUser({
+          email: normalizedEmail,
+          supabaseUser: supabaseIdentity.user || {
+            id: supabaseIdentity.userId,
+            email: supabaseIdentity.email,
+            email_confirmed_at: supabaseIdentity.emailVerifiedAt,
+            confirmed_at: supabaseIdentity.emailVerifiedAt,
+          },
+          reason: 'login_confirmed_user',
         });
 
-        logger.info(
-          {
-            email: normalizedEmail,
-            userId: user.id,
-            authProvider,
-            supabaseUserId: supabaseIdentity.userId,
-            identityLinked: !user.supabase_user_id,
-          },
-          'Sincronização de identidade Supabase atualizada no login'
-        );
-
-        if (!resolvedEmailVerified && supabaseIdentity.emailVerified) {
-          await reconcileSupabaseConfirmedUser({
-            email: normalizedEmail,
-            supabaseUser: supabaseIdentity.user || {
-              id: supabaseIdentity.userId,
-              email: supabaseIdentity.email,
-              email_confirmed_at: supabaseIdentity.emailVerifiedAt,
-              confirmed_at: supabaseIdentity.emailVerifiedAt,
-            },
-            reason: 'login_confirmed_user',
-          });
-
-          const refreshedUser = await authRepository.findUserByEmailIncludingBlocked(normalizedEmail);
-          if (refreshedUser) {
-            user = refreshedUser;
-            resolvedEmailVerified = Boolean(refreshedUser.email_verified);
-          }
-        }
-
-        if (!resolvedEmailVerified && !supabaseIdentity.emailVerified) {
-          logger.warn(
-            {
-              email: normalizedEmail,
-              userId: user.id,
-              authProvider,
-              reason: 'email_not_verified_provider',
-            },
-            'Login negado: e-mail não verificado no provedor Supabase'
-          );
-          throw new AppError(
-            'Conta não verificada. Verifique seu e-mail antes de fazer login.',
-            403,
-            'EMAIL_NOT_VERIFIED'
-          );
-        }
-      } else {
-        logger.info(
-          {
-            email: normalizedEmail,
-            userId: user.id,
-            authProvider,
-          },
-          'Login em modo legado'
-        );
-
-        const isValid = await bcrypt.compare(password, user.password_hash || '');
-
-        if (!isValid) {
-          logger.warn(
-            {
-              email: normalizedEmail,
-              userId: user.id,
-              authProvider,
-              reason: 'invalid_password',
-            },
-            'Login negado: senha inválida'
-          );
-          throw new UnauthorizedError('Email ou senha incorretos');
+        const refreshedUser = await authRepository.findUserBySupabaseUserId(supabaseIdentity.userId)
+          || await authRepository.findUserByEmailIncludingBlocked(normalizedEmail);
+        if (refreshedUser) {
+          user = refreshedUser;
+          resolvedEmailVerified = Boolean(refreshedUser.email_verified);
         }
       }
 
@@ -1291,15 +991,7 @@ export const authService = {
       });
     }
 
-    if (!tokenPayload?.token) {
-      throw new AppError('Token de verificação inválido.', 400, 'INVALID_VERIFICATION_TOKEN');
-    }
-
-    if (!allowsLegacyVerificationFlow()) {
-      throw new AppError('Link de verificação inválido ou expirado. Solicite um novo e-mail.', 400, 'INVALID_VERIFICATION_TOKEN');
-    }
-
-    return verifyEmailWithLegacyToken(tokenPayload.token);
+    throw new AppError('Link de verificação inválido ou expirado. Solicite um novo e-mail.', 400, 'INVALID_VERIFICATION_TOKEN');
   },
 
   async resendVerificationEmail(email) {
@@ -1315,174 +1007,109 @@ export const authService = {
       'Reenvio de verificacao solicitado'
     );
 
-    if (!isLegacyAuthProviderMode()) {
-      const [pendingRegistration, user] = await Promise.all([
-        authRepository.findPendingRegistrationByEmail(normalizedEmail),
-        authRepository.findUserByEmail(normalizedEmail),
-      ]);
+    const [pendingRegistration, user] = await Promise.all([
+      authRepository.findPendingRegistrationByEmail(normalizedEmail),
+      authRepository.findUserByEmail(normalizedEmail),
+    ]);
 
-      if (!pendingRegistration && (!user || user.email_verified)) {
-        logger.info(
-          {
-            mode,
-            email: normalizedEmail,
-            userFound: Boolean(user),
-            alreadyVerified: Boolean(user?.email_verified),
-          },
-          'Reenvio de verificação tratado sem envio'
-        );
-        return safeResponse;
-      }
-
-      try {
-        const supabaseUser = await supabaseAuthService.getUserByEmail(normalizedEmail);
-
-        if (supabaseUser?.emailVerified) {
-          logger.info(
-            {
-              mode,
-              email: normalizedEmail,
-              userId: user?.id || null,
-              pendingRegistrationId: pendingRegistration?.id || null,
-              supabaseUserId: supabaseUser.id,
-              supabaseEmailConfirmed: true,
-              localUserFound: Boolean(user),
-              pendingRegistrationFound: Boolean(pendingRegistration),
-              classification: 'already_confirmed',
-              accepted: false,
-              deliveryConfirmed: false,
-              reason: 'USER_ALREADY_CONFIRMED_IN_SUPABASE',
-            },
-            'Reenvio de verificacao ignorado para usuário já confirmado no Supabase'
-          );
-
-          await reconcileSupabaseConfirmedUser({
-            email: normalizedEmail,
-            supabaseUser,
-            reason: 'resend_already_confirmed',
-          });
-
-          return safeResponse;
-        }
-
-        const resendResult = await supabaseAuthService.resendVerificationEmail(normalizedEmail);
-
-        logger.info(
-          {
-            mode,
-            email: normalizedEmail,
-            userId: user?.id || null,
-            pendingRegistrationId: pendingRegistration?.id || null,
-            supabaseUserId: supabaseUser?.id || pendingRegistration?.supabase_user_id || null,
-            supabaseEmailConfirmed: Boolean(supabaseUser?.emailVerified),
-            redirectTo: resendResult?.redirectTo || null,
-            accepted: resendResult?.accepted === true,
-            deliveryConfirmed: resendResult?.deliveryConfirmed === true,
-            classification: resendResult?.classification || 'ambiguous',
-            resendSummary: resendResult?.summary || null,
-            status: 'success',
-          },
-          'Reenvio de verificacao concluido no Supabase'
-        );
-      } catch (error) {
-        logger.error(
-          {
-            err: error,
-            mode,
-            email: normalizedEmail,
-            userId: user?.id || null,
-            pendingRegistrationId: pendingRegistration?.id || null,
-            status: 'error',
-          },
-          'Falha ao reenviar verificacao no Supabase'
-        );
-
-        throw mapResendVerificationSupabaseError(error);
-      }
-
-      if (pendingRegistration) {
-        const pendingClient = await authRepository.getClient();
-
-        try {
-          await pendingClient.query('BEGIN');
-          await authRepository.touchPendingRegistrationVerificationSentAt(
-            pendingClient,
-            pendingRegistration.id
-          );
-          await pendingClient.query('COMMIT');
-        } catch (error) {
-          await pendingClient.query('ROLLBACK');
-          logger.error(
-            { err: error, email: normalizedEmail, pendingRegistrationId: pendingRegistration.id },
-            'Erro ao atualizar pendência de verificação'
-          );
-        } finally {
-          pendingClient.release();
-        }
-      }
-
-      return safeResponse;
-    }
-
-    const user = await authRepository.findUserByEmail(normalizedEmail);
-
-    if (!user || user.email_verified) {
+    if (!pendingRegistration && (!user || user.email_verified)) {
       logger.info(
-        { email: normalizedEmail, userFound: Boolean(user), alreadyVerified: Boolean(user?.email_verified) },
+        {
+          mode,
+          email: normalizedEmail,
+          userFound: Boolean(user),
+          alreadyVerified: Boolean(user?.email_verified),
+        },
         'Reenvio de verificação tratado sem envio'
       );
       return safeResponse;
     }
 
-    const { token, tokenHash, expiresAt } = generateEmailVerificationToken();
-    const client = await authRepository.getClient();
-
     try {
-      await client.query('BEGIN');
-      await authRepository.setEmailVerificationToken(client, {
-        userId: user.id,
-        tokenHash,
-        expiresAt,
-      });
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error({ err: error, userId: user.id, email: normalizedEmail }, 'Erro ao gerar novo token de verificação');
-      throw new AppError(
-        'Não foi possível processar o reenvio do e-mail de verificação. Tente novamente.',
-        500,
-        'RESEND_VERIFICATION_ERROR'
+      const supabaseUser = await supabaseAuthService.getUserByEmail(normalizedEmail);
+
+      if (supabaseUser?.emailVerified) {
+        logger.info(
+          {
+            mode,
+            email: normalizedEmail,
+            userId: user?.id || null,
+            pendingRegistrationId: pendingRegistration?.id || null,
+            supabaseUserId: supabaseUser.id,
+            supabaseEmailConfirmed: true,
+            localUserFound: Boolean(user),
+            pendingRegistrationFound: Boolean(pendingRegistration),
+            classification: 'already_confirmed',
+            accepted: false,
+            deliveryConfirmed: false,
+            reason: 'USER_ALREADY_CONFIRMED_IN_SUPABASE',
+          },
+          'Reenvio de verificacao ignorado para usuário já confirmado no Supabase'
+        );
+
+        await reconcileSupabaseConfirmedUser({
+          email: normalizedEmail,
+          supabaseUser,
+          reason: 'resend_already_confirmed',
+        });
+
+        return safeResponse;
+      }
+
+      const resendResult = await supabaseAuthService.resendVerificationEmail(normalizedEmail);
+
+      logger.info(
+        {
+          mode,
+          email: normalizedEmail,
+          userId: user?.id || null,
+          pendingRegistrationId: pendingRegistration?.id || null,
+          supabaseUserId: supabaseUser?.id || pendingRegistration?.supabase_user_id || null,
+          supabaseEmailConfirmed: Boolean(supabaseUser?.emailVerified),
+          redirectTo: resendResult?.redirectTo || null,
+          accepted: resendResult?.accepted === true,
+          deliveryConfirmed: resendResult?.deliveryConfirmed === true,
+          classification: resendResult?.classification || 'ambiguous',
+          resendSummary: resendResult?.summary || null,
+          status: 'success',
+        },
+        'Reenvio de verificacao concluido no Supabase'
       );
-    } finally {
-      client.release();
+    } catch (error) {
+      logger.error(
+        {
+          err: error,
+          mode,
+          email: normalizedEmail,
+          userId: user?.id || null,
+          pendingRegistrationId: pendingRegistration?.id || null,
+          status: 'error',
+        },
+        'Falha ao reenviar verificacao no Supabase'
+      );
+
+      throw mapResendVerificationSupabaseError(error);
     }
 
-    try {
-      await emailService.sendAccountVerificationEmail({
-        to: user.email,
-        token,
-        barbershopName: user.barbershop_name,
-      });
-    } catch (error) {
-      logger.error({ err: error, userId: user.id, email: user.email }, 'Falha ao reenviar e-mail de verificação');
+    if (pendingRegistration) {
+      const pendingClient = await authRepository.getClient();
 
-      if (error instanceof AppError && error.code === 'EMAIL_DELIVERY_FAILED') {
-        throw new AppError(
-          'Não foi possível enviar o e-mail de verificação no momento. Tente novamente.',
-          503,
-          'RESEND_VERIFICATION_EMAIL_UNAVAILABLE'
+      try {
+        await pendingClient.query('BEGIN');
+        await authRepository.touchPendingRegistrationVerificationSentAt(
+          pendingClient,
+          pendingRegistration.id
         );
+        await pendingClient.query('COMMIT');
+      } catch (error) {
+        await pendingClient.query('ROLLBACK');
+        logger.error(
+          { err: error, email: normalizedEmail, pendingRegistrationId: pendingRegistration.id },
+          'Erro ao atualizar pendência de verificação'
+        );
+      } finally {
+        pendingClient.release();
       }
-
-      if (error instanceof AppError) {
-        throw error;
-      }
-
-      throw new AppError(
-        'Não foi possível processar o reenvio do e-mail de verificação. Tente novamente.',
-        500,
-        'RESEND_VERIFICATION_ERROR'
-      );
     }
 
     return safeResponse;

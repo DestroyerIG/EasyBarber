@@ -1,23 +1,21 @@
-const ALLOWED_AUTH_PROVIDER_MODES = new Set(['legacy', 'dual', 'supabase']);
-const DEFAULT_AUTH_PROVIDER_MODE = 'dual';
+const DEFAULT_AUTH_PROVIDER_MODE = 'supabase';
 
-const normalizeMode = (value) => {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (ALLOWED_AUTH_PROVIDER_MODES.has(normalized)) {
-    return normalized;
-  }
+const normalizeMode = (_value) => {
+  // AUTH_PROVIDER_MODE is deprecated. Supabase Auth is the only supported provider.
   return DEFAULT_AUTH_PROVIDER_MODE;
 };
 
 export const getAuthProviderMode = () => normalizeMode(process.env.AUTH_PROVIDER_MODE);
 
-export const isLegacyAuthProviderMode = () => getAuthProviderMode() === 'legacy';
+export const isLegacyAuthProviderMode = () => false;
 
-export const isSupabaseOnlyAuthProviderMode = () => getAuthProviderMode() === 'supabase';
+export const isSupabaseOnlyAuthProviderMode = () => true;
 
-export const isSupabasePrimaryAuthProviderMode = () => {
-  const mode = getAuthProviderMode();
-  return mode === 'dual' || mode === 'supabase';
+export const isSupabasePrimaryAuthProviderMode = () => true;
+
+export const allowsLegacyVerificationFlow = () => false;
+
+export const isDeprecatedAuthProviderModeValue = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'legacy' || normalized === 'dual';
 };
-
-export const allowsLegacyVerificationFlow = () => !isSupabaseOnlyAuthProviderMode();
