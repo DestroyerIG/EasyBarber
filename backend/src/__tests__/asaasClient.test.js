@@ -82,6 +82,14 @@ describe('asaasClient', () => {
         },
       },
       details: expect.objectContaining({
+        payload: {
+          errors: [
+            {
+              code: 'invalid_field',
+              description: 'Campo inválido',
+            },
+          ],
+        },
         requestBody: JSON.stringify({
           name: 'Itallo Gabriel',
           cpfCnpj: '70596090404',
@@ -137,6 +145,9 @@ describe('asaasClient', () => {
         },
       },
       details: expect.objectContaining({
+        payload: {
+          rawBody: 'Bad Request',
+        },
         responseText: 'Bad Request',
         responseHeaders: {
           'content-type': 'text/plain',

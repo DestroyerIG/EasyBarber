@@ -164,6 +164,105 @@ const parseJsonSafely = (text) => {
   }
 };
 
+const maskDigitsTail = (value, visibleDigits = 4) => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const digits = String(value).replace(/\D+/g, '');
+  if (!digits) {
+    return '***';
+  }
+
+  if (digits.length <= visibleDigits) {
+    return digits;
+  }
+
+  return `${'*'.repeat(Math.max(0, digits.length - visibleDigits))}${digits.slice(-visibleDigits)}`;
+};
+
+const maskEmail = (value) => {
+  if (typeof value !== 'string') {
+    return value || null;
+  }
+
+  const normalized = value.trim();
+  const atIndex = normalized.indexOf('@');
+
+  if (atIndex <= 0) {
+    return normalized;
+  }
+
+  const local = normalized.slice(0, atIndex);
+  const domain = normalized.slice(atIndex + 1);
+
+  if (!domain) {
+    return `${local.slice(0, 1)}***`;
+  }
+
+  const maskedLocal = local.length <= 2
+    ? `${local.slice(0, 1)}*`
+    : `${local.slice(0, 2)}***`;
+
+  const [domainName, ...domainTailParts] = domain.split('.');
+  const domainTail = domainTailParts.length > 0 ? `.${domainTailParts.join('.')}` : '';
+  const maskedDomainName = domainName
+    ? `${domainName.slice(0, 1)}***`
+    : '***';
+
+  return `${maskedLocal}@${maskedDomainName}${domainTail}`;
+};
+
+const maskSensitiveByKey = (key, value) => {
+  const normalizedKey = String(key || '').toLowerCase();
+
+  if (normalizedKey.includes('email')) {
+    return maskEmail(value);
+  }
+
+  if (
+    normalizedKey.includes('cpf') ||
+    normalizedKey.includes('cnpj') ||
+    normalizedKey.includes('phone') ||
+    normalizedKey.includes('whatsapp') ||
+    normalizedKey.includes('mobile')
+  ) {
+    return maskDigitsTail(value);
+  }
+
+  return value;
+};
+
+const maskSensitiveData = (value, key = '') => {
+  if (Array.isArray(value)) {
+    return value.map((item) => maskSensitiveData(item, key));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([entryKey, entryValue]) => [
+        entryKey,
+        maskSensitiveData(entryValue, entryKey),
+      ])
+    );
+  }
+
+  return maskSensitiveByKey(key, value);
+};
+
+const sanitizeBodyForLog = (serializedBody) => {
+  if (!serializedBody) {
+    return null;
+  }
+
+  const parsed = parseJsonSafely(serializedBody);
+  if (parsed && typeof parsed === 'object') {
+    return maskSensitiveData(parsed);
+  }
+
+  return serializedBody;
+};
+
 const buildAsaasError = ({
   statusCode,
   payload,
@@ -174,12 +273,18 @@ const buildAsaasError = ({
   url,
   requestBody,
 }) => {
-  const apiMessage = payload?.errors?.[0]?.description || payload?.message || null;
+  const responseBody =
+    payload !== undefined && payload !== null
+      ? payload
+      : responseText
+        ? { rawBody: responseText }
+        : null;
+  const apiMessage = responseBody?.errors?.[0]?.description || responseBody?.message || null;
   const message = apiMessage || responseText || `Erro Asaas (${method} ${path})`;
   const error = new AppError(message, statusCode || 502, 'ASAAS_API_ERROR');
   error.response = {
     status: statusCode || 502,
-    data: payload || (responseText ? { rawBody: responseText } : null),
+    data: responseBody,
     headers: responseHeaders || {},
   };
 
@@ -189,7 +294,7 @@ const buildAsaasError = ({
     path,
     url,
     statusCode,
-    payload,
+    payload: responseBody,
     responseHeaders: responseHeaders || {},
     responseText: responseText || null,
     requestBody: requestBody || null,
@@ -243,7 +348,7 @@ const request = async (method, path, options = {}) => {
             'has-access-token': Boolean(headers.access_token),
             'has-idempotency-key': Boolean(idempotencyKey),
           },
-          requestBody: serializedBody,
+          requestBody: sanitizeBodyForLog(serializedBody),
         },
         'ASAAS HTTP REQUEST'
       );
@@ -269,7 +374,7 @@ const request = async (method, path, options = {}) => {
           url: url.toString(),
           statusCode: response.status,
           responseHeaders,
-          responseBody: payload || responseText || null,
+          responseBody: maskSensitiveData(payload || responseText || null),
         },
         'ASAAS HTTP RESPONSE'
       );

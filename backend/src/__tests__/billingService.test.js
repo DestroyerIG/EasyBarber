@@ -21,6 +21,13 @@ const mockAsaasMapper = {
   extractBarbershopIdFromExternalReference: jest.fn(),
 };
 
+const mockLogger = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn(),
+};
+
 jest.unstable_mockModule('../repositories/subscriptionRepository.js', () => ({
   subscriptionRepository: mockSubscriptionRepository,
 }));
@@ -38,12 +45,7 @@ jest.unstable_mockModule('../integrations/asaas/mapper.js', () => ({
 }));
 
 jest.unstable_mockModule('../utils/logger.js', () => ({
-  default: {
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
-  },
+  default: mockLogger,
 }));
 
 const { billingService } = await import('../services/billingService.js');
@@ -51,6 +53,10 @@ const { billingService } = await import('../services/billingService.js');
 describe('billingService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockLogger.info.mockReset();
+    mockLogger.warn.mockReset();
+    mockLogger.error.mockReset();
+    mockLogger.debug.mockReset();
 
     mockAsaasService.resolveBillingPeriodFromPayment.mockReturnValue({
       periodStart: null,
@@ -170,6 +176,71 @@ describe('billingService', () => {
     );
 
     expect(mockSubscriptionRepository.upsertBillingPayment).toHaveBeenCalled();
+  });
+
+  it('maps Asaas customer create failures to controlled Pix checkout error', async () => {
+    const asaasProvider = {
+      createSubscription: jest.fn().mockRejectedValue({
+        code: 'ASAAS_CUSTOMER_CREATE_ERROR',
+        statusCode: 400,
+        providerStatus: 400,
+        providerData: {
+          method: 'POST',
+          path: '/customers',
+          statusCode: 400,
+          payload: {
+            errors: [
+              {
+                code: 'invalid_field',
+                description: 'Campo inválido',
+              },
+            ],
+          },
+          errors: [
+            {
+              code: 'invalid_field',
+              description: 'Campo inválido',
+            },
+          ],
+        },
+      }),
+      mapExternalStatusToInternalStatus: jest.fn(),
+    };
+
+    mockSubscriptionRepository.getBarbershopBillingContext.mockResolvedValue({
+      id: 'tenant-asaas-error-1',
+      name: 'Barbearia Teste',
+      owner_name: 'Joao',
+      email: 'teste@barber.com',
+      whatsapp: '11999999999',
+      plan: 'basico',
+      desired_plan: 'profissional',
+    });
+
+    mockBillingProviderFactory.resolveProviderByPaymentMethod.mockReturnValue('asaas');
+    mockBillingProviderFactory.getProvider.mockReturnValue(asaasProvider);
+
+    await expect(
+      billingService.createCheckoutSession('tenant-asaas-error-1', 'profissional', 'pix')
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'ASAAS_CUSTOMER_CREATE_FAILED',
+      message:
+        'Não foi possível criar o cliente no Asaas. Verifique os dados cadastrais e tente novamente.',
+      details: {
+        traceCode: expect.any(String),
+      },
+    });
+
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'billing_checkout_error',
+        barbershopId: 'tenant-asaas-error-1',
+        paymentMethod: 'pix',
+        code: 'ASAAS_CUSTOMER_CREATE_ERROR',
+      }),
+      'Falha ao criar checkout de billing'
+    );
   });
 
   it('refreshes Pix payment status and updates local subscription state', async () => {

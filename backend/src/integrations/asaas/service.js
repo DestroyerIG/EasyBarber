@@ -15,6 +15,245 @@ const PLAN_VALUES = Object.freeze({
   premium: 199.9,
 });
 
+const GENERIC_CUSTOMER_NAMES = new Set([
+  'equipe easybarber',
+  'equipe easy barber',
+  'easybarber',
+  'easy barber',
+]);
+
+const DUPLICATE_CUSTOMER_ERROR_HINTS = [
+  'already exists',
+  'já existe',
+  'ja existe',
+  'duplic',
+  'cpf já cadastrado',
+  'cpf ja cadastrado',
+  'cnpj já cadastrado',
+  'cnpj ja cadastrado',
+  'external reference',
+  'documento já cadastrado',
+  'documento ja cadastrado',
+];
+
+const parseJsonSafely = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(normalized);
+  } catch {
+    return null;
+  }
+};
+
+const normalizeText = (value) => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value.trim().replace(/\s+/g, ' ');
+};
+
+const maskDigitsTail = (value, visibleDigits = 4) => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const digits = String(value).replace(/\D+/g, '');
+  if (!digits) {
+    return '***';
+  }
+
+  if (digits.length <= visibleDigits) {
+    return digits;
+  }
+
+  return `${'*'.repeat(Math.max(0, digits.length - visibleDigits))}${digits.slice(-visibleDigits)}`;
+};
+
+const maskEmail = (value) => {
+  if (typeof value !== 'string') {
+    return value || null;
+  }
+
+  const normalized = value.trim();
+  const atIndex = normalized.indexOf('@');
+
+  if (atIndex <= 0) {
+    return normalized;
+  }
+
+  const local = normalized.slice(0, atIndex);
+  const domain = normalized.slice(atIndex + 1);
+
+  if (!domain) {
+    return `${local.slice(0, 1)}***`;
+  }
+
+  const maskedLocal = local.length <= 2
+    ? `${local.slice(0, 1)}*`
+    : `${local.slice(0, 2)}***`;
+
+  const [domainName, ...domainTailParts] = domain.split('.');
+  const domainTail = domainTailParts.length > 0 ? `.${domainTailParts.join('.')}` : '';
+  const maskedDomainName = domainName
+    ? `${domainName.slice(0, 1)}***`
+    : '***';
+
+  return `${maskedLocal}@${maskedDomainName}${domainTail}`;
+};
+
+const maskSensitiveByKey = (key, value) => {
+  const normalizedKey = String(key || '').toLowerCase();
+
+  if (normalizedKey.includes('email')) {
+    return maskEmail(value);
+  }
+
+  if (
+    normalizedKey.includes('cpf') ||
+    normalizedKey.includes('cnpj') ||
+    normalizedKey.includes('phone') ||
+    normalizedKey.includes('whatsapp') ||
+    normalizedKey.includes('mobile')
+  ) {
+    return maskDigitsTail(value);
+  }
+
+  return value;
+};
+
+const maskSensitiveData = (value, key = '') => {
+  if (Array.isArray(value)) {
+    return value.map((item) => maskSensitiveData(item, key));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([entryKey, entryValue]) => [
+        entryKey,
+        maskSensitiveData(entryValue, entryKey),
+      ])
+    );
+  }
+
+  return maskSensitiveByKey(key, value);
+};
+
+const removeEmptyFields = (payload = {}) => {
+  return Object.fromEntries(
+    Object.entries(payload)
+      .map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value])
+      .filter(([, value]) => {
+        if (value === null || value === undefined) {
+          return false;
+        }
+
+        if (typeof value === 'string') {
+          return value.length > 0;
+        }
+
+        return true;
+      })
+  );
+};
+
+const extractAsaasErrors = (responseBody) => {
+  if (Array.isArray(responseBody?.errors)) {
+    return responseBody.errors;
+  }
+
+  if (Array.isArray(responseBody?.error)) {
+    return responseBody.error;
+  }
+
+  return [];
+};
+
+const buildAsaasErrorContext = (
+  error,
+  { method = null, path = null, requestPayload = null } = {}
+) => {
+  const details = error?.details || {};
+  const providerData = error?.providerData || null;
+  const responsePayloadFromString = parseJsonSafely(details?.responseText);
+  const responseBody =
+    providerData?.payload ||
+    error?.response?.data ||
+    details?.payload ||
+    responsePayloadFromString ||
+    (details?.responseText ? { rawBody: details.responseText } : null);
+  const responseHeaders =
+    providerData?.responseHeaders ||
+    error?.response?.headers ||
+    details?.responseHeaders ||
+    null;
+  const parsedRequestBody = parseJsonSafely(details?.requestBody);
+  const resolvedRequestPayload =
+    requestPayload ||
+    providerData?.requestPayload ||
+    parsedRequestBody ||
+    null;
+
+  return {
+    statusCode:
+      error?.providerStatus ||
+      error?.response?.status ||
+      details?.statusCode ||
+      error?.statusCode ||
+      null,
+    method: providerData?.method || details?.method || method,
+    path: providerData?.path || details?.path || path,
+    requestPayload: resolvedRequestPayload,
+    responseBody,
+    responseHeaders,
+    responseErrors: providerData?.errors || extractAsaasErrors(responseBody),
+  };
+};
+
+const isDuplicateCustomerError = (errorContext) => {
+  const statusCode = Number(errorContext?.statusCode || 0);
+  if (statusCode !== 400 && statusCode !== 409) {
+    return false;
+  }
+
+  const responseErrors = Array.isArray(errorContext?.responseErrors)
+    ? errorContext.responseErrors
+    : [];
+  const errorCodes = responseErrors
+    .map((item) => String(item?.code || '').toLowerCase())
+    .filter(Boolean);
+
+  if (
+    errorCodes.some(
+      (code) =>
+        code.includes('already') ||
+        code.includes('exists') ||
+        code.includes('duplicate') ||
+        code.includes('document')
+    )
+  ) {
+    return true;
+  }
+
+  const messageChunks = [
+    errorContext?.responseBody?.message,
+    ...responseErrors.map((item) => item?.description || item?.message || null),
+  ]
+    .filter(Boolean)
+    .join(' | ')
+    .toLowerCase();
+
+  return DUPLICATE_CUSTOMER_ERROR_HINTS.some((hint) => messageChunks.includes(hint));
+};
+
 const onlyNumbers = (value) => {
   if (value === undefined || value === null) {
     return null;
@@ -138,6 +377,22 @@ const findCustomerByExternalReference = async (externalReference) => {
   return response?.data?.[0] || null;
 };
 
+const findCustomerByCpfCnpj = async (cpfCnpj) => {
+  if (!cpfCnpj) {
+    return null;
+  }
+
+  const response = await asaasClient.get('/customers', {
+    query: {
+      cpfCnpj,
+      limit: 1,
+      offset: 0,
+    },
+  });
+
+  return response?.data?.[0] || null;
+};
+
 const findMostRecentPaymentBySubscription = async (subscriptionId) => {
   const response = await asaasClient.get('/payments', {
     query: {
@@ -160,10 +415,35 @@ const resolvePixQrCode = async (paymentId) => {
   }
 };
 
+const resolveCustomerNameCandidates = (barbershop) => {
+  return [
+    barbershop?.owner_name,
+    barbershop?.ownerName,
+    barbershop?.responsible_name,
+    barbershop?.responsibleName,
+    barbershop?.metadata?.ownerName,
+    barbershop?.metadata?.responsibleName,
+    barbershop?.name,
+  ]
+    .map((value) => normalizeText(value))
+    .filter(Boolean);
+};
+
+const isGenericCustomerName = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  return GENERIC_CUSTOMER_NAMES.has(normalized);
+};
+
 const resolveCustomerName = (barbershop) => {
-  const candidate = barbershop?.owner_name || barbershop?.name || null;
-  const normalized = typeof candidate === 'string' ? candidate.trim() : '';
-  return normalized || null;
+  const candidates = resolveCustomerNameCandidates(barbershop);
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const nonGeneric = candidates.find((value) => !isGenericCustomerName(value));
+  const resolved = nonGeneric || candidates[0];
+
+  return resolved.length >= 3 ? resolved : null;
 };
 
 const isValidPublicEmail = (email) => {
@@ -198,10 +478,57 @@ const resolveCustomerEmail = (barbershop) => {
   return isValidPublicEmail(candidate) ? candidate.toLowerCase() : null;
 };
 
+const resolveCustomerExternalReference = (barbershop) => {
+  const candidates = [
+    barbershop?.id,
+    barbershop?.tenantId,
+    barbershop?.tenant_id,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeText(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+};
+
+const resolveSavedAsaasCustomerId = (barbershop) => {
+  const normalizedProvider = String(barbershop?.provider || '').trim().toLowerCase();
+  const normalizedPaymentMethod = String(barbershop?.payment_method || '').trim().toLowerCase();
+  const canTrustProviderCustomerId =
+    normalizedProvider === 'asaas' || normalizedPaymentMethod === 'pix';
+
+  const candidates = [
+    canTrustProviderCustomerId ? barbershop?.provider_customer_id : null,
+    barbershop?.asaas_customer_id,
+    barbershop?.asaasCustomerId,
+    barbershop?.customer_id,
+    barbershop?.customerId,
+    barbershop?.metadata?.asaas?.customerId,
+    barbershop?.metadata?.billing?.asaas?.customerId,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeText(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+};
+
 const resolveCustomerCpfCnpjInput = (barbershop) => {
   const candidates = [
     barbershop?.cpf_cnpj,
     barbershop?.cpfCnpj,
+    barbershop?.document,
+    barbershop?.documentNumber,
+    barbershop?.metadata?.cpfCnpj,
+    barbershop?.metadata?.document,
   ];
 
   for (const candidate of candidates) {
@@ -214,12 +541,41 @@ const resolveCustomerCpfCnpjInput = (barbershop) => {
   return null;
 };
 
+const validateCustomerCpfCnpjOrThrow = (cpfCnpj) => {
+  if (!cpfCnpj) {
+    throw new AppError(
+      'CPF/CNPJ obrigatório para pagamento via Pix.',
+      400,
+      'CPF_CNPJ_REQUIRED'
+    );
+  }
+
+  const length = cpfCnpj.length;
+  if (length !== 11 && length !== 14) {
+    throw new AppError(
+      'CPF/CNPJ inválido. Informe um CPF com 11 dígitos ou CNPJ com 14 dígitos.',
+      400,
+      'INVALID_CPF_CNPJ'
+    );
+  }
+
+  if (!isValidCpfCnpj(cpfCnpj)) {
+    throw new AppError(
+      'CPF/CNPJ inválido. Informe um CPF com 11 dígitos ou CNPJ com 14 dígitos.',
+      400,
+      'INVALID_CPF_CNPJ'
+    );
+  }
+};
+
 const buildCustomerPayload = (barbershop) => {
   const name = resolveCustomerName(barbershop);
   const email = resolveCustomerEmail(barbershop);
-  const mobilePhone = normalizeBrazilPhone(barbershop?.whatsapp);
+  const mobilePhone = normalizeBrazilPhone(
+    barbershop?.whatsapp || barbershop?.phone || barbershop?.mobile_phone
+  );
   const cpfCnpj = resolveCustomerCpfCnpjInput(barbershop);
-  const externalReference = barbershop.id;
+  const externalReference = resolveCustomerExternalReference(barbershop);
   const notificationDisabledCandidates = [
     barbershop?.notificationDisabled,
     barbershop?.metadata?.asaas?.notificationDisabled,
@@ -237,58 +593,48 @@ const buildCustomerPayload = (barbershop) => {
     );
   }
 
-  if (!cpfCnpj) {
+  if (name.length < 3) {
     throw new AppError(
-      'CPF/CNPJ é obrigatório para pagamento via Pix.',
+      'Nome é obrigatório para pagamento via Pix.',
       400,
-      'CPF_CNPJ_REQUIRED'
+      'CUSTOMER_NAME_REQUIRED'
     );
   }
 
-  if (!isValidCpfCnpj(cpfCnpj)) {
+  validateCustomerCpfCnpjOrThrow(cpfCnpj);
+
+  if (!mobilePhone) {
     throw new AppError(
-      'CPF/CNPJ inválido para pagamento via Pix.',
+      'Telefone/WhatsApp obrigatório para pagamento via Pix.',
       400,
-      'INVALID_CPF_CNPJ'
+      'MOBILE_PHONE_REQUIRED'
     );
   }
 
-  return {
+  return removeEmptyFields({
     name,
     cpfCnpj,
-    ...(mobilePhone ? { mobilePhone } : {}),
+    mobilePhone,
     ...(email ? { email } : {}),
     ...(externalReference ? { externalReference } : {}),
     ...(typeof notificationDisabled === 'boolean'
       ? { notificationDisabled }
       : {}),
-  };
+  });
 };
 
 const rethrowAsaasError = (
   error,
   fallbackMessage,
-  fallbackCode = 'ASAAS_REQUEST_ERROR'
+  fallbackCode = 'ASAAS_REQUEST_ERROR',
+  contextOptions = {}
 ) => {
-  const responseStatus =
-    error?.response?.status ||
-    error?.statusCode ||
-    error?.details?.statusCode ||
-    null;
-  const responseData =
-    error?.response?.data ||
-    error?.providerData ||
-    error?.details?.payload ||
-    error?.details?.responseText ||
-    error?.details ||
-    null;
-  const responseHeaders =
-    error?.response?.headers ||
-    error?.providerHeaders ||
-    error?.details?.responseHeaders ||
-    null;
+  const providerContext = buildAsaasErrorContext(error, contextOptions);
+  const responseData = providerContext.responseBody;
+  const responseHeaders = providerContext.responseHeaders || null;
+  const responseErrors = providerContext.responseErrors || [];
   const asaasMessage =
-    responseData?.errors?.map((item) => item.description).filter(Boolean).join(' | ') ||
+    responseErrors.map((item) => item?.description || item?.message).filter(Boolean).join(' | ') ||
     (typeof responseData === 'string' ? responseData : null) ||
     responseData?.message ||
     error?.message ||
@@ -296,13 +642,21 @@ const rethrowAsaasError = (
 
   const appError = new AppError(
     asaasMessage || fallbackMessage,
-    responseStatus || 502,
+    providerContext.statusCode || 502,
     fallbackCode
   );
 
-  appError.details = responseData || null;
-  appError.providerStatus = responseStatus || null;
-  appError.providerData = responseData || null;
+  appError.details = maskSensitiveData(responseData) || null;
+  appError.providerStatus = providerContext.statusCode || null;
+  appError.providerData = {
+    method: providerContext.method || contextOptions.method || null,
+    path: providerContext.path || contextOptions.path || null,
+    statusCode: providerContext.statusCode || null,
+    requestPayload: maskSensitiveData(providerContext.requestPayload),
+    payload: maskSensitiveData(responseData),
+    errors: maskSensitiveData(responseErrors),
+    responseHeaders: providerContext.responseHeaders || null,
+  };
   appError.providerHeaders = responseHeaders || null;
   throw appError;
 };
@@ -317,7 +671,7 @@ const syncExistingCustomer = async ({
     {
       code: 'ASAAS_CUSTOMER_UPDATE_REQUEST',
       customerId,
-      payload,
+      payload: maskSensitiveData(payload),
     },
     'ASAAS CUSTOMER PAYLOAD'
   );
@@ -327,11 +681,12 @@ const syncExistingCustomer = async ({
       idempotencyKey,
     });
   } catch (error) {
-    const statusCode =
-      error?.statusCode ||
-      error?.details?.statusCode ||
-      error?.response?.status ||
-      null;
+    const providerContext = buildAsaasErrorContext(error, {
+      method: 'PUT',
+      path: '/customers/:id',
+      requestPayload: payload,
+    });
+    const statusCode = providerContext.statusCode;
 
     if (allowNotFound && statusCode === 404) {
       return null;
@@ -341,13 +696,15 @@ const syncExistingCustomer = async ({
       {
         message: error?.message,
         statusCode,
-        providerStatus: error?.response?.status || statusCode,
-        providerData: error?.response?.data || error?.details || null,
-        providerHeaders: error?.response?.headers || error?.details?.responseHeaders || null,
+        method: providerContext.method,
+        path: providerContext.path,
+        providerStatus: statusCode,
+        requestPayload: maskSensitiveData(payload),
+        responseBody: maskSensitiveData(providerContext.responseBody),
+        responseErrors: maskSensitiveData(providerContext.responseErrors),
+        providerHeaders: providerContext.responseHeaders,
         code: error?.code || 'ASAAS_CUSTOMER_UPDATE_ERROR',
-        details: error?.details || null,
         customerId,
-        payload,
       },
       'ASAAS CUSTOMER SYNC ERROR'
     );
@@ -355,7 +712,12 @@ const syncExistingCustomer = async ({
     rethrowAsaasError(
       error,
       'Erro Asaas (PUT /customers/:id)',
-      'ASAAS_CUSTOMER_UPDATE_ERROR'
+      'ASAAS_CUSTOMER_UPDATE_ERROR',
+      {
+        method: 'PUT',
+        path: '/customers/:id',
+        requestPayload: payload,
+      }
     );
   }
 };
@@ -380,63 +742,220 @@ export const asaasService = {
 
     const payload = buildCustomerPayload(barbershop);
 
-    if (barbershop.provider_customer_id && barbershop.provider === 'asaas') {
+    logger.info(
+      {
+        event: 'asaas_customer_payload_prepared',
+        barbershopId: barbershop.id,
+        payload: maskSensitiveData(payload),
+      },
+      'Payload de cliente Asaas preparado'
+    );
+
+    const savedCustomerId = resolveSavedAsaasCustomerId(barbershop);
+
+    if (savedCustomerId) {
       const syncedCustomer = await syncExistingCustomer({
-        customerId: barbershop.provider_customer_id,
+        customerId: savedCustomerId,
         payload,
         idempotencyKey,
         allowNotFound: true,
       });
 
       if (syncedCustomer?.id) {
+        logger.info(
+          {
+            event: 'asaas_customer_reuse',
+            source: 'saved_customer_id',
+            barbershopId: barbershop.id,
+            customerId: syncedCustomer.id,
+          },
+          'Cliente Asaas reutilizado'
+        );
+
         return syncedCustomer;
       }
     }
 
-    const externalReference = barbershop.id;
+    const externalReference = payload.externalReference || resolveCustomerExternalReference(barbershop);
 
-    const existing = await findCustomerByExternalReference(externalReference);
-    if (existing?.id) {
-      const syncedCustomer = await syncExistingCustomer({
-        customerId: existing.id,
-        payload,
-        idempotencyKey,
-      });
+    if (externalReference) {
+      try {
+        const existingByReference = await findCustomerByExternalReference(externalReference);
+        if (existingByReference?.id) {
+          const syncedCustomer = await syncExistingCustomer({
+            customerId: existingByReference.id,
+            payload,
+            idempotencyKey,
+          });
 
-      return syncedCustomer || existing;
+          const reusedCustomer = syncedCustomer || existingByReference;
+
+          logger.info(
+            {
+              event: 'asaas_customer_reuse',
+              source: 'external_reference',
+              barbershopId: barbershop.id,
+              customerId: reusedCustomer.id,
+            },
+            'Cliente Asaas reutilizado'
+          );
+
+          return reusedCustomer;
+        }
+      } catch (lookupError) {
+        logger.warn(
+          {
+            event: 'asaas_customer_lookup_warning',
+            source: 'external_reference',
+            barbershopId: barbershop.id,
+            externalReference,
+            message: lookupError?.message,
+          },
+          'Falha ao buscar cliente Asaas por externalReference'
+        );
+      }
     }
 
-    try {
-      logger.debug(
-        {
-          code: 'ASAAS_CUSTOMER_CREATE_REQUEST',
-          payload,
-        },
-        'ASAAS CUSTOMER PAYLOAD'
-      );
+    if (payload.cpfCnpj) {
+      try {
+        const existingByDocument = await findCustomerByCpfCnpj(payload.cpfCnpj);
+        if (existingByDocument?.id) {
+          const syncedCustomer = await syncExistingCustomer({
+            customerId: existingByDocument.id,
+            payload,
+            idempotencyKey,
+          });
 
-      return await asaasClient.post('/customers', payload, {
+          const reusedCustomer = syncedCustomer || existingByDocument;
+
+          logger.info(
+            {
+              event: 'asaas_customer_reuse',
+              source: 'cpf_cnpj',
+              barbershopId: barbershop.id,
+              customerId: reusedCustomer.id,
+            },
+            'Cliente Asaas reutilizado'
+          );
+
+          return reusedCustomer;
+        }
+      } catch (lookupError) {
+        logger.warn(
+          {
+            event: 'asaas_customer_lookup_warning',
+            source: 'cpf_cnpj',
+            barbershopId: barbershop.id,
+            message: lookupError?.message,
+            cpfCnpj: maskDigitsTail(payload.cpfCnpj),
+          },
+          'Falha ao buscar cliente Asaas por CPF/CNPJ'
+        );
+      }
+    }
+
+    logger.info(
+      {
+        event: 'asaas_customer_create_start',
+        barbershopId: barbershop.id,
+        method: 'POST',
+        path: '/customers',
+        payload: maskSensitiveData(payload),
+      },
+      'Iniciando criacao de cliente Asaas'
+    );
+
+    try {
+      const createdCustomer = await asaasClient.post('/customers', payload, {
         idempotencyKey,
       });
+
+      logger.info(
+        {
+          event: 'asaas_customer_create_success',
+          barbershopId: barbershop.id,
+          customerId: createdCustomer?.id || null,
+          externalReference: payload.externalReference || null,
+        },
+        'Cliente Asaas criado com sucesso'
+      );
+
+      return createdCustomer;
     } catch (error) {
+      const providerContext = buildAsaasErrorContext(error, {
+        method: 'POST',
+        path: '/customers',
+        requestPayload: payload,
+      });
+
+      if (isDuplicateCustomerError(providerContext)) {
+        let duplicatedCustomer = null;
+
+        if (externalReference) {
+          try {
+            duplicatedCustomer = await findCustomerByExternalReference(externalReference);
+          } catch {
+            duplicatedCustomer = null;
+          }
+        }
+
+        if (!duplicatedCustomer?.id && payload.cpfCnpj) {
+          try {
+            duplicatedCustomer = await findCustomerByCpfCnpj(payload.cpfCnpj);
+          } catch {
+            duplicatedCustomer = null;
+          }
+        }
+
+        if (duplicatedCustomer?.id) {
+          const syncedCustomer = await syncExistingCustomer({
+            customerId: duplicatedCustomer.id,
+            payload,
+            idempotencyKey,
+          });
+
+          const reusedCustomer = syncedCustomer || duplicatedCustomer;
+
+          logger.info(
+            {
+              event: 'asaas_customer_reuse',
+              source: 'duplicate_error_recovery',
+              barbershopId: barbershop.id,
+              customerId: reusedCustomer.id,
+            },
+            'Cliente Asaas reutilizado apos erro de duplicidade'
+          );
+
+          return reusedCustomer;
+        }
+      }
+
       logger.error(
         {
+          event: 'asaas_customer_create_error',
+          barbershopId: barbershop.id,
           message: error?.message,
-          statusCode: error?.statusCode || error?.status || null,
-          providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
-          providerData: error?.response?.data || error?.details || null,
-          providerHeaders: error?.response?.headers || error?.details?.responseHeaders || null,
+          statusCode: providerContext.statusCode,
+          method: providerContext.method,
+          path: providerContext.path,
+          requestPayload: maskSensitiveData(providerContext.requestPayload),
+          responseBody: maskSensitiveData(providerContext.responseBody),
+          responseErrors: maskSensitiveData(providerContext.responseErrors),
+          providerHeaders: providerContext.responseHeaders,
           code: error?.code || 'ASAAS_CUSTOMER_CREATE_ERROR',
-          details: error?.details || null,
-          payload,
         },
-        'ASAAS CUSTOMER ERROR'
+        'Falha ao criar cliente Asaas'
       );
 
       rethrowAsaasError(
         error,
         'Erro Asaas (POST /customers)',
-        'ASAAS_CUSTOMER_CREATE_ERROR'
+        'ASAAS_CUSTOMER_CREATE_ERROR',
+        {
+          method: 'POST',
+          path: '/customers',
+          requestPayload: payload,
+        }
       );
     }
   },
@@ -467,21 +986,51 @@ export const asaasService = {
       ...(isValidCpfCnpj(normalizedCpfCnpj) ? { cpfCnpj: normalizedCpfCnpj } : {}),
     };
 
+    logger.info(
+      {
+        event: 'asaas_pix_payment_create_start',
+        barbershopId,
+        method: 'POST',
+        path: '/payments',
+        payload: maskSensitiveData(payload),
+      },
+      'Iniciando criacao de cobranca Pix no Asaas'
+    );
+
     try {
-      return await asaasClient.post('/payments', payload, {
+      const createdPayment = await asaasClient.post('/payments', payload, {
         idempotencyKey,
       });
+
+      logger.info(
+        {
+          event: 'asaas_pix_payment_create_success',
+          barbershopId,
+          paymentId: createdPayment?.id || null,
+          status: createdPayment?.status || null,
+        },
+        'Cobranca Pix criada no Asaas'
+      );
+
+      return createdPayment;
     } catch (error) {
+      const providerContext = buildAsaasErrorContext(error, {
+        method: 'POST',
+        path: '/payments',
+        requestPayload: payload,
+      });
+
       logger.error(
         {
           message: error?.message,
-          statusCode: error?.statusCode || error?.status || null,
-          providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
-          providerData: error?.response?.data || error?.details || null,
-          providerHeaders: error?.response?.headers || error?.details?.responseHeaders || null,
+          statusCode: providerContext.statusCode,
+          method: providerContext.method,
+          path: providerContext.path,
+          requestPayload: maskSensitiveData(providerContext.requestPayload),
+          responseBody: maskSensitiveData(providerContext.responseBody),
+          responseErrors: maskSensitiveData(providerContext.responseErrors),
+          providerHeaders: providerContext.responseHeaders,
           code: error?.code || 'ASAAS_PIX_PAYMENT_CREATE_ERROR',
-          details: error?.details || null,
-          payload,
         },
         'ASAAS PAYMENT ERROR'
       );
@@ -489,7 +1038,12 @@ export const asaasService = {
       rethrowAsaasError(
         error,
         'Erro Asaas (POST /payments)',
-        'ASAAS_PIX_PAYMENT_CREATE_ERROR'
+        'ASAAS_PIX_PAYMENT_CREATE_ERROR',
+        {
+          method: 'POST',
+          path: '/payments',
+          requestPayload: payload,
+        }
       );
     }
   },
@@ -503,21 +1057,7 @@ export const asaasService = {
   }) {
     const payerCpfCnpj = resolveCustomerCpfCnpjInput(barbershop);
 
-    if (!payerCpfCnpj) {
-      throw new AppError(
-        'CPF/CNPJ é obrigatório para pagamento via Pix.',
-        400,
-        'CPF_CNPJ_REQUIRED'
-      );
-    }
-
-    if (!isValidCpfCnpj(payerCpfCnpj)) {
-      throw new AppError(
-        'CPF/CNPJ inválido para pagamento via Pix.',
-        400,
-        'INVALID_CPF_CNPJ'
-      );
-    }
+    validateCustomerCpfCnpjOrThrow(payerCpfCnpj);
 
     const customer = await this.createOrGetCustomer({
       barbershop,

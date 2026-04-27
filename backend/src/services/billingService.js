@@ -90,6 +90,25 @@ const resolveCheckoutPlanFromBarbershop = (barbershop) => {
   return 'basico';
 };
 
+const ASAAS_CUSTOMER_FAILURE_CODES = new Set([
+  'ASAAS_CUSTOMER_CREATE_ERROR',
+  'ASAAS_CUSTOMER_UPDATE_ERROR',
+]);
+
+const isAsaasCustomerCreationFailure = (error) => {
+  const code = String(error?.code || '').trim().toUpperCase();
+  if (ASAAS_CUSTOMER_FAILURE_CODES.has(code)) {
+    return true;
+  }
+
+  const providerPath = String(error?.providerData?.path || '').trim().toLowerCase();
+  if (providerPath === '/customers' || providerPath.startsWith('/customers/')) {
+    return true;
+  }
+
+  return false;
+};
+
 const hasActivePaymentEvidence = (data, provider) => {
   const status = normalizeInternalSubscriptionStatus(data?.subscription_status);
   const paymentMethod = String(data?.payment_method || '').toLowerCase();
@@ -254,123 +273,175 @@ const resolveAsaasWebhookBarbershop = async (normalizedPayload, client = null) =
 
 export const billingService = {
   async createCheckoutSession(barbershopId, plan, paymentMethod) {
-    if (!VALID_PAYMENT_METHODS.has(paymentMethod)) {
-      throw new AppError('Método de pagamento inválido para checkout', 400, 'INVALID_PAYMENT_METHOD');
-    }
-
-    const barbershop = await subscriptionRepository.getBarbershopBillingContext(barbershopId);
-    if (!barbershop) {
-      throw new NotFoundError('Barbearia');
-    }
-
-    const checkoutPlan = resolveCheckoutPlanFromBarbershop(barbershop);
-    const requestedPlan = String(plan || '').trim().toLowerCase();
-
-    if (requestedPlan && !VALID_PLANS.has(requestedPlan)) {
-      throw new AppError('Plano inválido para checkout', 400, 'INVALID_PLAN');
-    }
-
-    if (requestedPlan && requestedPlan !== checkoutPlan) {
-      logger.info(
-        {
-          barbershopId,
-          requestedPlan,
-          desiredPlan: checkoutPlan,
-          subscriptionStatus: barbershop.subscription_status,
-          paymentRequired: true,
-          checkoutCreated: false,
-          paymentProvider: null,
-          reason: 'requested_plan_ignored_using_desired_plan',
-        },
-        'Checkout solicitado com plano diferente do desired_plan salvo'
-      );
-    }
-
-    const providerName = billingProviderFactory.resolveProviderByPaymentMethod(paymentMethod);
-    const provider = billingProviderFactory.getProvider(providerName);
-
-    if (providerName === 'stripe') {
-      const stripeCheckout = await provider.createSubscription({
+    logger.info(
+      {
+        event: 'billing_checkout_start',
         barbershopId,
-        plan: checkoutPlan,
+        plan,
         paymentMethod,
+      },
+      'Iniciando checkout de billing'
+    );
+
+    try {
+      if (!VALID_PAYMENT_METHODS.has(paymentMethod)) {
+        throw new AppError('Método de pagamento inválido para checkout', 400, 'INVALID_PAYMENT_METHOD');
+      }
+
+      const barbershop = await subscriptionRepository.getBarbershopBillingContext(barbershopId);
+      if (!barbershop) {
+        throw new NotFoundError('Barbearia');
+      }
+
+      const checkoutPlan = resolveCheckoutPlanFromBarbershop(barbershop);
+      const requestedPlan = String(plan || '').trim().toLowerCase();
+
+      if (requestedPlan && !VALID_PLANS.has(requestedPlan)) {
+        throw new AppError('Plano inválido para checkout', 400, 'INVALID_PLAN');
+      }
+
+      if (requestedPlan && requestedPlan !== checkoutPlan) {
+        logger.info(
+          {
+            barbershopId,
+            requestedPlan,
+            desiredPlan: checkoutPlan,
+            subscriptionStatus: barbershop.subscription_status,
+            paymentRequired: true,
+            checkoutCreated: false,
+            paymentProvider: null,
+            reason: 'requested_plan_ignored_using_desired_plan',
+          },
+          'Checkout solicitado com plano diferente do desired_plan salvo'
+        );
+      }
+
+      const providerName = billingProviderFactory.resolveProviderByPaymentMethod(paymentMethod);
+      const provider = billingProviderFactory.getProvider(providerName);
+
+      if (providerName === 'stripe') {
+        const stripeCheckout = await provider.createSubscription({
+          barbershopId,
+          plan: checkoutPlan,
+          paymentMethod,
+        });
+
+        logger.info(
+          {
+            email: barbershop.email,
+            barbershopId,
+            desiredPlan: checkoutPlan,
+            subscriptionStatus: barbershop.subscription_status,
+            paymentRequired: true,
+            checkoutCreated: true,
+            paymentProvider: 'stripe',
+            reason: 'card_checkout_created',
+          },
+          'Checkout de onboarding criado'
+        );
+
+        return {
+          provider: 'stripe',
+          checkoutUrl: stripeCheckout.checkoutUrl,
+          sessionId: stripeCheckout.sessionId,
+          plan: checkoutPlan,
+        };
+      }
+
+      const idempotencyKey = `pix-checkout:${barbershopId}:${plan}:${crypto.randomUUID()}`;
+      const pixCheckout = await provider.createSubscription({
+        barbershop,
+        plan: checkoutPlan,
+        idempotencyKey,
+      });
+
+      const payment = pixCheckout.payment || null;
+      const internalStatus = provider.mapExternalStatusToInternalStatus(payment?.status);
+      const resolvedPlan = resolvePlanFromExternalReference(payment?.externalReference) || checkoutPlan;
+
+      await updateBarbershopFromAsaasPayment({
+        barbershop,
+        plan: resolvedPlan,
+        payment,
+        subscriptionId: pixCheckout.subscription?.id || payment?.subscription || null,
+        customerId: pixCheckout.customer?.id || null,
+        internalStatus,
+        eventType: 'checkout.pix.created',
+      });
+
+      await saveAsaasPaymentSnapshot({
+        barbershopId,
+        payment,
+        subscriptionId: pixCheckout.subscription?.id || payment?.subscription || null,
+        internalStatus,
+        pixData: pixCheckout.pixData,
       });
 
       logger.info(
         {
           email: barbershop.email,
           barbershopId,
-          desiredPlan: checkoutPlan,
-          subscriptionStatus: barbershop.subscription_status,
-          paymentRequired: true,
+          desiredPlan: resolvedPlan,
+          subscriptionStatus: internalStatus,
+          paymentRequired: internalStatus !== 'active',
           checkoutCreated: true,
-          paymentProvider: 'stripe',
-          reason: 'card_checkout_created',
+          paymentProvider: 'asaas',
+          reason: 'pix_checkout_created',
         },
         'Checkout de onboarding criado'
       );
 
       return {
-        provider: 'stripe',
-        checkoutUrl: stripeCheckout.checkoutUrl,
-        sessionId: stripeCheckout.sessionId,
-        plan: checkoutPlan,
+        provider: 'asaas',
+        paymentId: payment?.id || null,
+        subscriptionId: pixCheckout.subscription?.id || payment?.subscription || null,
+        status: internalStatus,
+        plan: resolvedPlan,
+        qrCode: pixCheckout.pixData?.qrCode || null,
+        pixCopyPaste: pixCheckout.pixData?.pixCopyPaste || null,
+        expiresAt: pixCheckout.pixData?.expiresAt || null,
       };
+    } catch (error) {
+      const traceCode = `billing-checkout:${crypto.randomUUID()}`;
+
+      logger.error(
+        {
+          event: 'billing_checkout_error',
+          traceCode,
+          barbershopId,
+          plan,
+          paymentMethod,
+          code: error?.code || null,
+          statusCode: error?.statusCode || null,
+          providerStatus: error?.providerStatus || null,
+          providerData: error?.providerData || null,
+        },
+        'Falha ao criar checkout de billing'
+      );
+
+      const normalizedPaymentMethod = String(paymentMethod || '').trim().toLowerCase();
+      if (
+        normalizedPaymentMethod === 'pix' &&
+        isAsaasCustomerCreationFailure(error)
+      ) {
+        const controlledError = new AppError(
+          'Não foi possível criar o cliente no Asaas. Verifique os dados cadastrais e tente novamente.',
+          400,
+          'ASAAS_CUSTOMER_CREATE_FAILED'
+        );
+
+        controlledError.details = {
+          traceCode,
+        };
+        controlledError.providerStatus = error?.providerStatus || error?.statusCode || null;
+        controlledError.providerData = error?.providerData || null;
+        controlledError.providerHeaders = error?.providerHeaders || null;
+
+        throw controlledError;
+      }
+
+      throw error;
     }
-
-    const idempotencyKey = `pix-checkout:${barbershopId}:${plan}:${crypto.randomUUID()}`;
-    const pixCheckout = await provider.createSubscription({
-      barbershop,
-      plan: checkoutPlan,
-      idempotencyKey,
-    });
-
-    const payment = pixCheckout.payment || null;
-    const internalStatus = provider.mapExternalStatusToInternalStatus(payment?.status);
-    const resolvedPlan = resolvePlanFromExternalReference(payment?.externalReference) || checkoutPlan;
-
-    await updateBarbershopFromAsaasPayment({
-      barbershop,
-      plan: resolvedPlan,
-      payment,
-      subscriptionId: pixCheckout.subscription?.id || payment?.subscription || null,
-      customerId: pixCheckout.customer?.id || null,
-      internalStatus,
-      eventType: 'checkout.pix.created',
-    });
-
-    await saveAsaasPaymentSnapshot({
-      barbershopId,
-      payment,
-      subscriptionId: pixCheckout.subscription?.id || payment?.subscription || null,
-      internalStatus,
-      pixData: pixCheckout.pixData,
-    });
-
-    logger.info(
-      {
-        email: barbershop.email,
-        barbershopId,
-        desiredPlan: resolvedPlan,
-        subscriptionStatus: internalStatus,
-        paymentRequired: internalStatus !== 'active',
-        checkoutCreated: true,
-        paymentProvider: 'asaas',
-        reason: 'pix_checkout_created',
-      },
-      'Checkout de onboarding criado'
-    );
-
-    return {
-      provider: 'asaas',
-      paymentId: payment?.id || null,
-      subscriptionId: pixCheckout.subscription?.id || payment?.subscription || null,
-      status: internalStatus,
-      plan: resolvedPlan,
-      qrCode: pixCheckout.pixData?.qrCode || null,
-      pixCopyPaste: pixCheckout.pixData?.pixCopyPaste || null,
-      expiresAt: pixCheckout.pixData?.expiresAt || null,
-    };
   },
 
   async getStatus(barbershopId) {

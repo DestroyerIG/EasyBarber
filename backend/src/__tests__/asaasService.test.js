@@ -36,6 +36,7 @@ const { asaasService } = await import('../integrations/asaas/service.js');
 describe('asaasService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAsaasClient.get.mockResolvedValue({ data: [] });
 
     mockAsaasMapper.mapAsaasPaymentToPixData.mockReturnValue({
       qrCode: 'data:image/png;base64,abc',
@@ -51,8 +52,7 @@ describe('asaasService', () => {
     expect(asaasService.normalizeBrazilPhone('123')).toBeNull();
   });
 
-  it('builds Asaas customer payload with sanitized valid fields only', async () => {
-    mockAsaasClient.get.mockResolvedValue({ data: [] });
+  it('builds Asaas customer payload with sanitized valid fields only and no empty fields', async () => {
     mockAsaasClient.post.mockResolvedValue({ id: 'cus_1' });
 
     await asaasService.createOrGetCustomer({
@@ -85,18 +85,66 @@ describe('asaasService', () => {
       }
     );
 
-    expect(mockLogger.debug).toHaveBeenCalledWith(
+    expect(mockLogger.info).toHaveBeenCalledWith(
       expect.objectContaining({
-        code: 'ASAAS_CUSTOMER_CREATE_REQUEST',
-        payload: {
-          name: 'Easy Barber Premium',
-          cpfCnpj: '12345678000195',
-          mobilePhone: '11998887766',
-          externalReference: 'tenant-asaas-1',
-          notificationDisabled: true,
-        },
+        event: 'asaas_customer_payload_prepared',
       }),
-      'ASAAS CUSTOMER PAYLOAD'
+      'Payload de cliente Asaas preparado'
+    );
+  });
+
+  it('removes empty optional fields from customer payload before sending to Asaas', async () => {
+    mockAsaasClient.post.mockResolvedValue({ id: 'cus_no_empty_1' });
+
+    await asaasService.createOrGetCustomer({
+      barbershop: {
+        id: 'tenant-empty-fields-1',
+        owner_name: 'Pedro Lima',
+        email: '   ',
+        whatsapp: '(11) 97777-6666',
+        cpf_cnpj: '12.345.678/0001-95',
+      },
+    });
+
+    expect(mockAsaasClient.post).toHaveBeenCalledWith(
+      '/customers',
+      {
+        name: 'Pedro Lima',
+        cpfCnpj: '12345678000195',
+        mobilePhone: '11977776666',
+        externalReference: 'tenant-empty-fields-1',
+      },
+      {
+        idempotencyKey: null,
+      }
+    );
+  });
+
+  it('accepts CPF with 11 digits for Pix customer payload', async () => {
+    mockAsaasClient.post.mockResolvedValue({ id: 'cus_cpf_1' });
+
+    await asaasService.createOrGetCustomer({
+      barbershop: {
+        id: 'tenant-asaas-cpf-1',
+        owner_name: 'Maria Fernandes',
+        email: 'maria@provedor.com.br',
+        whatsapp: '(83) 98888-7777',
+        cpf_cnpj: '705.960.904-04',
+      },
+    });
+
+    expect(mockAsaasClient.post).toHaveBeenCalledWith(
+      '/customers',
+      {
+        name: 'Maria Fernandes',
+        cpfCnpj: '70596090404',
+        mobilePhone: '83988887777',
+        email: 'maria@provedor.com.br',
+        externalReference: 'tenant-asaas-cpf-1',
+      },
+      {
+        idempotencyKey: null,
+      }
     );
   });
 
@@ -107,33 +155,86 @@ describe('asaasService', () => {
           id: 'tenant-asaas-2',
           name: 'Barbearia Sem Documento',
           email: 'cliente@provedor.com.br',
+          whatsapp: '(11) 98888-7766',
         },
       })
     ).rejects.toMatchObject({
       statusCode: 400,
       code: 'CPF_CNPJ_REQUIRED',
-      message: 'CPF/CNPJ é obrigatório para pagamento via Pix.',
+      message: 'CPF/CNPJ obrigatório para pagamento via Pix.',
     });
   });
 
-  it('rejects Pix customer creation when CPF/CNPJ is invalid', async () => {
+  it('rejects Pix customer creation when CPF/CNPJ has invalid length', async () => {
     await expect(
       asaasService.createOrGetCustomer({
         barbershop: {
           id: 'tenant-asaas-invalid-doc',
           name: 'Barbearia Documento Invalido',
-          cpf_cnpj: '11111111111',
+          whatsapp: '(11) 99888-7766',
+          cpf_cnpj: '1234567890',
         },
       })
     ).rejects.toMatchObject({
       statusCode: 400,
       code: 'INVALID_CPF_CNPJ',
-      message: 'CPF/CNPJ inválido para pagamento via Pix.',
+      message: 'CPF/CNPJ inválido. Informe um CPF com 11 dígitos ou CNPJ com 14 dígitos.',
     });
+  });
+
+  it('rejects Pix customer creation when phone is missing', async () => {
+    await expect(
+      asaasService.createOrGetCustomer({
+        barbershop: {
+          id: 'tenant-asaas-missing-phone',
+          name: 'Barbearia Sem Telefone',
+          cpf_cnpj: '12.345.678/0001-95',
+        },
+      })
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'MOBILE_PHONE_REQUIRED',
+      message: 'Telefone/WhatsApp obrigatório para pagamento via Pix.',
+    });
+  });
+
+  it('reuses existing customer found by externalReference without creating a new one', async () => {
+    mockAsaasClient.get.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'cus_existing_1',
+        },
+      ],
+    });
+    mockAsaasClient.put.mockResolvedValue({ id: 'cus_existing_1' });
+
+    const result = await asaasService.createOrGetCustomer({
+      barbershop: {
+        id: 'tenant-existing-1',
+        owner_name: 'Joao da Silva',
+        whatsapp: '(83) 99999-9999',
+        cpf_cnpj: '12.345.678/0001-95',
+      },
+      idempotencyKey: 'pix-checkout:reuse-existing',
+    });
+
+    expect(mockAsaasClient.post).not.toHaveBeenCalled();
+    expect(mockAsaasClient.put).toHaveBeenCalledWith(
+      '/customers/cus_existing_1',
+      expect.objectContaining({
+        cpfCnpj: '12345678000195',
+        mobilePhone: '83999999999',
+      }),
+      {
+        idempotencyKey: 'pix-checkout:reuse-existing',
+      }
+    );
+    expect(result).toEqual({ id: 'cus_existing_1' });
   });
 
   it('keeps Pix flow creating charge after customer creation succeeds', async () => {
     mockAsaasClient.get
+      .mockResolvedValueOnce({ data: [] })
       .mockResolvedValueOnce({ data: [] })
       .mockResolvedValueOnce({ data: [] })
       .mockResolvedValueOnce({ encodedImage: 'qr-image', payload: 'pix-code' });
@@ -213,7 +314,7 @@ describe('asaasService', () => {
     );
   });
 
-  it('logs provider payload and exposes provider status/data on Asaas customer errors', async () => {
+  it('preserves Asaas 400 response body in internal error context and logs', async () => {
     const providerError = {
       message: 'Request failed with status code 400',
       response: {
@@ -229,7 +330,6 @@ describe('asaasService', () => {
       },
     };
 
-    mockAsaasClient.get.mockResolvedValue({ data: [] });
     mockAsaasClient.post.mockRejectedValue(providerError);
 
     await expect(
@@ -238,6 +338,7 @@ describe('asaasService', () => {
           id: 'tenant-asaas-4',
           name: 'Barbearia Teste',
           email: 'cliente@provedor.com.br',
+          whatsapp: '(83) 99999-1111',
           cpf_cnpj: '12.345.678/0001-95',
         },
       })
@@ -245,22 +346,26 @@ describe('asaasService', () => {
       statusCode: 400,
       code: 'ASAAS_CUSTOMER_CREATE_ERROR',
       providerStatus: 400,
-      providerData: providerError.response.data,
+      providerData: expect.objectContaining({
+        method: 'POST',
+        path: '/customers',
+        statusCode: 400,
+        payload: providerError.response.data,
+        errors: providerError.response.data.errors,
+      }),
       details: providerError.response.data,
     });
 
     expect(mockLogger.error).toHaveBeenCalledWith(
       expect.objectContaining({
-        providerStatus: 400,
-        providerData: providerError.response.data,
-        payload: {
-          name: 'Barbearia Teste',
-          email: 'cliente@provedor.com.br',
-          cpfCnpj: '12345678000195',
-          externalReference: 'tenant-asaas-4',
-        },
+        event: 'asaas_customer_create_error',
+        statusCode: 400,
+        method: 'POST',
+        path: '/customers',
+        responseBody: providerError.response.data,
+        responseErrors: providerError.response.data.errors,
       }),
-      'ASAAS CUSTOMER ERROR'
+      'Falha ao criar cliente Asaas'
     );
   });
 });
