@@ -27,6 +27,7 @@ interface CallbackParams {
 }
 
 const SUCCESS_REDIRECT_URL = '/login?confirmed=1';
+const PAYMENT_REDIRECT_FALLBACK_URL = '/pagamento';
 
 const SUPABASE_EMAIL_OTP_TYPES: EmailOtpType[] = [
   'signup',
@@ -109,10 +110,41 @@ const getSyncSummary = (payload: unknown) => {
     : null;
 };
 
+const getPaymentRedirectUrl = (payload: unknown) => {
+  if (!payload || typeof payload !== 'object') {
+    return PAYMENT_REDIRECT_FALLBACK_URL;
+  }
+
+  const data = payload as {
+    desiredPlan?: unknown;
+    paymentRequired?: unknown;
+    confirmation?: {
+      desiredPlan?: unknown;
+      paymentRequired?: unknown;
+    };
+  };
+  const desiredPlan = typeof data.desiredPlan === 'string'
+    ? data.desiredPlan
+    : typeof data.confirmation?.desiredPlan === 'string'
+    ? data.confirmation.desiredPlan
+    : null;
+  const paymentRequired = data.paymentRequired === true || data.confirmation?.paymentRequired === true;
+  const params = new URLSearchParams({ from: 'confirm' });
+
+  if (desiredPlan) {
+    params.set('plan', desiredPlan);
+  }
+
+  return paymentRequired
+    ? `/pagamento?${params.toString()}`
+    : '/dashboard';
+};
+
 export function AuthConfirmView() {
   const [status, setStatus] = useState<ConfirmationStatus>('loading');
   const [message, setMessage] = useState('Confirmando seu e-mail...');
   const [email, setEmail] = useState('');
+  const [successRedirectUrl, setSuccessRedirectUrl] = useState(PAYMENT_REDIRECT_FALLBACK_URL);
   const [resending, setResending] = useState(false);
 
   const router = useRouter();
@@ -321,7 +353,12 @@ export function AuthConfirmView() {
           });
 
           setStatus('success');
-          setMessage(successMessage);
+          setSuccessRedirectUrl(getPaymentRedirectUrl(syncResponse?.data));
+          setMessage(
+            syncResponse?.data?.paymentRequired === true
+              ? 'E-mail confirmado com sucesso. Agora finalize o pagamento para ativar sua conta.'
+              : successMessage
+          );
           showToast(successMessage, 'success');
         } catch (syncError) {
           if (!active) return;
@@ -361,13 +398,13 @@ export function AuthConfirmView() {
     }
 
     const redirectId = window.setTimeout(() => {
-      router.replace(SUCCESS_REDIRECT_URL);
-    }, 1800);
+      router.replace(successRedirectUrl);
+    }, 2400);
 
     return () => {
       window.clearTimeout(redirectId);
     };
-  }, [router, status]);
+  }, [router, status, successRedirectUrl]);
 
   const handleResendVerification = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -419,7 +456,7 @@ export function AuthConfirmView() {
 
         {status === 'success' && (
           <div className="mt-6 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
-            E-mail confirmado com sucesso. Você será redirecionado para o login em instantes.
+            E-mail confirmado com sucesso. Você será levado para finalizar o pagamento.
           </div>
         )}
 
@@ -458,10 +495,10 @@ export function AuthConfirmView() {
 
         <div className="mt-7 flex flex-wrap items-center gap-3 text-sm">
           <Link
-            href={SUCCESS_REDIRECT_URL}
+            href={status === 'success' ? successRedirectUrl : SUCCESS_REDIRECT_URL}
             className="rounded-lg border border-primary/40 px-4 py-2 font-semibold text-primary hover:border-primary"
           >
-            Ir para login
+            {status === 'success' ? 'Ir para pagamento' : 'Ir para login'}
           </Link>
           <Link href="/cadastro" className="text-gray-300 hover:text-white">
             Criar nova conta

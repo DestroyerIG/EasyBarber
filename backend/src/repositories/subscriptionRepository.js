@@ -13,7 +13,7 @@ const normalizeJsonb = (value) => {
 export const subscriptionRepository = {
   async getBarbershopBillingContext(barbershopId, client = null) {
     const result = await db(client).query(
-      `SELECT id, name, owner_name, email, whatsapp, plan,
+      `SELECT id, name, owner_name, email, whatsapp, plan, desired_plan,
               cpf_cnpj,
               stripe_customer_id,
               stripe_subscription_id,
@@ -295,6 +295,7 @@ export const subscriptionRepository = {
   async getSubscriptionStatus(barbershopId, client = null) {
     const result = await db(client).query(
       `SELECT plan,
+              desired_plan,
               stripe_customer_id,
               stripe_subscription_id,
               stripe_payment_mode,

@@ -95,12 +95,18 @@ const hasPaymentEvidence = (billingStatus: Record<string, unknown>) => {
 const resolveTenantPostLoginRoute = async (redirectTo?: string) => {
   try {
     const response = await api.get('/billing/status');
+    const desiredPlan = typeof response.data?.desiredPlan === 'string'
+      ? response.data.desiredPlan
+      : null;
+    const paymentPath = desiredPlan
+      ? `/pagamento?plan=${encodeURIComponent(desiredPlan)}`
+      : '/pagamento';
 
     if (!response.data || typeof response.data !== 'object' || !hasPaymentEvidence(response.data)) {
-      return '/planos';
+      return paymentPath;
     }
   } catch {
-    return '/planos';
+    return '/pagamento';
   }
 
   return redirectTo || '/dashboard';

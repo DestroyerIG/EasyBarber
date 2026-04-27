@@ -155,6 +155,12 @@ const buildVerificationResponse = ({ email, emailVerifiedAt, confirmation = null
     emailVerified: true,
     emailVerifiedAt,
   },
+  ...(confirmation?.barbershopId ? { barbershopId: confirmation.barbershopId } : {}),
+  ...(confirmation?.desiredPlan ? { desiredPlan: confirmation.desiredPlan } : {}),
+  ...(confirmation?.subscriptionStatus ? { subscriptionStatus: confirmation.subscriptionStatus } : {}),
+  paymentRequired: confirmation
+    ? !['active', 'trialing'].includes(confirmation.subscriptionStatus || 'incomplete')
+    : true,
   ...(confirmation ? { confirmation } : {}),
 });
 
@@ -465,6 +471,11 @@ const reconcileSupabaseConfirmedUser = async ({
       }
     }
 
+    summary.barbershopId = barbershopId;
+    summary.desiredPlan = pendingRegistration?.desired_plan || localUser?.desired_plan || DEFAULT_PLAN;
+    summary.subscriptionStatus = localUser?.subscription_status || 'incomplete';
+    summary.paymentRequired = !['active', 'trialing'].includes(summary.subscriptionStatus);
+
     if (!localUser && pendingRegistration && barbershopId) {
       localUser = await authRepository.upsertTenantAdminUser(client, {
         barbershopId,
@@ -626,6 +637,63 @@ const verifyEmailWithSupabaseSession = async ({ accessToken }) => {
     emailVerifiedAt: identity.verifiedAt || new Date().toISOString(),
     confirmation,
   });
+};
+
+const createInternalSessionForConfirmedUser = async (res, { email, supabaseUserId }) => {
+  let user = await authRepository.findUserBySupabaseUserId(supabaseUserId);
+
+  if (!user) {
+    user = await authRepository.findUserByEmailIncludingBlocked(email);
+  }
+
+  if (!user || user.blocked) {
+    throw new UnauthorizedError('Usuário não encontrado');
+  }
+
+  const client = await authRepository.getClient();
+
+  try {
+    await client.query('BEGIN');
+    await authRepository.revokeUserRefreshTokens(client, user.id);
+
+    const normalizedRole = normalizeRole(user.role);
+    const accessToken = generateAccessToken({
+      userId: user.id,
+      barbershopId: user.barbershop_id,
+      email: user.email,
+      plan: user.plan,
+      role: normalizedRole,
+      subscriptionStatus: user.subscription_status,
+      subscriptionCurrentPeriodEnd: user.subscription_current_period_end,
+    });
+    const refreshToken = await generateRefreshToken(client, user.id);
+
+    await client.query('COMMIT');
+    setAuthCookies(res, accessToken, refreshToken);
+
+    return {
+      token: accessToken,
+      refreshToken,
+      user: buildUserPayload({
+        barbershopId: user.barbershop_id,
+        email: user.email,
+        role: normalizedRole,
+        barbershopName: user.barbershop_name,
+        plan: user.plan,
+        emailVerified: user.email_verified,
+        subscriptionStatus: user.subscription_status,
+        subscriptionCurrentPeriodEnd: user.subscription_current_period_end,
+      }),
+      desiredPlan: user.desired_plan || user.plan || DEFAULT_PLAN,
+      subscriptionStatus: user.subscription_status || 'incomplete',
+      barbershopId: user.barbershop_id,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 export const authService = {
@@ -1010,6 +1078,85 @@ export const authService = {
     }
 
     throw new AppError('Link de verificação inválido ou expirado. Solicite um novo e-mail.', 400, 'INVALID_VERIFICATION_TOKEN');
+  },
+
+  async confirmSignup(res, { accessToken }) {
+    const identity = await supabaseAuthService.getVerifiedIdentityFromAccessToken(accessToken);
+
+    if (!identity.emailVerified) {
+      throw new AppError(
+        'Conta não verificada. Verifique seu e-mail antes de continuar para o pagamento.',
+        403,
+        'EMAIL_NOT_VERIFIED'
+      );
+    }
+
+    let confirmation = null;
+
+    try {
+      confirmation = await reconcileSupabaseConfirmedUser({
+        email: identity.email,
+        supabaseUser: identity.user || {
+          id: identity.userId,
+          email: identity.email,
+          email_confirmed_at: identity.verifiedAt,
+          confirmed_at: identity.verifiedAt,
+        },
+        reason: 'confirm_signup_payment_onboarding',
+      });
+    } catch (error) {
+      if (error.code === '23505') {
+        throw new ConflictError('Email já cadastrado');
+      }
+
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      logger.error({ err: error, email: identity.email }, 'Erro ao sincronizar cadastro confirmado');
+      throw new AppError('Não foi possível finalizar o cadastro. Tente novamente.', 500, 'CONFIRM_SIGNUP_ERROR');
+    }
+
+    const session = await createInternalSessionForConfirmedUser(res, {
+      email: identity.email,
+      supabaseUserId: identity.userId,
+    });
+
+    const desiredPlan = confirmation?.desiredPlan || session.desiredPlan || DEFAULT_PLAN;
+    const subscriptionStatus = session.subscriptionStatus || confirmation?.subscriptionStatus || 'incomplete';
+    const paymentRequired = !['active', 'trialing'].includes(subscriptionStatus);
+
+    logger.info(
+      {
+        email: identity.email,
+        barbershopId: session.barbershopId,
+        desiredPlan,
+        subscriptionStatus,
+        paymentRequired,
+        checkoutCreated: false,
+        paymentProvider: null,
+        reason: 'email_confirmed_payment_required',
+      },
+      'Cadastro confirmado e sessão interna criada para pagamento'
+    );
+
+    return {
+      ...buildVerificationResponse({
+        email: identity.email,
+        emailVerifiedAt: identity.verifiedAt || new Date().toISOString(),
+        confirmation: {
+          ...confirmation,
+          barbershopId: session.barbershopId,
+          desiredPlan,
+          subscriptionStatus,
+          paymentRequired,
+        },
+      }),
+      ...session,
+      desiredPlan,
+      subscriptionStatus,
+      paymentRequired,
+    };
   },
 
   async resendVerificationEmail(email) {

@@ -16,6 +16,7 @@ export interface StripeCheckoutSessionResponse {
   provider: 'stripe';
   sessionId: string;
   checkoutUrl: string;
+  plan?: PlanId;
 }
 
 export interface PixCheckoutSessionResponse {
@@ -23,6 +24,7 @@ export interface PixCheckoutSessionResponse {
   paymentId: string | null;
   subscriptionId: string | null;
   status: SubscriptionStatus;
+  plan?: PlanId;
   qrCode: string | null;
   pixCopyPaste: string | null;
   expiresAt: string | null;
@@ -34,8 +36,10 @@ export type CheckoutSessionResponse =
 
 export interface SubscriptionStatusResponse {
   plan: string;
+  desiredPlan?: PlanId | string | null;
   provider: BillingProvider | null;
   subscriptionStatus: SubscriptionStatus;
+  paymentRequired?: boolean;
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
   nextDueDate?: string | null;

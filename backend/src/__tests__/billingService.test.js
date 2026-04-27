@@ -80,6 +80,7 @@ describe('billingService', () => {
     mockSubscriptionRepository.getBarbershopBillingContext.mockResolvedValue({
       id: 'tenant-1',
       plan: 'basico',
+      desired_plan: 'premium',
     });
 
     mockBillingProviderFactory.resolveProviderByPaymentMethod.mockReturnValue('stripe');
@@ -91,6 +92,7 @@ describe('billingService', () => {
       provider: 'stripe',
       sessionId: 'cs_test_123',
       checkoutUrl: 'https://checkout.stripe.com/test',
+      plan: 'premium',
     });
 
     expect(stripeProvider.createSubscription).toHaveBeenCalledWith({
@@ -128,6 +130,7 @@ describe('billingService', () => {
       email: 'teste@barber.com',
       whatsapp: '11999999999',
       plan: 'basico',
+      desired_plan: 'profissional',
     });
 
     mockSubscriptionRepository.updateSubscriptionState.mockResolvedValue({
@@ -147,6 +150,7 @@ describe('billingService', () => {
       paymentId: 'pay_asaas',
       subscriptionId: 'sub_asaas',
       status: 'pending',
+      plan: 'profissional',
       qrCode: 'data:image/png;base64,abc',
       pixCopyPaste: '000201...',
       expiresAt: '2026-04-20T23:59:00.000Z',

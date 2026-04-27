@@ -75,6 +75,44 @@ const resolvePlanFromExternalReference = (externalReference) => {
   return VALID_PLANS.has(normalized) ? normalized : null;
 };
 
+const resolveCheckoutPlanFromBarbershop = (barbershop) => {
+  const desiredPlan = String(barbershop?.desired_plan || '').trim().toLowerCase();
+  const currentPlan = String(barbershop?.plan || '').trim().toLowerCase();
+
+  if (VALID_PLANS.has(desiredPlan)) {
+    return desiredPlan;
+  }
+
+  if (VALID_PLANS.has(currentPlan)) {
+    return currentPlan;
+  }
+
+  return 'basico';
+};
+
+const hasActivePaymentEvidence = (data, provider) => {
+  const status = normalizeInternalSubscriptionStatus(data?.subscription_status);
+  const paymentMethod = String(data?.payment_method || '').toLowerCase();
+
+  if (status !== 'active' && status !== 'trialing') {
+    return false;
+  }
+
+  if (status === 'trialing') {
+    return Boolean(data?.provider_subscription_id || data?.stripe_subscription_id);
+  }
+
+  if (provider === 'asaas' || paymentMethod === 'pix') {
+    return Boolean(data?.provider_payment_id && data?.last_payment_date);
+  }
+
+  if (provider === 'stripe' || paymentMethod === 'card') {
+    return Boolean(data?.provider_subscription_id || data?.stripe_subscription_id);
+  }
+
+  return false;
+};
+
 const buildAsaasMetadata = (payload = {}) => {
   return {
     billingProvider: 'asaas',
@@ -216,10 +254,6 @@ const resolveAsaasWebhookBarbershop = async (normalizedPayload, client = null) =
 
 export const billingService = {
   async createCheckoutSession(barbershopId, plan, paymentMethod) {
-    if (!VALID_PLANS.has(plan)) {
-      throw new AppError('Plano inválido para checkout', 400, 'INVALID_PLAN');
-    }
-
     if (!VALID_PAYMENT_METHODS.has(paymentMethod)) {
       throw new AppError('Método de pagamento inválido para checkout', 400, 'INVALID_PAYMENT_METHOD');
     }
@@ -229,33 +263,71 @@ export const billingService = {
       throw new NotFoundError('Barbearia');
     }
 
+    const checkoutPlan = resolveCheckoutPlanFromBarbershop(barbershop);
+    const requestedPlan = String(plan || '').trim().toLowerCase();
+
+    if (requestedPlan && !VALID_PLANS.has(requestedPlan)) {
+      throw new AppError('Plano inválido para checkout', 400, 'INVALID_PLAN');
+    }
+
+    if (requestedPlan && requestedPlan !== checkoutPlan) {
+      logger.info(
+        {
+          barbershopId,
+          requestedPlan,
+          desiredPlan: checkoutPlan,
+          subscriptionStatus: barbershop.subscription_status,
+          paymentRequired: true,
+          checkoutCreated: false,
+          paymentProvider: null,
+          reason: 'requested_plan_ignored_using_desired_plan',
+        },
+        'Checkout solicitado com plano diferente do desired_plan salvo'
+      );
+    }
+
     const providerName = billingProviderFactory.resolveProviderByPaymentMethod(paymentMethod);
     const provider = billingProviderFactory.getProvider(providerName);
 
     if (providerName === 'stripe') {
       const stripeCheckout = await provider.createSubscription({
         barbershopId,
-        plan,
+        plan: checkoutPlan,
         paymentMethod,
       });
+
+      logger.info(
+        {
+          email: barbershop.email,
+          barbershopId,
+          desiredPlan: checkoutPlan,
+          subscriptionStatus: barbershop.subscription_status,
+          paymentRequired: true,
+          checkoutCreated: true,
+          paymentProvider: 'stripe',
+          reason: 'card_checkout_created',
+        },
+        'Checkout de onboarding criado'
+      );
 
       return {
         provider: 'stripe',
         checkoutUrl: stripeCheckout.checkoutUrl,
         sessionId: stripeCheckout.sessionId,
+        plan: checkoutPlan,
       };
     }
 
     const idempotencyKey = `pix-checkout:${barbershopId}:${plan}:${crypto.randomUUID()}`;
     const pixCheckout = await provider.createSubscription({
       barbershop,
-      plan,
+      plan: checkoutPlan,
       idempotencyKey,
     });
 
     const payment = pixCheckout.payment || null;
     const internalStatus = provider.mapExternalStatusToInternalStatus(payment?.status);
-    const resolvedPlan = resolvePlanFromExternalReference(payment?.externalReference) || plan;
+    const resolvedPlan = resolvePlanFromExternalReference(payment?.externalReference) || checkoutPlan;
 
     await updateBarbershopFromAsaasPayment({
       barbershop,
@@ -275,11 +347,26 @@ export const billingService = {
       pixData: pixCheckout.pixData,
     });
 
+    logger.info(
+      {
+        email: barbershop.email,
+        barbershopId,
+        desiredPlan: resolvedPlan,
+        subscriptionStatus: internalStatus,
+        paymentRequired: internalStatus !== 'active',
+        checkoutCreated: true,
+        paymentProvider: 'asaas',
+        reason: 'pix_checkout_created',
+      },
+      'Checkout de onboarding criado'
+    );
+
     return {
       provider: 'asaas',
       paymentId: payment?.id || null,
       subscriptionId: pixCheckout.subscription?.id || payment?.subscription || null,
       status: internalStatus,
+      plan: resolvedPlan,
       qrCode: pixCheckout.pixData?.qrCode || null,
       pixCopyPaste: pixCheckout.pixData?.pixCopyPaste || null,
       expiresAt: pixCheckout.pixData?.expiresAt || null,
@@ -293,12 +380,16 @@ export const billingService = {
     }
 
     const provider = resolveBillingProviderFromContext(data);
+    const subscriptionStatus = normalizeInternalSubscriptionStatus(data.subscription_status);
+    const paymentRequired = !hasActivePaymentEvidence(data, provider);
 
     return {
       plan: data.plan,
+      desiredPlan: resolveCheckoutPlanFromBarbershop(data),
       provider,
       paymentMethod: data.payment_method || null,
-      subscriptionStatus: normalizeInternalSubscriptionStatus(data.subscription_status),
+      subscriptionStatus,
+      paymentRequired,
       currentPeriodStart: data.current_period_start || data.subscription_current_period_start,
       currentPeriodEnd: data.current_period_end || data.subscription_current_period_end,
       nextDueDate: data.next_due_date || data.current_period_end || data.subscription_current_period_end,

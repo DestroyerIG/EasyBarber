@@ -112,7 +112,7 @@ export const authRepository = {
                 u.email_verified, u.email_verified_at,
                 u.email_verification_token_hash, u.email_verification_expires_at, u.verification_sent_at,
                 u.supabase_user_id, u.auth_provider, u.last_identity_sync_at,
-                b.plan, b.name as barbershop_name, b.id as barbershop_id,
+                b.plan, b.desired_plan, b.name as barbershop_name, b.id as barbershop_id,
                 b.subscription_status,
                 b.subscription_current_period_end
          FROM users u
@@ -133,7 +133,7 @@ export const authRepository = {
                 NULL::UUID as supabase_user_id,
                 'legacy'::VARCHAR as auth_provider,
                 NULL::TIMESTAMP as last_identity_sync_at,
-                b.plan, b.name as barbershop_name, b.id as barbershop_id,
+                b.plan, NULL::VARCHAR AS desired_plan, b.name as barbershop_name, b.id as barbershop_id,
                 b.subscription_status,
                 b.subscription_current_period_end
          FROM users u
@@ -153,7 +153,7 @@ export const authRepository = {
                 u.email_verified, u.email_verified_at,
                 u.email_verification_token_hash, u.email_verification_expires_at, u.verification_sent_at,
                 u.supabase_user_id, u.auth_provider, u.last_identity_sync_at,
-                b.plan, b.name as barbershop_name, b.id as barbershop_id,
+                b.plan, b.desired_plan, b.name as barbershop_name, b.id as barbershop_id,
                 b.subscription_status,
                 b.subscription_current_period_end
          FROM users u
@@ -176,7 +176,7 @@ export const authRepository = {
                 NULL::UUID as supabase_user_id,
                 'legacy'::VARCHAR as auth_provider,
                 NULL::TIMESTAMP as last_identity_sync_at,
-                b.plan, b.name as barbershop_name, b.id as barbershop_id,
+                b.plan, NULL::VARCHAR AS desired_plan, b.name as barbershop_name, b.id as barbershop_id,
                 b.subscription_status,
                 b.subscription_current_period_end
          FROM users u
@@ -196,7 +196,7 @@ export const authRepository = {
         `SELECT u.id, u.email, u.password_hash, u.role, u.blocked,
                 u.email_verified, u.email_verified_at,
                 u.supabase_user_id, u.auth_provider, u.last_identity_sync_at,
-                b.plan, b.name as barbershop_name, b.id as barbershop_id,
+                b.plan, b.desired_plan, b.name as barbershop_name, b.id as barbershop_id,
                 b.subscription_status,
                 b.subscription_current_period_end
          FROM users u

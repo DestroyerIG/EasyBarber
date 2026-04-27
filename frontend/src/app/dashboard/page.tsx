@@ -39,7 +39,7 @@ export default function DashboardPage() {
     } catch (error: unknown) {
       if (getApiErrorCode(error) === 'SUBSCRIPTION_REQUIRED') {
         showToast('Finalize o pagamento para acessar o sistema.', 'info');
-        router.replace('/planos');
+        router.replace('/pagamento');
         return;
       }
 

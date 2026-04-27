@@ -101,7 +101,7 @@ export const verifyEmailSession = async (req, res, next) => {
 
 export const confirmSignup = async (req, res, next) => {
   try {
-    const data = await authService.verifyEmail({
+    const data = await authService.confirmSignup(res, {
       accessToken: req.body.accessToken,
     });
     return sendSuccess(res, data);

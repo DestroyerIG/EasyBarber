@@ -68,7 +68,11 @@ const shouldRedirectToBilling = (url: string) => {
   }
 
   const pathname = window.location.pathname;
-  const isBillingPage = pathname === '/planos' || pathname === '/dashboard/planos';
+  const isBillingPage =
+    pathname === '/planos' ||
+    pathname === '/pagamento' ||
+    pathname.startsWith('/pagamento/') ||
+    pathname === '/dashboard/planos';
   const isBillingRequest =
     url.includes('/billing/status') ||
     url.includes('/billing/checkout/session') ||
@@ -160,7 +164,7 @@ api.interceptors.response.use(
       getErrorCode(error.response?.data) === 'SUBSCRIPTION_REQUIRED' &&
       shouldRedirectToBilling(url)
     ) {
-      window.location.replace('/planos');
+      window.location.replace('/pagamento');
       return Promise.reject(error);
     }
 

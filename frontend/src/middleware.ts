@@ -16,6 +16,7 @@ type DashboardAliasRoute = typeof DASHBOARD_ALIAS_ROUTES[number];
 const PROTECTED_PATHS = [
   '/dashboard',
   ...DASHBOARD_ALIAS_ROUTES.map((route) => `/${route}`),
+  '/pagamento',
   '/admin',
 ];
 const AUTH_PAGES = ['/login', '/cadastro'];
@@ -101,6 +102,7 @@ export const config = {
     '/clientes/:path*',
     '/servicos/:path*',
     '/planos/:path*',
+    '/pagamento/:path*',
     '/configuracoes/:path*',
     '/whatsapp/:path*',
     '/admin/:path*',
