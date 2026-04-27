@@ -18,6 +18,7 @@ import whatsappRoutes from './routes/whatsapp.js';
 import subscriptionRoutes from './routes/subscriptions.js';
 import billingRoutes from './routes/billing.js';
 import adminRoutes from './routes/admin.js';
+import debugRoutes from './routes/debug.js';
 import { stripeWebhook } from './controllers/subscriptionController.js';
 import { startReminderCron } from './services/cronService.js';
 import { initWhatsApp } from './services/whatsappClient.js';
@@ -334,6 +335,7 @@ app.use(`${API_V1}/whatsapp`, whatsappRoutes);
 app.use(`${API_V1}/subscriptions`, subscriptionRoutes);
 app.use(`${API_V1}/billing`, billingRoutes);
 app.use(`${API_V1}/admin`, adminRoutes);
+app.use(`${API_V1}/debug`, debugRoutes);
 
 // Backward-compat: redireciona /api/<recurso> para /api/v1/<recurso>
 app.use('/api', (req, res, next) => {
