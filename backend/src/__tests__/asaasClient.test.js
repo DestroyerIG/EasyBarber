@@ -107,11 +107,10 @@ describe('asaasClient', () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
-          accept: 'application/json',
-          'content-type': 'application/json',
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
           access_token: 'aact_prod_test_key_123456',
-          'user-agent': 'EasyBarber/1.0',
-          'idempotency-key': 'pix-checkout:test-client-1',
+          'User-Agent': 'EasyBarber/1.0',
           'Idempotency-Key': 'pix-checkout:test-client-1',
         }),
         body: JSON.stringify({
@@ -121,6 +120,40 @@ describe('asaasClient', () => {
         }),
       })
     );
+  });
+
+  it('preserves empty raw response body as an empty string on edge 400 errors', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      headers: new Headers({
+        'x-cache': 'Error from cloudfront',
+      }),
+      text: async () => '',
+    });
+
+    await expect(
+      asaasClient.post('/customers', {
+        name: 'Cliente Teste',
+        cpfCnpj: '70596090404',
+        mobilePhone: '83999998888',
+      })
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      response: {
+        status: 400,
+        data: null,
+        headers: {
+          'x-cache': 'Error from cloudfront',
+        },
+      },
+      details: expect.objectContaining({
+        payload: null,
+        responseText: '',
+        responseBodyRaw: '',
+        responseJson: null,
+      }),
+    });
   });
 
   it('normalizes Asaas API key before sending access_token header', async () => {

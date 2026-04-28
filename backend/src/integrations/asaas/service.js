@@ -205,19 +205,29 @@ const buildAsaasErrorContext = (
     typeof providerData?.responseText === 'string'
       ? providerData.responseText
       : null;
+  const responseBodyRawFromProvider =
+    typeof providerData?.responseBodyRaw === 'string'
+      ? providerData.responseBodyRaw
+      : null;
   const responseTextFromDetails =
     typeof details?.responseText === 'string'
       ? details.responseText
+      : null;
+  const responseBodyRawFromDetails =
+    typeof details?.responseBodyRaw === 'string'
+      ? details.responseBodyRaw
       : null;
   const responseTextFromResponseData =
     typeof error?.response?.data === 'string'
       ? error.response.data
       : null;
   const responseText =
+    responseBodyRawFromProvider ||
     responseTextFromProvider ||
+    responseBodyRawFromDetails ||
     responseTextFromDetails ||
     responseTextFromResponseData ||
-    null;
+    '';
   const responsePayloadFromString = parseJsonSafely(responseText);
   const responseBody =
     providerData?.payload ||
@@ -227,13 +237,14 @@ const buildAsaasErrorContext = (
     (responseText ? { rawBody: responseText } : null);
   const responseJson =
     providerData?.responseJson ||
+    details?.responseJson ||
     (responseBody && typeof responseBody === 'object' && !Object.prototype.hasOwnProperty.call(responseBody, 'rawBody')
       ? responseBody
       : responsePayloadFromString) ||
     null;
   const responseBodyRaw =
     responseText ||
-    (responseJson ? safeJSONStringify(responseJson) : null);
+    (responseJson ? safeJSONStringify(responseJson) : '');
   const responseHeaders =
     providerData?.responseHeaders ||
     error?.response?.headers ||
@@ -441,7 +452,13 @@ const resolveCustomerName = (barbershop) => {
     return null;
   }
 
-  const nonGeneric = candidates.find((value) => !isGenericCustomerName(value));
+  const withGivenAndFamilyName = candidates.find(
+    (value) =>
+      !isGenericCustomerName(value) &&
+      value.split(/\s+/).filter(Boolean).length >= 2
+  );
+  const nonGeneric =
+    withGivenAndFamilyName || candidates.find((value) => !isGenericCustomerName(value));
   const resolved = nonGeneric || candidates[0];
 
   return resolved.length >= 3 ? resolved : null;
@@ -830,9 +847,7 @@ export const asaasService = {
     );
 
     try {
-      const createdCustomer = await asaasClient.post('/customers', payload, {
-        idempotencyKey,
-      });
+      const createdCustomer = await asaasClient.post('/customers', payload);
 
       logger.info(
         {

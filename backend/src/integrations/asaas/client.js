@@ -107,6 +107,26 @@ const serializeHeaders = (headers) => {
   return Object.fromEntries(Object.entries(headers));
 };
 
+const isEmptyPayloadValue = (value) =>
+  value === undefined ||
+  value === null ||
+  (typeof value === 'string' && value.trim().length === 0);
+
+const removeEmptyFields = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, entryValue]) => [
+        key,
+        typeof entryValue === 'string' ? entryValue.trim() : entryValue,
+      ])
+      .filter(([, entryValue]) => !isEmptyPayloadValue(entryValue))
+  );
+};
+
 const getConfig = () => {
   const apiKey = normalizeAsaasApiKey(process.env.ASAAS_API_KEY);
 
@@ -213,6 +233,21 @@ const safeJSONStringify = (value) => {
   }
 };
 
+const buildHeaders = ({ apiKey, userAgent, idempotencyKey = null }) => {
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'User-Agent': userAgent,
+    access_token: apiKey,
+  };
+
+  if (idempotencyKey) {
+    headers['Idempotency-Key'] = idempotencyKey;
+  }
+
+  return headers;
+};
+
 const maskDigitsTail = (value, visibleDigits = 4) => {
   if (value === undefined || value === null) {
     return null;
@@ -304,6 +339,24 @@ const sanitizeBodyForLog = (serializedBody) => {
   return serializedBody;
 };
 
+const maskSensitiveText = (value) => {
+  if (typeof value !== 'string') {
+    return value || null;
+  }
+
+  const parsed = parseJsonSafely(value);
+  if (parsed && typeof parsed === 'object') {
+    return safeJSONStringify(maskSensitiveData(parsed));
+  }
+
+  const maskedEmails = value.replace(
+    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+    (email) => maskEmail(email)
+  );
+
+  return maskedEmails.replace(/\d{10,14}/g, (digits) => maskDigitsTail(digits));
+};
+
 const isResponseLikeError = (error) => {
   const response = error?.response;
 
@@ -331,19 +384,19 @@ const normalizeErrorResponseContext = async (error) => {
     (typeof error?.status === 'number' ? error.status : null) ||
     null;
 
-  let responseText = null;
+  let responseText = '';
   if (typeof response?.text === 'function') {
     try {
       responseText = await response.text();
     } catch {
-      responseText = null;
+      responseText = '';
     }
   }
 
   const responseData = response?.data;
   const responseHeaders = serializeHeaders(response?.headers || error?.headers || {});
 
-  if (!responseText && typeof responseData === 'string') {
+  if (responseText === '' && typeof responseData === 'string') {
     responseText = responseData;
   }
 
@@ -372,7 +425,7 @@ const normalizeErrorResponseContext = async (error) => {
     payload = { rawBody: responseText };
   }
 
-  if (!responseText && responseJson) {
+  if (responseText === '' && responseJson) {
     responseText = safeJSONStringify(responseJson);
   }
 
@@ -380,6 +433,8 @@ const normalizeErrorResponseContext = async (error) => {
     statusCode,
     responseHeaders,
     responseText,
+    responseBodyRaw: responseText,
+    responseJson,
     payload,
   };
 };
@@ -394,11 +449,13 @@ const buildAsaasError = ({
   url,
   requestBody,
 }) => {
+  const normalizedResponseText =
+    typeof responseText === 'string' ? responseText : '';
   const responseBody =
     payload !== undefined && payload !== null
       ? payload
-      : responseText
-        ? { rawBody: responseText }
+      : normalizedResponseText
+        ? { rawBody: normalizedResponseText }
         : null;
   const apiMessage = responseBody?.errors?.[0]?.description || responseBody?.message || null;
   const errorCodes = Array.isArray(responseBody?.errors)
@@ -407,7 +464,7 @@ const buildAsaasError = ({
   const invalidAccessToken = errorCodes.includes('invalid_access_token');
   const message = invalidAccessToken
     ? 'Configuração Asaas inválida. Verifique ASAAS_API_KEY no Render.'
-    : apiMessage || responseText || `Erro Asaas (${method} ${path})`;
+    : apiMessage || normalizedResponseText || `Erro Asaas (${method} ${path})`;
   const error = new AppError(
     message,
     invalidAccessToken ? 503 : statusCode || 502,
@@ -427,11 +484,101 @@ const buildAsaasError = ({
     statusCode,
     payload: responseBody,
     responseHeaders: responseHeaders || {},
-    responseText: responseText || null,
+    responseText: normalizedResponseText,
+    responseBodyRaw: normalizedResponseText,
+    responseJson: payload && typeof payload === 'object' ? payload : null,
     requestBody: requestBody || null,
   };
 
   return error;
+};
+
+const readAsaasResponse = async (response) => {
+  const responseText = await response.text();
+  const responseJson = parseJsonSafely(responseText);
+
+  return {
+    responseText,
+    responseJson,
+    responseHeaders: serializeHeaders(response.headers),
+  };
+};
+
+export const rawAsaasRequest = async (method, path, options = {}) => {
+  const { apiKey, baseUrl, timeoutMs, userAgent, keyEnvironment, urlEnvironment } = getConfig();
+  const {
+    body = null,
+    query = null,
+    idempotencyKey = null,
+    timeout = timeoutMs,
+  } = options;
+  const url = buildUrl(baseUrl, path, query);
+  const payload = removeEmptyFields(body);
+  const serializedBody = payload !== null && payload !== undefined
+    ? JSON.stringify(payload)
+    : undefined;
+  const headers = buildHeaders({ apiKey, userAgent, idempotencyKey });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    logger.debug(
+      {
+        code: 'ASAAS_HTTP_REQUEST',
+        method,
+        path,
+        url: url.toString(),
+        baseUrl,
+        keyEnvironment,
+        urlEnvironment,
+        maskedApiKey: maskApiKey(apiKey),
+        headers: {
+          'Content-Type': headers['Content-Type'],
+          Accept: headers.Accept,
+          'User-Agent': headers['User-Agent'],
+          'has-access-token': Boolean(headers.access_token),
+          'has-idempotency-key': Boolean(idempotencyKey),
+        },
+        requestBody: sanitizeBodyForLog(serializedBody),
+      },
+      'ASAAS HTTP REQUEST'
+    );
+
+    const response = await fetch(url, {
+      method,
+      headers,
+      signal: controller.signal,
+      body: serializedBody,
+    });
+
+    const { responseText, responseJson, responseHeaders } = await readAsaasResponse(response);
+
+    logger.debug(
+      {
+        code: 'ASAAS_HTTP_RESPONSE',
+        method,
+        path,
+        url: url.toString(),
+        statusCode: response.status,
+        responseHeaders,
+        responseBodyRaw: maskSensitiveText(responseText),
+        responseJson: maskSensitiveData(responseJson),
+      },
+      'ASAAS HTTP RESPONSE'
+    );
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      headers: responseHeaders,
+      bodyRaw: responseText,
+      bodyJson: responseJson,
+      url: url.toString(),
+      requestBody: serializedBody || null,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 const request = async (method, path, options = {}) => {
@@ -444,18 +591,11 @@ const request = async (method, path, options = {}) => {
   } = options;
 
   const url = buildUrl(baseUrl, path, query);
-  const serializedBody = body ? JSON.stringify(body) : null;
-  const headers = {
-    accept: 'application/json',
-    'content-type': 'application/json',
-    access_token: apiKey,
-    'user-agent': userAgent,
-  };
-
-  if (idempotencyKey) {
-    headers['idempotency-key'] = idempotencyKey;
-    headers['Idempotency-Key'] = idempotencyKey;
-  }
+  const payload = removeEmptyFields(body);
+  const serializedBody = payload !== null && payload !== undefined
+    ? JSON.stringify(payload)
+    : null;
+  const headers = buildHeaders({ apiKey, userAgent, idempotencyKey });
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     const controller = new AbortController();
@@ -473,9 +613,9 @@ const request = async (method, path, options = {}) => {
           urlEnvironment,
           maskedApiKey: maskApiKey(apiKey),
           headers: {
-            accept: headers.accept,
-            'content-type': headers['content-type'],
-            'user-agent': headers['user-agent'],
+            'Content-Type': headers['Content-Type'],
+            Accept: headers.Accept,
+            'User-Agent': headers['User-Agent'],
             'has-access-token': Boolean(headers.access_token),
             'has-idempotency-key': Boolean(idempotencyKey),
           },
@@ -493,9 +633,11 @@ const request = async (method, path, options = {}) => {
 
       clearTimeout(timer);
 
-      const responseText = await response.text();
-      const payload = parseJsonSafely(responseText);
-      const responseHeaders = serializeHeaders(response.headers);
+      const {
+        responseText,
+        responseJson,
+        responseHeaders,
+      } = await readAsaasResponse(response);
 
       logger.debug(
         {
@@ -505,7 +647,8 @@ const request = async (method, path, options = {}) => {
           url: url.toString(),
           statusCode: response.status,
           responseHeaders,
-          responseBody: maskSensitiveData(payload || responseText || null),
+          responseBodyRaw: maskSensitiveText(responseText),
+          responseJson: maskSensitiveData(responseJson),
         },
         'ASAAS HTTP RESPONSE'
       );
@@ -521,7 +664,7 @@ const request = async (method, path, options = {}) => {
 
         throw buildAsaasError({
           statusCode: response.status,
-          payload,
+          payload: responseJson,
           responseHeaders,
           responseText,
           method,
@@ -531,7 +674,7 @@ const request = async (method, path, options = {}) => {
         });
       }
 
-      return payload;
+      return responseJson;
     } catch (error) {
       clearTimeout(timer);
 

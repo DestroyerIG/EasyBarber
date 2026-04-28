@@ -88,9 +88,6 @@ describe('asaasService', () => {
         mobilePhone: '11998887766',
         externalReference: 'tenant-asaas-1',
         notificationDisabled: true,
-      },
-      {
-        idempotencyKey: 'pix-checkout:test-1',
       }
     );
 
@@ -122,9 +119,6 @@ describe('asaasService', () => {
         cpfCnpj: '12345678000195',
         mobilePhone: '11977776666',
         externalReference: 'tenant-empty-fields-1',
-      },
-      {
-        idempotencyKey: null,
       }
     );
   });
@@ -150,9 +144,6 @@ describe('asaasService', () => {
         mobilePhone: '83988887777',
         email: 'maria@provedor.com.br',
         externalReference: 'tenant-asaas-cpf-1',
-      },
-      {
-        idempotencyKey: null,
       }
     );
   });
@@ -320,9 +311,6 @@ describe('asaasService', () => {
         cpfCnpj: '12345678000195',
         mobilePhone: '83999999999',
         externalReference: 'tenant-asaas-3',
-      },
-      {
-        idempotencyKey: 'pix-checkout:test-2',
       }
     );
 
