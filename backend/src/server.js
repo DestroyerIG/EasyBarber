@@ -319,6 +319,25 @@ app.get('/health', async (req, res) => {
   }
 });
 
+app.get('/debug/ip', async (req, res) => {
+  try {
+    const response = await fetch('https://api.ipify.org?format=json');
+    const data = await response.json();
+
+    return res.json({
+      success: true,
+      ip: data.ip,
+    });
+  } catch (err) {
+    console.error('Erro ao obter IP público:', err);
+
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
 // Auth com limitadores específicos
 app.use(`${API_V1}/auth/login`, loginLimiter);
 app.use(`${API_V1}/auth/register`, registerLimiter);
