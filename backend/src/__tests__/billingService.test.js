@@ -112,12 +112,14 @@ describe('billingService', () => {
     const asaasProvider = {
       createSubscription: jest.fn().mockResolvedValue({
         customer: { id: 'cus_asaas' },
-        subscription: { id: 'sub_asaas' },
+        subscription: null,
         payment: {
           id: 'pay_asaas',
           status: 'PENDING',
           dueDate: '2026-04-20',
           value: 99.9,
+          invoiceUrl: 'https://asaas.test/invoice/pay_asaas',
+          bankSlipUrl: 'https://asaas.test/boleto/pay_asaas',
           externalReference: 'barbershop:tenant-2:plan:profissional',
         },
         pixData: {
@@ -154,9 +156,12 @@ describe('billingService', () => {
     expect(result).toEqual({
       provider: 'asaas',
       paymentId: 'pay_asaas',
-      subscriptionId: 'sub_asaas',
+      subscriptionId: null,
+      invoiceUrl: 'https://asaas.test/invoice/pay_asaas',
+      bankSlipUrl: 'https://asaas.test/boleto/pay_asaas',
       status: 'pending',
       plan: 'profissional',
+      pixQrCode: 'data:image/png;base64,abc',
       qrCode: 'data:image/png;base64,abc',
       pixCopyPaste: '000201...',
       expiresAt: '2026-04-20T23:59:00.000Z',
@@ -167,7 +172,7 @@ describe('billingService', () => {
       expect.objectContaining({
         provider: 'asaas',
         providerCustomerId: 'cus_asaas',
-        providerSubscriptionId: 'sub_asaas',
+        providerSubscriptionId: null,
         providerPaymentId: 'pay_asaas',
         paymentMethod: 'pix',
         subscriptionStatus: 'pending',
@@ -176,6 +181,62 @@ describe('billingService', () => {
     );
 
     expect(mockSubscriptionRepository.upsertBillingPayment).toHaveBeenCalled();
+  });
+
+  it('keeps initial Pix checkout pending even if provider status maps to active before webhook', async () => {
+    const asaasProvider = {
+      createSubscription: jest.fn().mockResolvedValue({
+        customer: { id: 'cus_asaas_active' },
+        subscription: null,
+        payment: {
+          id: 'pay_asaas_active',
+          status: 'CONFIRMED',
+          dueDate: '2026-04-20',
+          value: 99.9,
+          externalReference: 'barbershop:tenant-active-pix:plan:profissional',
+        },
+        pixData: {
+          qrCode: null,
+          pixCopyPaste: '000201...',
+          expiresAt: '2026-04-20T23:59:00.000Z',
+        },
+      }),
+      mapExternalStatusToInternalStatus: jest.fn().mockReturnValue('active'),
+    };
+
+    mockSubscriptionRepository.getBarbershopBillingContext.mockResolvedValue({
+      id: 'tenant-active-pix',
+      name: 'Barbearia Teste',
+      owner_name: 'Joao',
+      email: 'teste@barber.com',
+      whatsapp: '11999999999',
+      plan: 'basico',
+      desired_plan: 'profissional',
+    });
+    mockSubscriptionRepository.updateSubscriptionState.mockResolvedValue({
+      id: 'tenant-active-pix',
+      subscription_status: 'pending',
+    });
+    mockSubscriptionRepository.upsertBillingPayment.mockResolvedValue({ id: 'bp_active_pix' });
+    mockBillingProviderFactory.resolveProviderByPaymentMethod.mockReturnValue('asaas');
+    mockBillingProviderFactory.getProvider.mockReturnValue(asaasProvider);
+
+    const result = await billingService.createCheckoutSession(
+      'tenant-active-pix',
+      'profissional',
+      'pix'
+    );
+
+    expect(result.status).toBe('pending');
+    expect(mockSubscriptionRepository.updateSubscriptionState).toHaveBeenCalledWith(
+      'tenant-active-pix',
+      expect.objectContaining({
+        subscriptionStatus: 'pending',
+        providerPaymentId: 'pay_asaas_active',
+        providerSubscriptionId: null,
+      }),
+      null
+    );
   });
 
   it('maps Asaas customer create failures to controlled Pix checkout error', async () => {

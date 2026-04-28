@@ -358,7 +358,8 @@ export const billingService = {
       });
 
       const payment = pixCheckout.payment || null;
-      const internalStatus = provider.mapExternalStatusToInternalStatus(payment?.status);
+      const mappedStatus = provider.mapExternalStatusToInternalStatus(payment?.status);
+      const internalStatus = mappedStatus === 'active' ? 'pending' : mappedStatus;
       const resolvedPlan = resolvePlanFromExternalReference(payment?.externalReference) || checkoutPlan;
 
       await updateBarbershopFromAsaasPayment({
@@ -397,8 +398,11 @@ export const billingService = {
         provider: 'asaas',
         paymentId: payment?.id || null,
         subscriptionId: pixCheckout.subscription?.id || payment?.subscription || null,
+        invoiceUrl: payment?.invoiceUrl || null,
+        bankSlipUrl: payment?.bankSlipUrl || null,
         status: internalStatus,
         plan: resolvedPlan,
+        pixQrCode: pixCheckout.pixData?.qrCode || null,
         qrCode: pixCheckout.pixData?.qrCode || null,
         pixCopyPaste: pixCheckout.pixData?.pixCopyPaste || null,
         expiresAt: pixCheckout.pixData?.expiresAt || null,

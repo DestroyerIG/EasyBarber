@@ -405,20 +405,6 @@ const findCustomerByCpfCnpj = async (cpfCnpj) => {
   return response?.data?.[0] || null;
 };
 
-const findMostRecentPaymentBySubscription = async (subscriptionId) => {
-  const response = await asaasClient.get('/payments', {
-    query: {
-      subscription: subscriptionId,
-      limit: 1,
-      offset: 0,
-      sort: 'desc',
-      order: 'desc',
-    },
-  });
-
-  return response?.data?.[0] || null;
-};
-
 const resolvePixQrCode = async (paymentId) => {
   try {
     return await asaasClient.get(`/payments/${paymentId}/pixQrCode`);
@@ -1016,14 +1002,12 @@ export const asaasService = {
     plan,
     amount,
     dueDate,
-    cpfCnpj = null,
     description,
     externalReference,
     idempotencyKey = null,
   }) {
     const resolvedAmount = typeof amount === 'number' ? amount : resolvePlanValue(plan);
     const resolvedDueDate = toAsaasDate(dueDate || addDays(new Date(), 3));
-    const normalizedCpfCnpj = normalizeDocumentDigits(cpfCnpj);
 
     const payload = {
       customer: customerId,
@@ -1033,7 +1017,6 @@ export const asaasService = {
       description,
       externalReference:
         externalReference || buildExternalReference({ barbershopId, plan }),
-      ...(isValidCpfCnpj(normalizedCpfCnpj) ? { cpfCnpj: normalizedCpfCnpj } : {}),
     };
 
     logger.info(
@@ -1127,73 +1110,27 @@ export const asaasService = {
       plan,
       barbershopName: barbershop.name,
     });
-
-    const subscriptionPayload = {
-      customer: customer.id,
-      billingType: 'PIX',
-      cycle: 'MONTHLY',
-      value: resolvedAmount,
-      nextDueDate: resolvedDueDate,
+    const externalReference = buildExternalReference({
+      barbershopId: barbershop.id,
+      plan,
+    });
+    const payment = await this.createPixCharge({
+      customerId: customer.id,
+      barbershopId: barbershop.id,
+      plan,
+      amount: resolvedAmount,
+      dueDate: resolvedDueDate,
       description,
-      externalReference: buildExternalReference({
-        barbershopId: barbershop.id,
-        plan,
-      }),
-    };
-
-    let subscription;
-
-    try {
-      subscription = await asaasClient.post('/subscriptions', subscriptionPayload, {
-        idempotencyKey,
-      });
-    } catch (error) {
-      logger.error(
-        {
-          message: error?.message,
-          statusCode: error?.statusCode || error?.status || null,
-          providerStatus: error?.response?.status || error?.statusCode || error?.status || null,
-          providerData: error?.response?.data || error?.details || null,
-          providerHeaders: error?.response?.headers || error?.details?.responseHeaders || null,
-          code: error?.code || 'ASAAS_SUBSCRIPTION_CREATE_ERROR',
-          details: error?.details || null,
-          payload: subscriptionPayload,
-        },
-        'ASAAS SUBSCRIPTION ERROR'
-      );
-
-      rethrowAsaasError(
-        error,
-        'Erro Asaas (POST /subscriptions)',
-        'ASAAS_SUBSCRIPTION_CREATE_ERROR'
-      );
-    }
-
-    let payment = await findMostRecentPaymentBySubscription(subscription.id);
-
-    if (!payment) {
-      payment = await this.createPixCharge({
-        customerId: customer.id,
-        barbershopId: barbershop.id,
-        plan,
-        amount: resolvedAmount,
-        dueDate: resolvedDueDate,
-        cpfCnpj: payerCpfCnpj,
-        description,
-        externalReference: buildExternalReference({
-          barbershopId: barbershop.id,
-          plan,
-        }),
-        idempotencyKey: `${idempotencyKey || 'pix'}:fallback-payment`,
-      });
-    }
+      externalReference,
+      idempotencyKey,
+    });
 
     const pixQrCode = payment?.id ? await resolvePixQrCode(payment.id) : null;
     const pixData = asaasMapper.mapAsaasPaymentToPixData(payment, pixQrCode);
 
     return {
       customer,
-      subscription,
+      subscription: null,
       payment,
       pixQrCode,
       pixData,

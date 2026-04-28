@@ -274,20 +274,16 @@ describe('asaasService', () => {
   it('keeps Pix flow creating charge after customer creation succeeds', async () => {
     mockAsaasClient.get
       .mockResolvedValueOnce({ data: [] })
-      .mockResolvedValueOnce({ data: [] })
-      .mockResolvedValueOnce({ data: [] })
       .mockResolvedValueOnce({ encodedImage: 'qr-image', payload: 'pix-code' });
 
     mockAsaasClient.post
       .mockResolvedValueOnce({ id: 'cus_pix_1' })
-      .mockResolvedValueOnce({ id: 'sub_pix_1' })
       .mockResolvedValueOnce({
         id: 'pay_pix_1',
         status: 'PENDING',
         dueDate: '2026-04-30',
         value: 99.9,
         customer: 'cus_pix_1',
-        subscription: 'sub_pix_1',
       });
 
     const result = await asaasService.createPixSubscription({
@@ -316,34 +312,26 @@ describe('asaasService', () => {
 
     expect(mockAsaasClient.post).toHaveBeenNthCalledWith(
       2,
-      '/subscriptions',
-      expect.objectContaining({
+      '/payments',
+      {
         customer: 'cus_pix_1',
         billingType: 'PIX',
-        cycle: 'MONTHLY',
-      }),
+        value: 99.9,
+        dueDate: '2026-04-30',
+        description: 'EasyBarber - Plano profissional (Barbearia)',
+        externalReference: 'barbershop:tenant-asaas-3:plan:profissional',
+      },
       {
         idempotencyKey: 'pix-checkout:test-2',
       }
     );
 
-    expect(mockAsaasClient.post).toHaveBeenNthCalledWith(
-      3,
-      '/payments',
-      expect.objectContaining({
-        customer: 'cus_pix_1',
-        billingType: 'PIX',
-        cpfCnpj: '12345678000195',
-      }),
-      {
-        idempotencyKey: 'pix-checkout:test-2:fallback-payment',
-      }
-    );
+    expect(mockAsaasClient.post).toHaveBeenCalledTimes(2);
 
     expect(result).toEqual(
       expect.objectContaining({
         customer: { id: 'cus_pix_1' },
-        subscription: { id: 'sub_pix_1' },
+        subscription: null,
         payment: expect.objectContaining({ id: 'pay_pix_1' }),
         pixData: expect.objectContaining({ pixCopyPaste: '000201...' }),
       })
