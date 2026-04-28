@@ -6,7 +6,11 @@ import {
   normalizeDocumentDigits,
 } from '../../utils/cpfCnpj.js';
 import logger from '../../utils/logger.js';
-import { asaasClient } from './client.js';
+import {
+  asaasClient,
+  normalizeAsaasApiKey,
+  removeEmptyFields as removeAsaasEmptyFields,
+} from './client.js';
 import { asaasMapper } from './mapper.js';
 
 const PLAN_VALUES = Object.freeze({
@@ -343,6 +347,68 @@ const toAsaasDate = (value) => {
   }
 
   return date.toISOString().slice(0, 10);
+};
+
+const resolveServerDateYYYYMMDD = (referenceDate = new Date()) =>
+  referenceDate.toISOString().slice(0, 10);
+
+const resolvePixDueDate = (value, referenceDate = new Date()) => {
+  const today = resolveServerDateYYYYMMDD(referenceDate);
+  const candidate = value ? toAsaasDate(value) : toAsaasDate(addDays(referenceDate, 1));
+
+  return candidate < today ? today : candidate;
+};
+
+const normalizeCurrencyAmount = (value) => {
+  const amount = Number(Number(value).toFixed(2));
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new AppError('Valor inválido para cobrança Pix no Asaas', 400, 'INVALID_PIX_AMOUNT');
+  }
+
+  return amount;
+};
+
+const maskApiKey = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = String(value).trim();
+  if (normalized.length <= 10) {
+    return '***';
+  }
+
+  return `${normalized.slice(0, 8)}...${normalized.slice(-4)}`;
+};
+
+const buildAsaasHeadersLog = () => ({
+  accept: 'application/json',
+  'content-type': 'application/json',
+  'user-agent': 'EasyBarber/1.0',
+  access_token: maskApiKey(normalizeAsaasApiKey(process.env.ASAAS_API_KEY)),
+});
+
+const buildFieldTypes = (payload = {}) =>
+  Object.fromEntries(
+    Object.entries(payload).map(([key, value]) => [key, typeof value])
+  );
+
+const buildMinimalPixPaymentPayload = ({ customerId, amount, dueDate }) => {
+  const customer = typeof customerId === 'string' ? customerId.trim() : String(customerId || '').trim();
+
+  if (!/^cus_[A-Za-z0-9_]+$/.test(customer)) {
+    throw new AppError('Customer Asaas inválido para cobrança Pix', 400, 'INVALID_ASAAS_CUSTOMER');
+  }
+
+  const payload = {
+    customer,
+    billingType: 'PIX',
+    value: normalizeCurrencyAmount(amount),
+    dueDate: resolvePixDueDate(dueDate),
+  };
+
+  return removeAsaasEmptyFields(payload);
 };
 
 const resolveBillingDescription = ({ plan, barbershopName }) => {
@@ -1002,22 +1068,16 @@ export const asaasService = {
     plan,
     amount,
     dueDate,
-    description,
-    externalReference,
     idempotencyKey = null,
   }) {
     const resolvedAmount = typeof amount === 'number' ? amount : resolvePlanValue(plan);
-    const resolvedDueDate = toAsaasDate(dueDate || addDays(new Date(), 3));
-
-    const payload = {
-      customer: customerId,
-      billingType: 'PIX',
-      value: resolvedAmount,
-      dueDate: resolvedDueDate,
-      description,
-      externalReference:
-        externalReference || buildExternalReference({ barbershopId, plan }),
-    };
+    const payload = buildMinimalPixPaymentPayload({
+      customerId,
+      amount: resolvedAmount,
+      dueDate,
+    });
+    const fieldTypes = buildFieldTypes(payload);
+    const serverCurrentDate = new Date();
 
     logger.info(
       {
@@ -1025,15 +1085,19 @@ export const asaasService = {
         barbershopId,
         method: 'POST',
         path: '/payments',
-        payload: maskSensitiveData(payload),
+        endpoint: '/payments',
+        payload,
+        fieldTypes,
+        serverCurrentDate: serverCurrentDate.toISOString(),
+        serverDateYYYYMMDD: resolveServerDateYYYYMMDD(serverCurrentDate),
+        dueDate: payload.dueDate,
+        headers: buildAsaasHeadersLog(),
       },
-      'Iniciando criacao de cobranca Pix no Asaas'
+      'Iniciando criacao de cobranca Pix minima no Asaas'
     );
 
     try {
-      const createdPayment = await asaasClient.post('/payments', payload, {
-        idempotencyKey,
-      });
+      const createdPayment = await asaasClient.post('/payments', payload);
 
       logger.info(
         {
@@ -1105,23 +1169,13 @@ export const asaasService = {
     });
 
     const resolvedAmount = typeof amount === 'number' ? amount : resolvePlanValue(plan);
-    const resolvedDueDate = toAsaasDate(nextDueDate || addDays(new Date(), 3));
-    const description = resolveBillingDescription({
-      plan,
-      barbershopName: barbershop.name,
-    });
-    const externalReference = buildExternalReference({
-      barbershopId: barbershop.id,
-      plan,
-    });
+    const resolvedDueDate = resolvePixDueDate(nextDueDate || addDays(new Date(), 1));
     const payment = await this.createPixCharge({
       customerId: customer.id,
       barbershopId: barbershop.id,
       plan,
       amount: resolvedAmount,
       dueDate: resolvedDueDate,
-      description,
-      externalReference,
       idempotencyKey,
     });
 

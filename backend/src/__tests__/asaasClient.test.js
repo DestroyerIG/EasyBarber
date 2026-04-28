@@ -107,11 +107,10 @@ describe('asaasClient', () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
+          accept: 'application/json',
+          'content-type': 'application/json',
           access_token: 'aact_prod_test_key_123456',
-          'User-Agent': 'EasyBarber/1.0',
-          'Idempotency-Key': 'pix-checkout:test-client-1',
+          'user-agent': 'EasyBarber/1.0',
         }),
         body: JSON.stringify({
           name: 'Itallo Gabriel',
@@ -120,6 +119,8 @@ describe('asaasClient', () => {
         }),
       })
     );
+    expect(global.fetch.mock.calls[0][1].headers.Authorization).toBeUndefined();
+    expect(global.fetch.mock.calls[0][1].headers['Idempotency-Key']).toBeUndefined();
   });
 
   it('preserves empty raw response body as an empty string on edge 400 errors', async () => {

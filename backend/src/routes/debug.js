@@ -3,6 +3,7 @@ import {
   asaasClient,
   getAsaasApiKeyDiagnostics,
   rawAsaasRequest,
+  removeEmptyFields,
 } from '../integrations/asaas/client.js';
 
 const router = express.Router();
@@ -63,6 +64,19 @@ const maskCpfCnpj = (value) => {
 
   return `${digits.slice(0, 3)}***${digits.slice(-2)}`;
 };
+
+const addDays = (referenceDate, days) => {
+  const date = new Date(referenceDate);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date;
+};
+
+const toDateYYYYMMDD = (value) => value.toISOString().slice(0, 10);
+
+const buildFieldTypes = (payload = {}) =>
+  Object.fromEntries(
+    Object.entries(payload).map(([key, value]) => [key, typeof value])
+  );
 
 const ensureDebugEnabled = (req, res, next) => {
   if (process.env.ENABLE_DEBUG_ROUTES !== 'true') {
@@ -218,6 +232,63 @@ router.get('/asaas/customer-test', ensureDebugEnabled, async (_req, res) => {
       error: {
         code: error?.code || 'ASAAS_DEBUG_CUSTOMER_TEST_ERROR',
         message: error?.message || 'Falha ao testar criação de customer Asaas.',
+      },
+    });
+  }
+});
+
+// Rota temporária de diagnóstico. Remover após resolver POST /payments PIX no Asaas.
+router.get('/asaas/pix-minimal', ensureDebugEnabled, async (_req, res) => {
+  const now = new Date();
+  const payload = removeEmptyFields({
+    customer: 'cus_000173482205',
+    billingType: 'PIX',
+    value: Number(Number(10).toFixed(2)),
+    dueDate: toDateYYYYMMDD(addDays(now, 1)),
+  });
+  const fieldTypes = buildFieldTypes(payload);
+
+  try {
+    const result = await rawAsaasRequest('POST', '/payments', { body: payload });
+    const empty400 = result.status === 400 && result.bodyRaw === '';
+
+    return res.status(200).json({
+      success: result.ok,
+      provider: 'asaas',
+      method: 'POST',
+      path: '/payments',
+      status: result.status,
+      headers: pickRelevantHeaders(result.headers),
+      bodyRaw: result.bodyRaw,
+      bodyJson: result.bodyJson,
+      payload,
+      fieldTypes,
+      serverCurrentDate: now.toISOString(),
+      dueDate: payload.dueDate,
+      conclusion: empty400
+        ? 'Payload mínimo Pix correto ainda falhou com 400 vazio: provável bloqueio WAF/CloudFront/infra do Asaas.'
+        : result.ok
+          ? 'Payload mínimo Pix funcionou: reintroduza description e externalReference gradualmente.'
+          : 'Payload mínimo Pix falhou com body: veja status, headers e body retornados pelo Asaas.',
+    });
+  } catch (error) {
+    return res.status(502).json({
+      success: false,
+      provider: 'asaas',
+      method: 'POST',
+      path: '/payments',
+      status: null,
+      headers: {},
+      bodyRaw: '',
+      bodyJson: null,
+      payload,
+      fieldTypes,
+      serverCurrentDate: now.toISOString(),
+      dueDate: payload.dueDate,
+      conclusion: 'Falha de comunicação antes de receber resposta do Asaas.',
+      error: {
+        code: error?.code || 'ASAAS_DEBUG_PIX_MINIMAL_ERROR',
+        message: error?.message || 'Falha ao testar cobrança Pix mínima no Asaas.',
       },
     });
   }

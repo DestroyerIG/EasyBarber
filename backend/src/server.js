@@ -355,6 +355,7 @@ app.use(`${API_V1}/subscriptions`, subscriptionRoutes);
 app.use(`${API_V1}/billing`, billingRoutes);
 app.use(`${API_V1}/admin`, adminRoutes);
 app.use(`${API_V1}/debug`, debugRoutes);
+app.use('/debug', debugRoutes);
 
 // Backward-compat: redireciona /api/<recurso> para /api/v1/<recurso>
 app.use('/api', (req, res, next) => {

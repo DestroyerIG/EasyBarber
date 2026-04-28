@@ -21,6 +21,11 @@ const mockLogger = {
 
 jest.unstable_mockModule('../integrations/asaas/client.js', () => ({
   asaasClient: mockAsaasClient,
+  normalizeAsaasApiKey: (value) => String(value || '').trim().replace(/^Bearer\s+/i, ''),
+  removeEmptyFields: (payload) =>
+    Object.fromEntries(
+      Object.entries(payload).filter(([, value]) => value !== undefined && value !== null && value !== '')
+    ),
 }));
 
 jest.unstable_mockModule('../integrations/asaas/mapper.js', () => ({
@@ -318,11 +323,6 @@ describe('asaasService', () => {
         billingType: 'PIX',
         value: 99.9,
         dueDate: '2026-04-30',
-        description: 'EasyBarber - Plano profissional (Barbearia)',
-        externalReference: 'barbershop:tenant-asaas-3:plan:profissional',
-      },
-      {
-        idempotencyKey: 'pix-checkout:test-2',
       }
     );
 

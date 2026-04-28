@@ -107,25 +107,17 @@ const serializeHeaders = (headers) => {
   return Object.fromEntries(Object.entries(headers));
 };
 
-const isEmptyPayloadValue = (value) =>
-  value === undefined ||
-  value === null ||
-  (typeof value === 'string' && value.trim().length === 0);
-
-const removeEmptyFields = (value) => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return value;
+export function removeEmptyFields(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
   }
 
   return Object.fromEntries(
-    Object.entries(value)
-      .map(([key, entryValue]) => [
-        key,
-        typeof entryValue === 'string' ? entryValue.trim() : entryValue,
-      ])
-      .filter(([, entryValue]) => !isEmptyPayloadValue(entryValue))
+    Object.entries(payload).filter(([, value]) => {
+      return value !== undefined && value !== null && value !== '';
+    })
   );
-};
+}
 
 const getConfig = () => {
   const apiKey = normalizeAsaasApiKey(process.env.ASAAS_API_KEY);
@@ -140,7 +132,7 @@ const getConfig = () => {
 
   const baseUrl = String(process.env.ASAAS_BASE_URL || DEFAULT_BASE_URL).trim().replace(/\/$/, '');
   const timeoutMs = Number(process.env.ASAAS_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
-  const userAgent = String(process.env.ASAAS_USER_AGENT || DEFAULT_USER_AGENT).trim() || DEFAULT_USER_AGENT;
+  const userAgent = DEFAULT_USER_AGENT;
   const keyEnvironment = inferEnvironmentFromApiKey(apiKey);
   const urlEnvironment = inferEnvironmentFromBaseUrl(baseUrl);
 
@@ -233,19 +225,13 @@ const safeJSONStringify = (value) => {
   }
 };
 
-const buildHeaders = ({ apiKey, userAgent, idempotencyKey = null }) => {
-  const headers = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-    'User-Agent': userAgent,
+const buildHeaders = ({ apiKey, userAgent }) => {
+  return {
+    accept: 'application/json',
+    'content-type': 'application/json',
+    'user-agent': userAgent,
     access_token: apiKey,
   };
-
-  if (idempotencyKey) {
-    headers['Idempotency-Key'] = idempotencyKey;
-  }
-
-  return headers;
 };
 
 const maskDigitsTail = (value, visibleDigits = 4) => {
@@ -517,7 +503,7 @@ export const rawAsaasRequest = async (method, path, options = {}) => {
   const serializedBody = payload !== null && payload !== undefined
     ? JSON.stringify(payload)
     : undefined;
-  const headers = buildHeaders({ apiKey, userAgent, idempotencyKey });
+  const headers = buildHeaders({ apiKey, userAgent });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
 
@@ -533,11 +519,10 @@ export const rawAsaasRequest = async (method, path, options = {}) => {
         urlEnvironment,
         maskedApiKey: maskApiKey(apiKey),
         headers: {
-          'Content-Type': headers['Content-Type'],
-          Accept: headers.Accept,
-          'User-Agent': headers['User-Agent'],
+          accept: headers.accept,
+          'content-type': headers['content-type'],
+          'user-agent': headers['user-agent'],
           'has-access-token': Boolean(headers.access_token),
-          'has-idempotency-key': Boolean(idempotencyKey),
         },
         requestBody: sanitizeBodyForLog(serializedBody),
       },
@@ -595,7 +580,7 @@ const request = async (method, path, options = {}) => {
   const serializedBody = payload !== null && payload !== undefined
     ? JSON.stringify(payload)
     : null;
-  const headers = buildHeaders({ apiKey, userAgent, idempotencyKey });
+  const headers = buildHeaders({ apiKey, userAgent });
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     const controller = new AbortController();
@@ -613,11 +598,10 @@ const request = async (method, path, options = {}) => {
           urlEnvironment,
           maskedApiKey: maskApiKey(apiKey),
           headers: {
-            'Content-Type': headers['Content-Type'],
-            Accept: headers.Accept,
-            'User-Agent': headers['User-Agent'],
+            accept: headers.accept,
+            'content-type': headers['content-type'],
+            'user-agent': headers['user-agent'],
             'has-access-token': Boolean(headers.access_token),
-            'has-idempotency-key': Boolean(idempotencyKey),
           },
           requestBody: sanitizeBodyForLog(serializedBody),
         },
