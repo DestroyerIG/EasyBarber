@@ -10,6 +10,7 @@ import { getApiErrorMessage } from '@/utils/handleApiError';
 import {
   getSupabaseClient,
   isSupabaseClientConfigured,
+  resolveAuthConfirmRedirectUrl,
 } from '@/lib/supabase/client';
 
 type ConfirmationStatus = 'loading' | 'success' | 'error';
@@ -421,6 +422,7 @@ export function AuthConfirmView() {
     try {
       const response = await api.post('/auth/resend-verification', {
         email: normalizedEmail,
+        emailRedirectTo: resolveAuthConfirmRedirectUrl(),
       });
 
       const resendMessage = getBackendMessage(
@@ -440,6 +442,12 @@ export function AuthConfirmView() {
     }
   };
 
+  const successActionLabel = successRedirectUrl.startsWith('/pagamento')
+    ? 'Ir para pagamento'
+    : successRedirectUrl.startsWith('/dashboard')
+    ? 'Ir para dashboard'
+    : 'Continuar';
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(255,122,0,0.2),_rgba(0,0,0,0.92)_45%)] px-4 py-10">
       <div className="mx-auto w-full max-w-xl rounded-2xl border border-white/10 bg-black/70 p-8 shadow-2xl shadow-black/40 backdrop-blur">
@@ -456,7 +464,10 @@ export function AuthConfirmView() {
 
         {status === 'success' && (
           <div className="mt-6 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
-            E-mail confirmado com sucesso. Você será levado para finalizar o pagamento.
+            <p className="font-semibold">E-mail confirmado com sucesso.</p>
+            <p className="mt-1 text-emerald-200">
+              Agora você já pode fazer login.
+            </p>
           </div>
         )}
 
@@ -498,8 +509,16 @@ export function AuthConfirmView() {
             href={status === 'success' ? successRedirectUrl : SUCCESS_REDIRECT_URL}
             className="rounded-lg border border-primary/40 px-4 py-2 font-semibold text-primary hover:border-primary"
           >
-            {status === 'success' ? 'Ir para pagamento' : 'Ir para login'}
+            {status === 'success' ? successActionLabel : 'Ir para login'}
           </Link>
+          {status === 'success' && (
+            <Link
+              href={SUCCESS_REDIRECT_URL}
+              className="rounded-lg border border-white/20 px-4 py-2 font-semibold text-gray-200 hover:border-white/40 hover:text-white"
+            >
+              Ir para login
+            </Link>
+          )}
           <Link href="/cadastro" className="text-gray-300 hover:text-white">
             Criar nova conta
           </Link>

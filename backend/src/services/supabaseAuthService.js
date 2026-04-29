@@ -209,11 +209,36 @@ const resolveFrontendBaseUrl = () => {
   return 'http://localhost:3000';
 };
 
-const resolveEmailRedirectTo = () => {
+const normalizeEmailRedirectTo = (value) => {
+  const resolved = ensureAbsoluteUrl(value, 'emailRedirectTo');
+
+  if (!resolved) {
+    return null;
+  }
+
+  const parsed = new URL(resolved);
+  if (parsed.pathname.replace(/\/+$/, '') !== '/auth/confirm') {
+    throw new AppError(
+      'URL de confirmação deve apontar para /auth/confirm.',
+      400,
+      'INVALID_EMAIL_REDIRECT_TO'
+    );
+  }
+
+  return resolved;
+};
+
+const resolveEmailRedirectTo = (emailRedirectTo = null) => {
+  const providedRedirect = normalizeEmailRedirectTo(emailRedirectTo);
+
+  if (providedRedirect) {
+    return providedRedirect;
+  }
+
   const explicitRedirect = String(process.env.AUTH_SUPABASE_REDIRECT_TO || '').trim();
 
   if (explicitRedirect) {
-    return ensureAbsoluteUrl(explicitRedirect, 'AUTH_SUPABASE_REDIRECT_TO');
+    return normalizeEmailRedirectTo(explicitRedirect);
   }
 
   return new URL('/auth/confirm', `${resolveFrontendBaseUrl()}/`).toString().replace(/\/$/, '');
@@ -549,7 +574,7 @@ export const supabaseAuthService = {
     };
   },
 
-  async signUpForEmailVerification(email, password) {
+  async signUpForEmailVerification(email, password, emailRedirectTo = null) {
     const normalizedEmail = normalizeEmail(email);
     const normalizedPassword = String(password || '');
 
@@ -558,7 +583,7 @@ export const supabaseAuthService = {
     }
 
     const client = getSupabaseClient();
-    const redirectTo = resolveEmailRedirectTo();
+    const redirectTo = resolveEmailRedirectTo(emailRedirectTo);
 
     logger.info(
       {
@@ -696,7 +721,7 @@ export const supabaseAuthService = {
     return null;
   },
 
-  async resendVerificationEmail(email) {
+  async resendVerificationEmail(email, emailRedirectTo = null) {
     const normalizedEmail = normalizeEmail(email);
 
     if (!normalizedEmail) {
@@ -704,7 +729,7 @@ export const supabaseAuthService = {
     }
 
     const client = getSupabaseClient();
-    const redirectTo = resolveEmailRedirectTo();
+    const redirectTo = resolveEmailRedirectTo(emailRedirectTo);
 
     let data;
     let error;

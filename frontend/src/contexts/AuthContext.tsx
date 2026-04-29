@@ -13,6 +13,7 @@ import api from '@/lib/api';
 import { isPublicAuthPath } from '@/lib/publicRoutes';
 import type { PlanId } from '@/lib/plans';
 import type { User } from '@/types';
+import { resolveAuthConfirmRedirectUrl } from '@/lib/supabase/client';
 
 interface AuthContextType {
   user: User | null;
@@ -248,7 +249,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(true);
 
       try {
-        const response = await api.post('/auth/register', data);
+        const response = await api.post('/auth/register', {
+          ...data,
+          emailRedirectTo: resolveAuthConfirmRedirectUrl(),
+        });
         const payload = response.data as RegisterApiPayload;
 
         setUser(null);

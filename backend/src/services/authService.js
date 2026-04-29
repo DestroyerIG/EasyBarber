@@ -213,6 +213,7 @@ const registerWithSupabasePrimaryFlow = async ({
   cpfCnpj,
   password,
   desiredPlan,
+  emailRedirectTo,
 }) => {
   const normalizedEmail = normalizeEmail(email);
   const plan = DEFAULT_PLAN;
@@ -241,7 +242,11 @@ const registerWithSupabasePrimaryFlow = async ({
   try {
     currentStage = 'supabase_signup';
 
-    const signUpResult = await supabaseAuthService.signUpForEmailVerification(normalizedEmail, password);
+    const signUpResult = await supabaseAuthService.signUpForEmailVerification(
+      normalizedEmail,
+      password,
+      emailRedirectTo
+    );
     supabaseUserId = signUpResult.userId;
     verificationEmailSent = signUpResult.verificationEmailSent !== false;
   } catch (error) {
@@ -269,7 +274,7 @@ const registerWithSupabasePrimaryFlow = async ({
         verificationEmailSent = false;
       } else {
         currentStage = 'supabase_resend_after_user_exists';
-        await supabaseAuthService.resendVerificationEmail(normalizedEmail);
+        await supabaseAuthService.resendVerificationEmail(normalizedEmail, emailRedirectTo);
         verificationEmailSent = true;
       }
     } catch (resendError) {
@@ -709,6 +714,7 @@ export const authService = {
     cpfCnpj,
     password,
     desiredPlan,
+    emailRedirectTo,
   }) {
     return registerWithSupabasePrimaryFlow({
       barbershopName,
@@ -718,6 +724,7 @@ export const authService = {
       cpfCnpj,
       password,
       desiredPlan,
+      emailRedirectTo,
     });
   },
 
@@ -1159,7 +1166,7 @@ export const authService = {
     };
   },
 
-  async resendVerificationEmail(email) {
+  async resendVerificationEmail(email, emailRedirectTo = null) {
     const normalizedEmail = normalizeEmail(email);
     const safeResponse = buildResendVerificationResponse();
 
@@ -1221,7 +1228,10 @@ export const authService = {
         return safeResponse;
       }
 
-      const resendResult = await supabaseAuthService.resendVerificationEmail(normalizedEmail);
+      const resendResult = await supabaseAuthService.resendVerificationEmail(
+        normalizedEmail,
+        emailRedirectTo
+      );
 
       logger.info(
         {

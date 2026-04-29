@@ -2,17 +2,23 @@ import '../styles/globals.css'
 import { ToastProvider } from '@/components/Toast'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { AuthProvider } from '@/contexts/AuthContext'
-import { Space_Grotesk, Plus_Jakarta_Sans } from 'next/font/google'
+import localFont from 'next/font/local'
 import easyBarberLogo from '@/icons/easybarber.png'
 
-const plusJakartaSans = Plus_Jakarta_Sans({
-  subsets: ['latin'],
+const plusJakartaSans = localFont({
+  src: '../assets/fonts/plus-jakarta-sans-latin.woff2',
   variable: '--font-sans',
+  weight: '200 800',
+  style: 'normal',
+  display: 'swap',
 });
 
-const spaceGrotesk = Space_Grotesk({
-  subsets: ['latin'],
+const spaceGrotesk = localFont({
+  src: '../assets/fonts/space-grotesk-latin.woff2',
   variable: '--font-display',
+  weight: '300 700',
+  style: 'normal',
+  display: 'swap',
 });
 
 export const metadata = {

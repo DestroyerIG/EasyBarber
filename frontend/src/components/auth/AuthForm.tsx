@@ -12,6 +12,7 @@ import { formatCurrency } from '@/lib/formatters';
 import api from '@/lib/api';
 import { getApiErrorCode, getApiErrorMessage } from '@/utils/handleApiError';
 import { formatCpfCnpj, isValidCpfCnpj, normalizeCpfCnpjDigits } from '@/utils/cpfCnpj';
+import { resolveAuthConfirmRedirectUrl } from '@/lib/supabase/client';
 import easyBarberLogo from '@/icons/easybarber.png';
 
 type AuthMode = 'login' | 'register';
@@ -204,7 +205,10 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
     setResendingVerification(true);
 
     try {
-      const response = await api.post('/auth/resend-verification', { email });
+      const response = await api.post('/auth/resend-verification', {
+        email,
+        emailRedirectTo: resolveAuthConfirmRedirectUrl(),
+      });
       const message =
         typeof response.data?.message === 'string'
           ? response.data.message

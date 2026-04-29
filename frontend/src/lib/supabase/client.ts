@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { resolveAppUrl } from '@/lib/appUrl';
+import { resolveAppUrl, trimTrailingSlash } from '@/lib/appUrl';
 
 export type SupabaseAnonKeyType = 'jwt_anon' | 'publishable' | 'invalid' | 'secret_rejected';
 
@@ -209,5 +209,9 @@ export const resolveFrontendAppUrl = () => {
 };
 
 export const resolveAuthConfirmRedirectUrl = () => {
+  if (typeof window !== 'undefined' && window.location.origin) {
+    return `${trimTrailingSlash(window.location.origin)}/auth/confirm`;
+  }
+
   return `${resolveFrontendAppUrl()}/auth/confirm`;
 };

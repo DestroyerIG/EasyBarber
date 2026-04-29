@@ -4,6 +4,20 @@ import { isValidCpfCnpj, normalizeDocumentDigits } from '../../utils/cpfCnpj.js'
 
 const planSchema = z.enum(['basico', 'profissional', 'premium']);
 
+const authConfirmRedirectSchema = z
+  .string()
+  .trim()
+  .url('URL de confirmação inválida')
+  .refine((value) => {
+    try {
+      const parsed = new URL(value);
+      return parsed.pathname.replace(/\/+$/, '') === '/auth/confirm';
+    } catch {
+      return false;
+    }
+  }, 'URL de confirmação deve apontar para /auth/confirm')
+  .optional();
+
 export const registerSchema = z.object({
   barbershopName: z.string().min(2, 'Nome da barbearia deve ter pelo menos 2 caracteres').max(255),
   ownerName: z.string().min(2, 'Nome do responsável deve ter pelo menos 2 caracteres').max(255),
@@ -22,6 +36,7 @@ export const registerSchema = z.object({
     }),
   password: passwordSchema,
   desiredPlan: planSchema.default('basico'),
+  emailRedirectTo: authConfirmRedirectSchema,
 });
 
 export const loginSchema = z.object({
@@ -64,6 +79,7 @@ export const verifyEmailSchema = z
 
 export const resendVerificationSchema = z.object({
   email: z.string().email('Email inválido').max(255),
+  emailRedirectTo: authConfirmRedirectSchema,
 });
 
 const accessTokenSchema = z

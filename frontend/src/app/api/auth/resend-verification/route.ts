@@ -11,6 +11,24 @@ const normalizeEmail = (value: unknown) => {
   return value.trim().toLowerCase();
 };
 
+const normalizeEmailRedirectTo = (value: unknown) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.pathname.replace(/\/+$/, '') === '/auth/confirm' ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+};
+
 export async function POST(request: NextRequest) {
   let body: unknown;
 
@@ -21,6 +39,9 @@ export async function POST(request: NextRequest) {
   }
 
   const email = normalizeEmail((body as { email?: unknown } | null)?.email);
+  const emailRedirectTo = normalizeEmailRedirectTo(
+    (body as { emailRedirectTo?: unknown } | null)?.emailRedirectTo
+  );
 
   if (!email || !EMAIL_REGEX.test(email)) {
     return errorResponse(400, null, 'E-mail inválido.');
@@ -35,7 +56,10 @@ export async function POST(request: NextRequest) {
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({
+      email,
+      ...(emailRedirectTo ? { emailRedirectTo } : {}),
+    }),
   });
 
   if (!upstream.response || upstream.networkError) {

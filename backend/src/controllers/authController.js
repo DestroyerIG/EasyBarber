@@ -112,7 +112,10 @@ export const confirmSignup = async (req, res, next) => {
 
 export const resendVerification = async (req, res, next) => {
   try {
-    const data = await authService.resendVerificationEmail(req.body.email);
+    const data = await authService.resendVerificationEmail(
+      req.body.email,
+      req.body.emailRedirectTo
+    );
     return sendSuccess(res, data);
   } catch (error) {
     next(error);

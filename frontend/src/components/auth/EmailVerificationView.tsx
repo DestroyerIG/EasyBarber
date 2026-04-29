@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '@/lib/api';
 import { useToast } from '@/components/Toast';
 import { getApiErrorMessage } from '@/utils/handleApiError';
+import { resolveAuthConfirmRedirectUrl } from '@/lib/supabase/client';
 
 type VerificationStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -91,6 +92,7 @@ export function EmailVerificationView({ initialToken, initialEmail }: EmailVerif
     try {
       const response = await api.post('/auth/resend-verification', {
         email: normalizedEmail,
+        emailRedirectTo: resolveAuthConfirmRedirectUrl(),
       });
 
       const successMessage =
