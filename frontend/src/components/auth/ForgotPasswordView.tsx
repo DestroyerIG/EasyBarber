@@ -14,6 +14,9 @@ type ForgotPasswordViewProps = {
   appUrl?: string;
 };
 
+const AUTH_CONNECTION_ERROR_MESSAGE =
+  'Não foi possível conectar ao serviço de autenticação. Verifique a configuração do Supabase.';
+
 const maskEmail = (email: string) => {
   const [localPart, domainPart = ''] = email.split('@');
 
@@ -53,15 +56,13 @@ export function ForgotPasswordView({ appUrl }: ForgotPasswordViewProps) {
       const maskedEmail = maskEmail(normalizedEmail);
       const diagnostics = getSupabaseClientDiagnostics();
 
-      console.info('[forgot-password] operação iniciada', {
+      console.info('[forgot-password] debug seguro de configuração', {
         operation: 'resetPasswordForEmail',
         email: maskedEmail,
         redirectTo,
-        currentOrigin: window.location.origin,
-        supabaseUrlHost: diagnostics.supabaseUrlHost,
+        supabaseUrl: diagnostics.supabaseUrlMasked,
         hasSupabaseUrl: diagnostics.hasSupabaseUrl,
         hasSupabaseAnonKey: diagnostics.hasSupabaseAnonKey,
-        anonKeyPrefix: diagnostics.anonKeyPrefix,
         supabaseUrlProjectRef: diagnostics.supabaseUrlProjectRef,
         anonKeyProjectRef: diagnostics.anonKeyProjectRef,
         canCompareProjectRef: diagnostics.canCompareProjectRef,
@@ -84,13 +85,9 @@ export function ForgotPasswordView({ appUrl }: ForgotPasswordViewProps) {
         operation: 'resetPasswordForEmail',
         email: maskedEmail,
         redirectTo,
-        supabaseError: response.error
-          ? {
-              message: response.error.message,
-              name: response.error.name,
-              status: 'status' in response.error ? response.error.status : undefined,
-            }
-          : null,
+        supabaseUrl: diagnostics.supabaseUrlMasked,
+        message: response.error?.message || null,
+        name: response.error?.name || null,
       });
 
       if (response.error) {
@@ -100,16 +97,24 @@ export function ForgotPasswordView({ appUrl }: ForgotPasswordViewProps) {
       setStatus('success');
       setMessage('Link de redefinição enviado. Confira seu e-mail para continuar.');
     } catch (error) {
+      const diagnostics = getSupabaseClientDiagnostics();
+      const message = error instanceof Error ? error.message : 'Erro desconhecido';
+      const name = error instanceof Error ? error.name : 'UnknownError';
+
       console.error('[forgot-password] operação falhou', {
         operation: 'resetPasswordForEmail',
         email: maskEmail(normalizedEmail),
         redirectTo: resolveResetPasswordRedirectUrl(appUrl),
-        supabaseError: error instanceof Error ? error.message : 'Erro desconhecido',
-        error,
+        supabaseUrl: diagnostics.supabaseUrlMasked,
+        message,
+        name,
       });
+
       setStatus('error');
-      if (error instanceof Error && error.message.includes('Configuração do Supabase')) {
-        setMessage(error.message);
+      if (message.includes('Failed to fetch')) {
+        setMessage(AUTH_CONNECTION_ERROR_MESSAGE);
+      } else if (message.includes('Configuração do Supabase')) {
+        setMessage(message);
       } else {
         setMessage('Não foi possível enviar o link de redefinição agora. Tente novamente.');
       }

@@ -11,6 +11,21 @@ const normalizeEnvValue = (value: string | undefined) => {
 const resolveSupabaseUrl = () => normalizeEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL);
 const resolveSupabaseAnonKey = () => normalizeEnvValue(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
+const maskSupabaseUrl = (url: string) => {
+  if (!url) return null;
+
+  try {
+    const parsedUrl = new URL(url);
+    const [projectRef = ''] = parsedUrl.host.split('.');
+    const maskedProjectRef =
+      projectRef.length > 8 ? `${projectRef.slice(0, 6)}...${projectRef.slice(-2)}` : projectRef;
+
+    return `${parsedUrl.protocol}//${maskedProjectRef}.${parsedUrl.host.split('.').slice(1).join('.')}`;
+  } catch {
+    return 'url-invalida';
+  }
+};
+
 const decodeBase64Url = (value: string) => {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
   const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
@@ -74,8 +89,8 @@ export const getSupabaseClientDiagnostics = () => {
     hasSupabaseUrl: Boolean(url),
     hasSupabaseAnonKey: Boolean(anonKey),
     supabaseUrlHost: urlHost,
+    supabaseUrlMasked: maskSupabaseUrl(url),
     supabaseUrlProjectRef: urlProjectRef,
-    anonKeyPrefix: anonKey ? `${anonKey.slice(0, 12)}...` : null,
     anonKeyProjectRef,
     canCompareProjectRef: Boolean(urlProjectRef && anonKeyProjectRef),
     isProjectRefMismatch:
@@ -89,6 +104,13 @@ export const getSupabaseClient = () => {
 
   if (!url || !anonKey) {
     const missingVars = getMissingSupabasePublicEnvVars();
+    console.error('[supabase-client] configuração pública ausente no browser', {
+      missingVars,
+      hasSupabaseUrl: Boolean(url),
+      hasSupabaseAnonKey: Boolean(anonKey),
+      supabaseUrl: maskSupabaseUrl(url),
+    });
+
     throw new Error(
       `Configuração Supabase ausente no frontend. Defina ${missingVars.join(' e ')}.`
     );

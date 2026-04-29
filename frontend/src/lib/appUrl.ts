@@ -54,6 +54,12 @@ export const resolveAppUrl = () => {
   return 'http://localhost:3000';
 };
 
-export const resolveResetPasswordRedirectUrl = (appUrl = resolveAppUrl()) => {
+export const resolveResetPasswordRedirectUrl = (fallbackAppUrl?: string) => {
+  if (typeof window !== 'undefined' && window.location.origin) {
+    return `${trimTrailingSlash(window.location.origin)}/auth/redefinir-senha`;
+  }
+
+  const appUrl = ensureAbsoluteUrl(process.env.NEXT_PUBLIC_APP_URL) || fallbackAppUrl || resolveAppUrl();
+
   return `${trimTrailingSlash(appUrl)}/auth/redefinir-senha`;
 };
