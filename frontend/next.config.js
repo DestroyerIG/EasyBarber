@@ -1,5 +1,7 @@
 const path = require('path');
 
+const PRODUCTION_BACKEND_ORIGIN = 'https://easybarber-backend.onrender.com';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -7,14 +9,23 @@ const nextConfig = {
   outputFileTracingRoot: path.join(__dirname, '..'),
 
   async headers() {
-    // Extrair somente a origem (scheme+host+port) da URL da API para o CSP
-    const apiOrigin = (() => {
+    const getOrigin = (value, fallback) => {
       try {
-        return new URL(process.env.BACKEND_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').origin;
+        return new URL(value || fallback).origin;
       } catch {
-        return 'http://localhost:5000';
+        return fallback;
       }
-    })();
+    };
+
+    // Extrair somente a origem (scheme+host+port) das URLs permitidas para o CSP
+    const apiOrigin = getOrigin(
+      process.env.BACKEND_API_URL || process.env.NEXT_PUBLIC_API_URL,
+      'http://localhost:5000'
+    );
+    const supabaseOrigin = getOrigin(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL,
+      'https://beiovtfhdpybinkxtqlb.supabase.co'
+    );
 
     return [
       {
@@ -52,7 +63,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https:",
               "font-src 'self'",
-              `connect-src 'self' ${apiOrigin}`,
+              `connect-src 'self' ${apiOrigin} ${PRODUCTION_BACKEND_ORIGIN} ${supabaseOrigin}`,
               "frame-ancestors 'none'",
               "base-uri 'self'",
               "form-action 'self'",
