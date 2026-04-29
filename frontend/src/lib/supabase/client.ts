@@ -1,6 +1,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { resolveAppUrl } from '@/lib/appUrl';
 
+export type SupabaseAnonKeyType = 'jwt_anon' | 'publishable' | 'invalid' | 'secret_rejected';
+
 let browserClient: SupabaseClient | null = null;
 
 const normalizeEnvValue = (value: string | undefined) => {
@@ -52,6 +54,68 @@ const tryExtractProjectRefFromJwt = (token: string) => {
   }
 };
 
+const tryDecodeJwtPayload = (token: string) => {
+  const parts = token.split('.');
+
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(decodeBase64Url(parts[1])) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+};
+
+const hasForbiddenLiteralValue = (value: string) => {
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'undefined' || normalized === 'null';
+};
+
+export const classifySupabaseAnonKey = (value = resolveSupabaseAnonKey()): SupabaseAnonKeyType => {
+  const key = normalizeEnvValue(value);
+
+  if (!key || hasForbiddenLiteralValue(key)) {
+    return 'invalid';
+  }
+
+  if (key.startsWith('sb_secret_')) {
+    return 'secret_rejected';
+  }
+
+  if (key.startsWith('sb_publishable_')) {
+    return 'publishable';
+  }
+
+  if (key.startsWith('eyJ')) {
+    const payload = tryDecodeJwtPayload(key);
+
+    if (!payload) {
+      return 'invalid';
+    }
+
+    if (payload.role === 'service_role') {
+      return 'secret_rejected';
+    }
+
+    return 'jwt_anon';
+  }
+
+  return 'invalid';
+};
+
+export const getSupabaseAnonKeySafeDiagnostics = (value = resolveSupabaseAnonKey()) => {
+  const key = normalizeEnvValue(value);
+
+  return {
+    anonKeyExists: Boolean(key) && !hasForbiddenLiteralValue(key),
+    anonKeyType: classifySupabaseAnonKey(key),
+    anonKeyPrefix: key ? key.slice(0, 12) : null,
+    anonKeyLength: key.length,
+  };
+};
+
 export const getMissingSupabasePublicEnvVars = () => {
   const missing: string[] = [];
 
@@ -67,7 +131,8 @@ export const getMissingSupabasePublicEnvVars = () => {
 };
 
 export const isSupabaseClientConfigured = () => {
-  return Boolean(resolveSupabaseUrl() && resolveSupabaseAnonKey());
+  const anonKeyType = classifySupabaseAnonKey();
+  return Boolean(resolveSupabaseUrl() && (anonKeyType === 'jwt_anon' || anonKeyType === 'publishable'));
 };
 
 export const getSupabaseClientDiagnostics = () => {
@@ -84,6 +149,7 @@ export const getSupabaseClientDiagnostics = () => {
   })();
   const urlProjectRef = urlHost?.split('.')[0] || null;
   const anonKeyProjectRef = anonKey ? tryExtractProjectRefFromJwt(anonKey) : null;
+  const anonKeyDiagnostics = getSupabaseAnonKeySafeDiagnostics(anonKey);
 
   return {
     hasSupabaseUrl: Boolean(url),
@@ -91,6 +157,7 @@ export const getSupabaseClientDiagnostics = () => {
     supabaseUrlHost: urlHost,
     supabaseUrlMasked: maskSupabaseUrl(url),
     supabaseUrlProjectRef: urlProjectRef,
+    ...anonKeyDiagnostics,
     anonKeyProjectRef,
     canCompareProjectRef: Boolean(urlProjectRef && anonKeyProjectRef),
     isProjectRefMismatch:
@@ -101,19 +168,27 @@ export const getSupabaseClientDiagnostics = () => {
 export const getSupabaseClient = () => {
   const url = resolveSupabaseUrl();
   const anonKey = resolveSupabaseAnonKey();
+  const anonKeyType = classifySupabaseAnonKey(anonKey);
 
-  if (!url || !anonKey) {
+  if (!url || anonKeyType === 'invalid' || anonKeyType === 'secret_rejected') {
     const missingVars = getMissingSupabasePublicEnvVars();
     console.error('[supabase-client] configuração pública ausente no browser', {
       missingVars,
       hasSupabaseUrl: Boolean(url),
       hasSupabaseAnonKey: Boolean(anonKey),
+      anonKeyType,
       supabaseUrl: maskSupabaseUrl(url),
     });
 
-    throw new Error(
-      `Configuração Supabase ausente no frontend. Defina ${missingVars.join(' e ')}.`
-    );
+    const invalidKeyMessage =
+      anonKeyType === 'secret_rejected'
+        ? 'NEXT_PUBLIC_SUPABASE_ANON_KEY não pode ser uma chave secreta ou service role.'
+        : 'NEXT_PUBLIC_SUPABASE_ANON_KEY deve ser uma JWT anon key ou uma sb_publishable key.';
+    const missingMessage = missingVars.length
+      ? `Defina ${missingVars.join(' e ')}.`
+      : invalidKeyMessage;
+
+    throw new Error(`Configuração Supabase inválida no frontend. ${missingMessage}`);
   }
 
   if (!browserClient) {
