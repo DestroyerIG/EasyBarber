@@ -4,6 +4,7 @@ import { AppError, NotFoundError, UnauthorizedError } from '../utils/errors.js';
 import { subscriptionRepository } from '../repositories/subscriptionRepository.js';
 import { asaasService } from '../integrations/asaas/service.js';
 import { asaasMapper } from '../integrations/asaas/mapper.js';
+import { subscriptionService } from './subscriptionService.js';
 import { billingProviderFactory } from './billing/billingProviderFactory.js';
 import {
   normalizeInternalSubscriptionStatus,
@@ -451,13 +452,48 @@ export const billingService = {
   },
 
   async getStatus(barbershopId) {
-    const data = await subscriptionRepository.getSubscriptionStatus(barbershopId);
+    let data = await subscriptionRepository.getSubscriptionStatus(barbershopId);
     if (!data) {
       throw new NotFoundError('Barbearia');
     }
 
-    const provider = resolveBillingProviderFromContext(data);
-    const subscriptionStatus = normalizeInternalSubscriptionStatus(data.subscription_status);
+    let provider = resolveBillingProviderFromContext(data);
+    let subscriptionStatus = normalizeInternalSubscriptionStatus(data.subscription_status);
+
+    if (
+      provider === 'stripe' &&
+      data.payment_method === 'card' &&
+      subscriptionStatus === 'pending'
+    ) {
+      try {
+        const synced = await subscriptionService.resyncBarbershopSubscription(barbershopId);
+        data = await subscriptionRepository.getSubscriptionStatus(barbershopId);
+        provider = resolveBillingProviderFromContext(data);
+        subscriptionStatus = normalizeInternalSubscriptionStatus(data.subscription_status);
+
+        logger.info(
+          {
+            event: 'stripe_subscription_synced',
+            barbershopId,
+            subscriptionStatus: synced.subscriptionStatus,
+            source: 'billing_status_refresh',
+          },
+          'Assinatura Stripe sincronizada ao consultar status'
+        );
+      } catch (error) {
+        logger.warn(
+          {
+            event: 'stripe_webhook_error',
+            barbershopId,
+            code: error?.code || null,
+            message: error?.message || null,
+            source: 'billing_status_refresh',
+          },
+          'Falha ao sincronizar assinatura Stripe ao consultar status'
+        );
+      }
+    }
+
     const paymentRequired = !hasActivePaymentEvidence(data, provider);
 
     return {

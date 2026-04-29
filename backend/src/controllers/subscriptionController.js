@@ -2,6 +2,7 @@ import { subscriptionService } from '../services/subscriptionService.js';
 import { sendSuccess } from '../utils/response.js';
 import { createCheckoutSessionSchema } from '../validators/schemas/index.js';
 import { UnauthorizedError } from '../utils/errors.js';
+import logger from '../utils/logger.js';
 
 export { createCheckoutSessionSchema };
 
@@ -53,6 +54,15 @@ export const stripeWebhook = async (req, res, next) => {
       eventType: result.eventType || null,
     });
   } catch (error) {
+    logger.error(
+      {
+        event: 'stripe_webhook_error',
+        err: error,
+        route: req.originalUrl,
+      },
+      'Erro no webhook Stripe'
+    );
+
     next(error);
   }
 };

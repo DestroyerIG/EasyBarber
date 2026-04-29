@@ -13,6 +13,7 @@ const CHECKOUT_COMPLETION_EVENTS = new Set([
 ]);
 
 const SUBSCRIPTION_EVENT_TYPES = new Set([
+  'customer.subscription.created',
   'customer.subscription.updated',
   'customer.subscription.deleted',
 ]);
@@ -56,6 +57,40 @@ const getSubscriptionData = async (stripe, subscriptionRef) => {
   }
 
   return stripe.subscriptions.retrieve(subscriptionId);
+};
+
+const getStripeObjectId = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  return typeof value === 'string' ? value : value.id || null;
+};
+
+const getCheckoutSessionData = async (stripe, session) => {
+  if (!session?.id || (session.customer && session.subscription)) {
+    return session;
+  }
+
+  return stripe.checkout.sessions.retrieve(session.id);
+};
+
+const isActivatingStatus = (status) => status === 'active' || status === 'trialing';
+
+const findLatestCustomerSubscription = async (stripe, customerId) => {
+  if (!customerId) {
+    return null;
+  }
+
+  const subscriptions = await stripe.subscriptions.list({
+    customer: customerId,
+    status: 'all',
+    limit: 10,
+  });
+
+  return subscriptions.data.find((subscription) => isActivatingStatus(subscription.status)) ||
+    subscriptions.data[0] ||
+    null;
 };
 
 const ensureCustomer = async (stripe, barbershop) => {
@@ -146,23 +181,50 @@ const updateFromStripeSubscription = async ({
   const stripePriceId = subscription.items?.data?.[0]?.price?.id || null;
   const resolvedByPriceId = stripePricingService.resolvePlanByPriceId(stripePriceId, priceCatalog);
   const resolvedPlan = explicitPlan || resolvedByPriceId?.plan || null;
+  const stripeCustomerId = getStripeObjectId(subscription.customer);
+  const subscriptionStatus = normalizeStatus(subscription.status);
 
-  return subscriptionRepository.updateSubscriptionState(
+  const updated = await subscriptionRepository.updateSubscriptionState(
     barbershopId,
     {
       plan: resolvedPlan,
+      stripeCustomerId,
       stripeSubscriptionId: subscription.id,
       stripePriceId,
       stripePaymentMode: 'subscription',
       paymentMethod: 'card',
-      subscriptionStatus: normalizeStatus(subscription.status),
+      subscriptionStatus,
       currentPeriodStart: unixToDate(subscription.current_period_start),
       currentPeriodEnd: unixToDate(subscription.current_period_end),
       cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+      provider: 'stripe',
+      providerCustomerId: stripeCustomerId,
+      providerSubscriptionId: subscription.id,
+      nextDueDate: unixToDate(subscription.current_period_end),
+      canceledAt: subscription.canceled_at ? unixToDate(subscription.canceled_at) : null,
+      metadata: {
+        billingProvider: 'stripe',
+        stripeStatus: subscription.status || null,
+      },
       clearStripeSubscriptionId: false,
     },
     client
   );
+
+  logger.info(
+    {
+      event: 'stripe_subscription_synced',
+      barbershopId,
+      stripeCustomerId,
+      stripeSubscriptionId: subscription.id,
+      subscriptionStatus,
+      plan: resolvedPlan,
+      activated: isActivatingStatus(subscriptionStatus),
+    },
+    'Assinatura Stripe sincronizada'
+  );
+
+  return updated;
 };
 
 const updatePendingOneTimePayment = async ({
@@ -386,17 +448,19 @@ export const subscriptionService = {
       );
     }
 
-    if (!barbershop.stripe_subscription_id) {
+    const subscription = barbershop.stripe_subscription_id
+      ? await getSubscriptionData(stripe, barbershop.stripe_subscription_id)
+      : await findLatestCustomerSubscription(
+        stripe,
+        barbershop.stripe_customer_id || barbershop.provider_customer_id
+      );
+
+    if (!subscription) {
       throw new AppError(
         'Barbearia sem assinatura Stripe vinculada para sincronização manual.',
         400,
         'SUBSCRIPTION_NOT_FOUND'
       );
-    }
-
-    const subscription = await getSubscriptionData(stripe, barbershop.stripe_subscription_id);
-    if (!subscription) {
-      throw new AppError('Subscription não encontrada no Stripe', 404, 'SUBSCRIPTION_NOT_FOUND');
     }
 
     const updated = await updateFromStripeSubscription({
@@ -417,6 +481,14 @@ export const subscriptionService = {
   },
 
   async handleWebhook(rawBody, signature) {
+    logger.info(
+      {
+        event: 'stripe_webhook_received',
+        hasSignature: Boolean(signature),
+      },
+      'Webhook Stripe recebido'
+    );
+
     if (!process.env.STRIPE_WEBHOOK_SECRET) {
       throw new AppError(
         'Webhook Stripe não configurado no servidor',
@@ -430,6 +502,15 @@ export const subscriptionService = {
       rawBody,
       signature,
       process.env.STRIPE_WEBHOOK_SECRET
+    );
+
+    logger.info(
+      {
+        event: 'stripe_webhook_signature_valid',
+        stripeEventId: event.id,
+        eventType: event.type,
+      },
+      'Assinatura do webhook Stripe validada'
     );
 
     const priceCatalog = getStripePriceCatalog();
@@ -447,10 +528,11 @@ export const subscriptionService = {
       let barbershopId = null;
 
       if (CHECKOUT_COMPLETION_EVENTS.has(event.type)) {
-        const session = event.data.object;
+        const session = await getCheckoutSessionData(stripe, event.data.object);
         const metadataPlan = session.metadata?.plan;
-        const metadataBarbershopId = session.metadata?.barbershopId;
+        const metadataBarbershopId = session.metadata?.barbershopId || session.metadata?.tenantId;
         const metadataPaymentMethod = session.metadata?.paymentMethod;
+        const stripeCustomerId = getStripeObjectId(session.customer);
 
         if (!metadataBarbershopId) {
           throw new AppError('Webhook sem barbershopId no metadata', 400, 'WEBHOOK_METADATA_ERROR');
@@ -464,12 +546,14 @@ export const subscriptionService = {
             paymentMethod: metadataPaymentMethod || null,
             mode: session.mode,
             paymentStatus: session.payment_status || null,
+            stripeCustomerId,
           },
           'Processando webhook de checkout Stripe'
         );
 
         if (session.mode === 'subscription') {
-          const subscription = await getSubscriptionData(stripe, session.subscription);
+          const subscription = await getSubscriptionData(stripe, session.subscription) ||
+            await findLatestCustomerSubscription(stripe, stripeCustomerId);
           if (!subscription) {
             throw new AppError('Subscription não encontrada no Stripe', 400, 'SUBSCRIPTION_NOT_FOUND');
           }
@@ -522,15 +606,17 @@ export const subscriptionService = {
 
       if (SUBSCRIPTION_EVENT_TYPES.has(event.type)) {
         const subscription = event.data.object;
-        const customerId = typeof subscription.customer === 'string'
-          ? subscription.customer
-          : subscription.customer?.id;
+        const customerId = getStripeObjectId(subscription.customer);
 
         if (!customerId) {
           throw new AppError('Webhook sem customer id', 400, 'WEBHOOK_METADATA_ERROR');
         }
 
-        const barbershop = await subscriptionRepository.findByStripeCustomerId(customerId, client);
+        const metadataBarbershopId = subscription.metadata?.barbershopId || subscription.metadata?.tenantId;
+        const barbershop = metadataBarbershopId
+          ? await subscriptionRepository.getBarbershopBillingContext(metadataBarbershopId, client)
+          : await subscriptionRepository.findByStripeCustomerId(customerId, client);
+
         if (!barbershop) {
           throw new AppError('Barbearia não encontrada para customer Stripe', 404, 'BARBERSHOP_NOT_FOUND');
         }
@@ -563,12 +649,10 @@ export const subscriptionService = {
 
       if (INVOICE_EVENT_TYPES.has(event.type)) {
         const invoice = event.data.object;
-        const customerId = typeof invoice.customer === 'string'
-          ? invoice.customer
-          : invoice.customer?.id;
+        const customerId = getStripeObjectId(invoice.customer);
 
         if (customerId) {
-          const barbershop = await subscriptionRepository.findByStripeCustomerId(customerId, client);
+          let barbershop = await subscriptionRepository.findByStripeCustomerId(customerId, client);
 
           if (barbershop) {
             barbershopId = barbershop.id;
@@ -583,8 +667,32 @@ export const subscriptionService = {
                 'Evento de invoice ignorado para conta em fluxo one-time'
               );
             } else {
-              const subscription = await getSubscriptionData(stripe, invoice.subscription);
+              const subscription = await getSubscriptionData(stripe, invoice.subscription) ||
+                await findLatestCustomerSubscription(stripe, customerId);
               if (subscription) {
+                await updateFromStripeSubscription({
+                  barbershopId: barbershop.id,
+                  subscription,
+                  explicitPlan: subscription.metadata?.plan || null,
+                  priceCatalog,
+                  client,
+                });
+              }
+            }
+          } else {
+            const subscription = await getSubscriptionData(stripe, invoice.subscription) ||
+              await findLatestCustomerSubscription(stripe, customerId);
+            const metadataBarbershopId = subscription?.metadata?.barbershopId ||
+              subscription?.metadata?.tenantId;
+
+            if (metadataBarbershopId) {
+              barbershop = await subscriptionRepository.getBarbershopBillingContext(
+                metadataBarbershopId,
+                client
+              );
+
+              if (barbershop && subscription) {
+                barbershopId = barbershop.id;
                 await updateFromStripeSubscription({
                   barbershopId: barbershop.id,
                   subscription,
@@ -625,6 +733,7 @@ export const subscriptionService = {
       const safeStripeError = getStripeErrorMetadata(error);
       logger.error(
         {
+          event: 'stripe_webhook_error',
           err: error,
           eventType: event.type,
           stripeError: safeStripeError,

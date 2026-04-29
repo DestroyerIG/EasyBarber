@@ -235,6 +235,7 @@ export const subscriptionRepository = {
     const result = await db(client).query(
       `UPDATE barbershops
        SET plan = COALESCE($2::text, plan),
+           stripe_customer_id = COALESCE($22::text, stripe_customer_id),
            stripe_subscription_id = CASE
              WHEN $11::boolean THEN NULL
              ELSE COALESCE($3::text, stripe_subscription_id)
@@ -250,11 +251,11 @@ export const subscriptionRepository = {
              $12::text,
              provider,
              CASE
-               WHEN $3::text IS NOT NULL OR $9::text IS NOT NULL OR $13::text IS NOT NULL THEN 'stripe'
+               WHEN $3::text IS NOT NULL OR $9::text IS NOT NULL OR $13::text IS NOT NULL OR $22::text IS NOT NULL THEN 'stripe'
                ELSE provider
              END
            ),
-           provider_customer_id = COALESCE($13::text, provider_customer_id),
+           provider_customer_id = COALESCE($13::text, $22::text, provider_customer_id),
            provider_subscription_id = CASE
              WHEN $11::boolean THEN NULL
              ELSE COALESCE($14::text, provider_subscription_id, $3::text)
@@ -308,6 +309,7 @@ export const subscriptionRepository = {
         payload.lastPaymentDate ?? null,
         payload.canceledAt ?? null,
         normalizeJsonb(payload.metadata),
+        payload.stripeCustomerId ?? null,
       ]
     );
 

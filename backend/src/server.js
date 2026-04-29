@@ -165,7 +165,19 @@ app.post(
 );
 
 app.post(
+  `${API_V1}/webhook/stripe`,
+  express.raw({ type: 'application/json' }),
+  stripeWebhook
+);
+
+app.post(
   `${API_V1}/billing/webhook/stripe`,
+  express.raw({ type: 'application/json' }),
+  stripeWebhook
+);
+
+app.post(
+  `${API_V1}/billing/webhooks/stripe`,
   express.raw({ type: 'application/json' }),
   stripeWebhook
 );
@@ -241,7 +253,9 @@ const apiLimiter = rateLimit({
   skip: (req) =>
     req.method === 'OPTIONS' ||
     req.originalUrl.startsWith(`${API_V1}/subscriptions/webhook`) ||
+    req.originalUrl.startsWith(`${API_V1}/webhook/stripe`) ||
     req.originalUrl.startsWith(`${API_V1}/billing/webhook/stripe`) ||
+    req.originalUrl.startsWith(`${API_V1}/billing/webhooks/stripe`) ||
     req.originalUrl.startsWith(`${API_V1}/billing/webhooks/asaas`) ||
     req.originalUrl.startsWith(`${API_V1}/billing/webhook/asaas`),
   message: {
