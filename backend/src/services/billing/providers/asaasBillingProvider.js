@@ -21,6 +21,7 @@ export const asaasBillingProvider = {
   async createSubscription({
     barbershop,
     plan,
+    amount,
     idempotencyKey = null,
     onCustomerResolved = null,
   }) {
@@ -31,6 +32,7 @@ export const asaasBillingProvider = {
     return asaasService.createPixSubscription({
       barbershop,
       plan,
+      amount,
       idempotencyKey,
       onCustomerResolved,
     });

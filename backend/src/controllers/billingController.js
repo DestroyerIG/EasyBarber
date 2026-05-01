@@ -17,7 +17,8 @@ export const createCheckoutSession = async (req, res, next) => {
     const data = await billingService.createCheckoutSession(
       req.user.barbershopId,
       req.body.plan,
-      req.body.paymentMethod
+      req.body.paymentMethod,
+      req.body.couponCode
     );
 
     sendSuccess(res, data);

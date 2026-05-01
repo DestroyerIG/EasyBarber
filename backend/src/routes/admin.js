@@ -21,6 +21,12 @@ import {
   adminActionParamsSchema,
   adminActionBodySchema,
 } from '../controllers/adminController.js';
+import {
+  listCoupons,
+  createCoupon,
+  updateCoupon,
+  deleteCoupon,
+} from '../controllers/couponController.js';
 
 const router = express.Router();
 
@@ -41,5 +47,10 @@ router.get('/subscriptions', validate({ query: adminSubscriptionListQuerySchema 
 router.post('/subscriptions/:id/resync', validate({ params: adminActionParamsSchema, body: adminActionBodySchema }), resyncSubscription);
 
 router.get('/logs', validate({ query: adminAuditLogQuerySchema }), getAdminAuditLogs);
+
+router.get('/coupons', listCoupons);
+router.post('/coupons', createCoupon);
+router.patch('/coupons/:id', updateCoupon);
+router.delete('/coupons/:id', deleteCoupon);
 
 export default router;

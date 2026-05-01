@@ -5,6 +5,7 @@ import { subscriptionRepository } from '../repositories/subscriptionRepository.j
 import { asaasService } from '../integrations/asaas/service.js';
 import { asaasMapper } from '../integrations/asaas/mapper.js';
 import { subscriptionService } from './subscriptionService.js';
+import { couponService } from './couponService.js';
 import { billingProviderFactory } from './billing/billingProviderFactory.js';
 import {
   normalizeInternalSubscriptionStatus,
@@ -273,7 +274,7 @@ const resolveAsaasWebhookBarbershop = async (normalizedPayload, client = null) =
 };
 
 export const billingService = {
-  async createCheckoutSession(barbershopId, plan, paymentMethod) {
+  async createCheckoutSession(barbershopId, plan, paymentMethod, couponCode = null) {
     logger.info(
       {
         event: 'billing_checkout_start',
@@ -349,10 +350,15 @@ export const billingService = {
         };
       }
 
+      const PLAN_VALUES = { basico: 49.9, profissional: 99.9, premium: 199.9 };
+      const baseAmount = PLAN_VALUES[checkoutPlan] ?? PLAN_VALUES['basico'];
+      const { finalAmount, discount, coupon: appliedCoupon } = await couponService.validateAndApply(couponCode, baseAmount);
+
       const idempotencyKey = `pix-checkout:${barbershopId}:${plan}:${crypto.randomUUID()}`;
       const pixCheckout = await provider.createSubscription({
         barbershop,
         plan: checkoutPlan,
+        amount: finalAmount,
         idempotencyKey,
         onCustomerResolved: (customerId) =>
           subscriptionRepository.setAsaasCustomerId(barbershopId, customerId),
@@ -407,6 +413,15 @@ export const billingService = {
         qrCode: pixCheckout.pixData?.qrCode || null,
         pixCopyPaste: pixCheckout.pixData?.pixCopyPaste || null,
         expiresAt: pixCheckout.pixData?.expiresAt || null,
+        discount,
+        coupon: appliedCoupon
+          ? {
+              id: appliedCoupon.id,
+              code: appliedCoupon.code,
+              discountType: appliedCoupon.discount_type,
+              discountValue: appliedCoupon.discount_value,
+            }
+          : null,
       };
     } catch (error) {
       const traceCode = `billing-checkout:${crypto.randomUUID()}`;
