@@ -19,6 +19,13 @@ export interface StripeCheckoutSessionResponse {
   plan?: PlanId;
 }
 
+export interface AppliedCoupon {
+  id: string;
+  code: string;
+  discountType: 'percent' | 'fixed';
+  discountValue: number;
+}
+
 export interface PixCheckoutSessionResponse {
   provider: 'asaas';
   paymentId: string | null;
@@ -28,6 +35,8 @@ export interface PixCheckoutSessionResponse {
   qrCode: string | null;
   pixCopyPaste: string | null;
   expiresAt: string | null;
+  discount?: number;
+  coupon?: AppliedCoupon | null;
 }
 
 export type CheckoutSessionResponse =
@@ -67,12 +76,29 @@ export interface PixPaymentStatusResponse {
   confirmedDate?: string | null;
 }
 
+export interface CouponValidationResponse {
+  valid: true;
+  discount: number;
+  finalAmount: number;
+  originalAmount: number;
+}
+
 export const billingApi = {
   async createCheckoutSession(
     plan: PlanId,
-    paymentMethod: CheckoutPaymentMethod = 'card'
+    paymentMethod: CheckoutPaymentMethod = 'card',
+    couponCode?: string | null
   ): Promise<CheckoutSessionResponse> {
-    const response = await api.post('/billing/checkout/session', { plan, paymentMethod });
+    const response = await api.post('/billing/checkout/session', {
+      plan,
+      paymentMethod,
+      couponCode: couponCode || null,
+    });
+    return response.data;
+  },
+
+  async validateCoupon(plan: PlanId, code: string): Promise<CouponValidationResponse> {
+    const response = await api.post('/billing/validate-coupon', { plan, code });
     return response.data;
   },
 

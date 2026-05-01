@@ -9,6 +9,7 @@ import { useToast } from '@/components/Toast';
 import {
   billingApi,
   type CheckoutPaymentMethod,
+  type CouponValidationResponse,
   type PixCheckoutSessionResponse,
   type SubscriptionStatusResponse,
 } from '@/lib/billing';
@@ -51,6 +52,10 @@ function PagamentoContent() {
   const [loading, setLoading] = useState(true);
   const [processingMethod, setProcessingMethod] = useState<CheckoutPaymentMethod | null>(null);
   const [checkingPayment, setCheckingPayment] = useState(false);
+  const [couponCode, setCouponCode] = useState('');
+  const [couponPreview, setCouponPreview] = useState<CouponValidationResponse | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
   const searchParams = useSearchParams();
   const router = useRouter();
   const { user, loading: authLoading, logout } = useAuth();
@@ -62,6 +67,16 @@ function PagamentoContent() {
   );
   const plan = PLAN_MAP[selectedPlan];
   const pixQrCodeSource = normalizeQrCodeSource(pixCheckout?.qrCode || null);
+  const couponCodeNormalized = couponCode.trim().toUpperCase();
+  const appliedDiscount = couponPreview?.discount ?? pixCheckout?.discount ?? 0;
+  const originalAmount = couponPreview?.originalAmount ?? plan.price;
+  const finalAmount = couponPreview?.finalAmount
+    ?? (appliedDiscount > 0
+      ? Math.max(0.01, Number((plan.price - appliedDiscount).toFixed(2)))
+      : plan.price);
+  const hasDiscount = appliedDiscount > 0;
+  const appliedCouponCode = pixCheckout?.coupon?.code || (couponPreview ? couponCodeNormalized : null);
+  const couponLocked = Boolean(processingMethod || pixCheckout);
 
   const refreshBillingStatus = async () => {
     const status = await billingApi.getStatus();
@@ -110,11 +125,54 @@ function PagamentoContent() {
     };
   }, [authLoading, router, showToast, user?.role]);
 
+  useEffect(() => {
+    setCouponPreview(null);
+    setCouponError(null);
+  }, [selectedPlan]);
+
+  const handleCouponChange = (value: string) => {
+    setCouponCode(value.toUpperCase());
+    if (couponError) {
+      setCouponError(null);
+    }
+    if (couponPreview) {
+      setCouponPreview(null);
+    }
+  };
+
+  const clearCoupon = () => {
+    setCouponCode('');
+    setCouponPreview(null);
+    setCouponError(null);
+  };
+
+  const applyCoupon = async () => {
+    if (!couponCodeNormalized) {
+      setCouponError('Informe o código do cupom.');
+      return;
+    }
+
+    setApplyingCoupon(true);
+
+    try {
+      const result = await billingApi.validateCoupon(selectedPlan, couponCodeNormalized);
+      setCouponPreview(result);
+      setCouponError(null);
+      showToast('Cupom aplicado com sucesso.', 'success');
+    } catch (error: unknown) {
+      setCouponPreview(null);
+      setCouponError(getApiErrorMessage(error, 'Cupom inválido ou expirado.'));
+    } finally {
+      setApplyingCoupon(false);
+    }
+  };
+
   const startCheckout = async (paymentMethod: CheckoutPaymentMethod) => {
     setProcessingMethod(paymentMethod);
 
     try {
-      const session = await billingApi.createCheckoutSession(selectedPlan, paymentMethod);
+      const couponToApply = paymentMethod === 'pix' ? (couponCodeNormalized || null) : null;
+      const session = await billingApi.createCheckoutSession(selectedPlan, paymentMethod, couponToApply);
 
       if (session.provider === 'stripe') {
         window.location.assign(session.checkoutUrl);
@@ -122,6 +180,17 @@ function PagamentoContent() {
       }
 
       setPixCheckout(session);
+      if (session.coupon?.code && !couponCodeNormalized) {
+        setCouponCode(session.coupon.code);
+      }
+      if (typeof session.discount === 'number' && session.discount > 0 && !couponPreview) {
+        setCouponPreview({
+          valid: true,
+          discount: session.discount,
+          originalAmount: plan.price,
+          finalAmount: Math.max(0.01, Number((plan.price - session.discount).toFixed(2))),
+        });
+      }
       setBillingStatus((current) => current ? {
         ...current,
         subscriptionStatus: session.status,
@@ -231,7 +300,18 @@ function PagamentoContent() {
                 <h2 className="text-2xl font-black text-white">{plan.name}</h2>
                 <p className="text-sm text-gray-400">{plan.description}</p>
               </div>
-              <p className="text-2xl font-black text-primary">{formatCurrency(plan.price)}<span className="text-sm text-gray-400">/mês</span></p>
+                <div className="text-right">
+                  {hasDiscount && (
+                    <p className="text-xs text-gray-500 line-through">{formatCurrency(originalAmount)}</p>
+                  )}
+                  <p className="text-2xl font-black text-primary">
+                    {formatCurrency(finalAmount)}
+                    <span className="text-sm text-gray-400">/mês</span>
+                  </p>
+                  {hasDiscount && (
+                    <p className="text-xs font-semibold text-emerald-300">Desconto de {formatCurrency(appliedDiscount)}</p>
+                  )}
+                </div>
             </div>
           </div>
 
@@ -250,6 +330,52 @@ function PagamentoContent() {
           <p className="mt-2 text-sm text-gray-400">
             Status atual: <span className="font-semibold text-amber-200">{billingStatus?.subscriptionStatus || 'incomplete'}</span>
           </p>
+
+          <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-gray-200">Cupom de desconto (Pix)</p>
+              {couponCode && !couponLocked && (
+                <button
+                  type="button"
+                  onClick={clearCoupon}
+                  className="text-xs font-semibold text-gray-400 transition hover:text-white"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <input
+                value={couponCode}
+                onChange={(event) => handleCouponChange(event.target.value)}
+                disabled={couponLocked}
+                placeholder="PROMO20"
+                className="input flex-1"
+              />
+              <button
+                type="button"
+                onClick={applyCoupon}
+                disabled={couponLocked || applyingCoupon || !couponCodeNormalized}
+                className="rounded-lg border border-white/15 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {applyingCoupon ? 'Validando...' : 'Aplicar'}
+              </button>
+            </div>
+
+            {couponError && (
+              <p className="mt-2 text-xs text-red-300">{couponError}</p>
+            )}
+
+            {couponPreview && (
+              <div className="mt-3 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                <p>Desconto aplicado: {formatCurrency(couponPreview.discount)}</p>
+                <p>Total com desconto: {formatCurrency(couponPreview.finalAmount)} / mês</p>
+              </div>
+            )}
+
+            <p className="mt-2 text-[11px] text-gray-500">Aplicado apenas ao Pix via Asaas.</p>
+          </div>
 
           <div className="mt-6 grid gap-3">
             <button
@@ -276,6 +402,12 @@ function PagamentoContent() {
           {pixCheckout && (
             <div className="mt-6 rounded-xl border border-cyan-300/30 bg-cyan-500/5 p-4">
               <p className="text-sm font-semibold text-cyan-100">Aguardando confirmação do pagamento</p>
+
+              {appliedCouponCode && hasDiscount && (
+                <p className="mt-2 text-xs text-cyan-100">
+                  Cupom aplicado: <span className="font-semibold">{appliedCouponCode}</span> - desconto de {formatCurrency(appliedDiscount)}
+                </p>
+              )}
 
               {pixQrCodeSource && (
                 <img
