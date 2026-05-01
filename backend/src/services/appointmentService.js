@@ -9,7 +9,10 @@ import {
   ForbiddenError,
 } from '../utils/errors.js';
 import logger from '../utils/logger.js';
-import { getLocalDate } from '../utils/date.js';
+import {
+  generateAvailableTimeSlots,
+  getBarbershopBusinessSettings,
+} from './barbershopBusinessSettingsService.js';
 
 const VALID_TRANSITIONS = {
   confirmado: ['concluido', 'cancelado'],
@@ -148,29 +151,17 @@ export const appointmentService = {
   async getAvailableSlots(barbershopId, { barberId, date, serviceId }) {
     if (!barberId || !date) throw new ValidationError('barberId e date são obrigatórios');
 
-    let duration = 60;
+    const businessSettings = await getBarbershopBusinessSettings(barbershopId);
+    let duration = businessSettings.slotIntervalMinutes || 60;
     if (serviceId) {
       const service = await serviceRepository.findDuration(serviceId, barbershopId);
       if (service) duration = service.duration_minutes;
     }
 
     const bookedTimes = await appointmentRepository.getBookedSlots(barbershopId, barberId, date);
-
-    const slots = [];
-    const startHour = 9;
-    const endHour = 19;
-
-    for (let hour = startHour; hour < endHour; hour++) {
-      for (let minute = 0; minute < 60; minute += duration) {
-        const endMinutes = hour * 60 + minute + duration;
-        if (endMinutes > endHour * 60) continue;
-        const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
-        if (!bookedTimes.includes(time)) {
-          slots.push(time.substring(0, 5));
-        }
-      }
-    }
-
-    return slots;
+    return generateAvailableTimeSlots(businessSettings, date, {
+      serviceDurationMinutes: duration,
+      bookedTimes,
+    });
   },
 };

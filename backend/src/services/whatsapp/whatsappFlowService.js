@@ -41,6 +41,7 @@ import {
 import {
   getBarbershopBusinessSettings,
   isWithinBusinessHours,
+  isBusinessOpenOnDate,
   generateAvailableTimeSlots,
   formatBusinessHoursRange,
 } from '../barbershopBusinessSettingsService.js';
@@ -1116,6 +1117,11 @@ const handleChooseDateStep = async (phone, text, barbershopId, sessionData, conf
   }
 
   const selectedDate = availableDates[choice - 1];
+
+  if (!isBusinessOpenOnDate(businessSettings, selectedDate)) {
+    await sendWhatsAppMessage(phone, 'Hoje não estamos atendendo. Escolha outro dia.', sendContext);
+    return { ok: true };
+  }
 
   const bookedResult = await pool.query(
     `SELECT time FROM appointments WHERE barbershop_id=$1 AND barber_id=$2 AND date=$3 AND status!='cancelado'`,

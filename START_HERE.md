@@ -1,6 +1,6 @@
 # Start Here
 
-Guia de entrada rápida para qualquer dev que acabou de clonar o repositório.
+Guia de entrada para devs que acabaram de clonar o EasyBarber SaaS 2.0.
 
 ## Ordem Recomendada de Leitura
 
@@ -10,26 +10,32 @@ Guia de entrada rápida para qualquer dev que acabou de clonar o repositório.
 4. API_DOCS.md
 5. DEPLOY.md
 
-## Decisão Rápida de Ambiente
+## Decisão Rápida
 
-- Quer rodar local para desenvolver: QUICK_START.md + INSTALL.md.
-- Quer preparar banco e migrations manualmente: POSTGRESQL_SETUP.md.
-- Quer subir em produção: DEPLOY.md.
-- Quer entender endpoints e contratos: API_DOCS.md.
+- Rodar local para desenvolver: QUICK_START.md.
+- Instalar tudo com mais contexto: INSTALL.md.
+- Preparar ou corrigir banco: POSTGRESQL_SETUP.md.
+- Entender endpoints REST: API_DOCS.md.
+- Publicar em produção: DEPLOY.md.
+- Diagnosticar falhas: TROUBLESHOOTING.md.
 
-## Checklist de Onboarding Técnico
+## Checklist de Onboarding
 
-- Instalar Node.js 20+, npm, PostgreSQL e Git.
-- Configurar backend/.env e frontend/.env.local.
-- Criar banco PostgreSQL com UTF-8.
-- Executar SQL base + migrations na ordem recomendada.
+- Instalar Node.js 20+, npm 10+, PostgreSQL 14+ e Git.
+- Instalar dependências com `npm run install:all`.
+- Criar `backend/.env` e `frontend/.env.local` a partir dos exemplos.
+- Configurar Supabase Auth: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` e redirects.
+- Criar banco PostgreSQL em UTF-8 e habilitar `pgcrypto`.
+- Aplicar `database.sql` e as migrations atuais até `migration_v18_asaas_customer_id.sql`.
 - Subir backend e frontend.
-- Validar /health e fluxo de login.
+- Validar `GET /health`, cadastro, confirmação de e-mail e login.
 
 ## Primeiros Comandos
 
 ```bash
 npm run install:all
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env.local
 ```
 
 ```bash
@@ -42,17 +48,23 @@ cd frontend && npm run dev
 
 ## Atenções Importantes
 
-- A API oficial está em /api/v1.
-- O backend exige JWT_SECRET e DATABASE_URL para iniciar.
-- O arquivo database.sql sozinho não cobre todas as colunas/tabelas exigidas pelo módulo de WhatsApp e deve ser complementado por migrations.
-- Execute as migrations ate a versao mais recente (atualmente migration_v15.sql), na ordem descrita em POSTGRESQL_SETUP.md.
+- A API canônica é `/api/v1`; chamadas para `/api/*` são redirecionadas com HTTP 301.
+- Supabase Auth é obrigatório para cadastro, confirmação de e-mail e login.
+- `AUTH_PROVIDER_MODE` é obsoleto e deve ser removido de ambientes novos.
+- SMTP é opcional e não é usado para verificação de autenticação.
+- `database.sql` sozinho não cobre o schema atual; aplique todas as migrations listadas em POSTGRESQL_SETUP.md.
+- O `docker-compose.yml` e `setup.ps1` atuais aplicam automaticamente até `migration_v15.sql`; em bancos criados por eles, aplique v16, v17 e v18 manualmente até esses scripts serem atualizados.
 
 ## Mapa de Docs
 
-- Setup completo: INSTALL.md
-- Setup rápido: QUICK_START.md
-- Banco e migrations: POSTGRESQL_SETUP.md
-- Estrutura técnica: PROJECT_STRUCTURE.md
-- API REST: API_DOCS.md
-- Deploy: DEPLOY.md
-- Diagnóstico de falhas: TROUBLESHOOTING.md
+- README.md: visão geral, stack, fluxos e comandos principais.
+- QUICK_START.md: caminho curto para subir local.
+- INSTALL.md: instalação completa.
+- POSTGRESQL_SETUP.md: banco, migrations e comandos SQL.
+- PROJECT_STRUCTURE.md: organização técnica do repositório.
+- API_DOCS.md: endpoints, auth, respostas e webhooks.
+- PLANOS.md: planos, features e status de assinatura.
+- WHATSAPP_BOT.md: integração Evolution API e bot.
+- DEPLOY.md: produção, envs, build, webhooks e rollback.
+- TROUBLESHOOTING.md: diagnóstico de erros comuns.
+- FIX_CADASTRO.md: checklist rápido para problemas de cadastro/login.

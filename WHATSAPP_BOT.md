@@ -1,192 +1,140 @@
 # WhatsApp Bot
 
-Guia técnico do módulo de WhatsApp do projeto.
+Guia técnico do módulo WhatsApp.
 
-## 1. Tecnologia
+## Arquitetura
 
 Implementação atual:
 
-- Backend EasyBarber consumindo Evolution API v1 por HTTP.
-- Evolution API hospedada como serviço externo (ex.: Render).
-- Frontend acessando apenas endpoints internos do backend EasyBarber.
+- Backend EasyBarber consome Evolution API v1 por HTTP.
+- Evolution API roda como serviço externo.
+- Frontend chama apenas endpoints internos do backend.
 
-Arquitetura obrigatória:
+Fluxo:
 
-Frontend -> Backend EasyBarber -> Evolution API v1 (externa)
+```text
+Frontend -> Backend EasyBarber -> Evolution API v1
+```
 
-## 2. Pré-requisitos
+## Pré-requisitos
 
 - Backend rodando.
-- Banco com migration_v3.sql aplicada.
-- Evolution API v1 rodando em URL pública.
-- Variáveis da Evolution configuradas no backend/.env.
+- Banco com migrations até `migration_v18_asaas_customer_id.sql`.
+- Plano com feature `whatsapp_automation` liberada.
+- Evolution API v1 acessível por URL pública.
+- Webhook configurado para o backend.
 
-Exemplo:
+## Variáveis
 
 ```env
 WHATSAPP_PROVIDER=evolution
-EVOLUTION_API_URL=https://sua-evolution.onrender.com
+EVOLUTION_API_URL=https://sua-evolution.com
 EVOLUTION_API_KEY=sua_chave
 EVOLUTION_INSTANCE_NAME=easybarber
 EVOLUTION_WEBHOOK_URL=https://sua-api.com/api/v1/whatsapp/webhook
 EVOLUTION_API_TIMEOUT_MS=10000
-EVOLUTION_WEBHOOK_EVENTS=MESSAGES_UPSERT,CONNECTION_UPDATE
-# Mapeamento explicito instance -> barbershopId (fallback legado temporario)
-WHATSAPP_INSTANCE_BARBERSHOP_MAP={"easybarber":"<barbershop_uuid>"}
+WHATSAPP_WEBHOOK_BODY_LIMIT=6mb
 WHATSAPP_SESSION_TIMEOUT_MS=1800000
+WHATSAPP_INSTANCE_BARBERSHOP_MAP=
 ```
 
-Recomendacao de eventos (producao):
+`WHATSAPP_INSTANCE_BARBERSHOP_MAP` aceita JSON ou `key=value`, mas é fallback legado. A fonte de verdade multi-tenant é `barbershops.whatsapp_instance_name`.
 
-- Ativar somente `MESSAGES_UPSERT` e `CONNECTION_UPDATE`.
-- Manter `webhook_by_events=true`.
-- Manter `webhook_base64=false`.
-- Nao habilitar `MESSAGES_SET` (evento pesado, desnecessario para o fluxo principal do bot e causa 413 em payloads grandes).
-- Fonte de verdade para tenant por webhook: `barbershops.whatsapp_instance_name`.
-- `WHATSAPP_INSTANCE_BARBERSHOP_MAP` deve ser mantida apenas como fallback de transicao (deprecated).
+## Webhooks Evolution
 
-## 3. Fluxo de Conexão
+Endpoints aceitos:
 
-1. Inicie backend EasyBarber.
-2. Abra dashboard e acesse módulo WhatsApp.
-3. Chame conexão via endpoint interno /whatsapp/connect.
-4. Consulte /whatsapp/status.
-5. Se status for pairing, consulte /whatsapp/qrcode e escaneie no celular.
+- `POST /api/v1/whatsapp/webhook`
+- `POST /api/v1/whatsapp/webhook/:event`
 
-Status possíveis retornados pela API:
+Eventos recomendados:
 
-- unavailable
-- disconnected
-- pairing
-- connected
-- error
+- `MESSAGES_UPSERT`
+- `CONNECTION_UPDATE`
 
-## 4. Endpoints
+Configurações recomendadas:
 
-Prefixo: /api/v1/whatsapp
+- `webhook_by_events=true`
+- `webhook_base64=false`
+- Não habilitar `MESSAGES_SET` em produção.
 
-Público:
+O backend ignora eventos pesados como `messages-set` antes do parser JSON para evitar payloads grandes.
 
-- POST /webhook (simulador local + webhook da Evolution)
+## Fluxo de Conexão
 
-Protegidos (auth + tenant role + feature whatsapp_automation):
+1. Usuário acessa `/dashboard/whatsapp`.
+2. Frontend chama `POST /whatsapp/connect` ou `POST /whatsapp/initialize`.
+3. Frontend consulta `GET /whatsapp/status`.
+4. Se necessário, consulta `GET /whatsapp/qrcode` ou `GET /whatsapp/qr`.
+5. Usuário escaneia o QR Code no celular.
 
-- GET /status
-- POST /connect
-- GET /qrcode
-- POST /disconnect
-- POST /send
-- GET /config
-- PUT /config
-- POST /config/reset
-- GET /config/menu
-- POST /config/menu
-- PUT /config/menu/:id
-- DELETE /config/menu/:id
-- PUT /config/menu-reorder
-- POST /config/menu/reset
+Status retornados podem incluir:
 
-Compatibilidade legada temporária:
+- `unavailable`
+- `disconnected`
+- `pairing`
+- `connected`
+- `error`
 
-- GET /qr (alias)
-- POST /logout (alias)
-- POST /restart (alias)
+## Endpoints
 
-## 5. Configuração de Mensagens
+Prefixo: `/api/v1/whatsapp`.
 
-A tabela whatsapp_bot_config armazena mensagens customizáveis.
+Públicos para webhook:
 
-Campos principais usados no fluxo:
+- `POST /webhook`
+- `POST /webhook/:event`
 
-- welcome_header
-- ask_name_message
-- confirmation_message
-- reminder_message
-- invalid_option_message
-- end_session_message
-- promotions_message
-- instagram_message
+Protegidos por auth, role tenant e feature `whatsapp_automation`:
 
-Sem migration_v3.sql, parte desses campos pode não existir e o módulo falha.
+- `GET /status`
+- `POST /connect`
+- `POST /initialize`
+- `GET /qrcode`
+- `GET /qr`
+- `POST /disconnect`
+- `POST /logout`
+- `POST /restart`
+- `POST /send`
+- `POST /test-send`
+- `POST /debug-send`
+- `POST /simulator/message`
+- `GET /config`
+- `PUT /config`
+- `POST /config/reset`
+- `GET /config/menu`
+- `POST /config/menu`
+- `PUT /config/menu/:id`
+- `DELETE /config/menu/:id`
+- `PUT /config/menu-reorder`
+- `POST /config/menu/reset`
 
-## 6. Menu Dinâmico
+## Configuração de Mensagens e Menu
 
-Tabela: whatsapp_menu_options
+O módulo permite:
 
-- Opções do sistema (type=system).
-- Opções customizadas (type=custom).
-- Máximo total: 15 opções.
-- Reordenação por endpoint menu-reorder.
+- Mensagem de saudação.
+- Mensagens automáticas por etapa.
+- Menu dinâmico.
+- Reordenação de opções.
+- Reset para configuração padrão.
 
-## 7. Sessão Conversacional
+## Simulador
 
-Tabela: whatsapp_sessions
+Endpoint:
 
-- Guarda etapa atual e contexto da conversa.
-- Timeout padrão: 30 minutos (WHATSAPP_SESSION_TIMEOUT_MS).
+- `POST /api/v1/whatsapp/simulator/message`
 
-## 8. Lembretes Automáticos
+Uso esperado:
 
-Agendador em cronService:
+- Testar fluxos sem depender de mensagem real.
+- Validar contexto da barbearia autenticada.
+- Reproduzir respostas do bot no dashboard.
 
-- roda a cada 10 minutos.
-- busca atendimentos para ~2h à frente.
-- envia mensagem de lembrete e marca reminder_sent=true.
+## Troubleshooting
 
-## 9. Restrição por Plano
-
-As rotas protegidas de WhatsApp usam feature gate whatsapp_automation.
-
-Na configuração atual:
-
-- Plano básico: sem acesso à automação de WhatsApp.
-- Plano profissional/premium: acesso liberado.
-
-## 10. Troubleshooting Rápido
-
-### Status unavailable
-
-- Verifique EVOLUTION_API_URL e EVOLUTION_API_KEY.
-- Verifique se a Evolution API está online.
-
-### QR não aparece (pairing)
-
-- Verifique EVOLUTION_INSTANCE_NAME.
-- Consulte GET /qrcode diretamente.
-- Verifique logs do backend e do serviço Evolution.
-
-### Erro ao salvar configuração
-
-- Provável schema incompleto (migration_v3 ausente).
-
-### Bot desconecta
-
-- Reconecte via endpoint /connect.
-- Refaça pareamento QR.
-
-### Mensagens não enviadas
-
-- Verifique status connected.
-- Teste envio via endpoint /send.
-- Verifique indisponibilidade da Evolution API.
-
-### Webhook ambiguo, @lid, grupos e auto-destino
-
-- O backend bloqueia resposta automaticamente quando o webhook nao identifica um telefone confiavel do cliente.
-- Eventos com identificadores bloqueados (@lid, @g.us, @broadcast, @newsletter) sao ignorados por seguranca.
-- Se o destino extraido coincidir com o numero da instancia conectada, o fluxo retorna self_target e nao envia mensagem.
-- Em payload ambiguo, o fluxo retorna ambiguous_phone e apenas registra logs para diagnostico.
-
-### Erro 413 em webhook
-
-- Causa mais comum: Evolution enviando eventos pesados como `MESSAGES_SET`.
-- Ajuste a instancia para enviar apenas `MESSAGES_UPSERT` e `CONNECTION_UPDATE`.
-- Verifique se `webhook_by_events=true` e `webhook_base64=false`.
-- Se a instancia ja existia com eventos antigos, reinitialize/reconecte para reaplicar a configuracao de eventos.
-
-## 11. Segurança Operacional
-
-- Controle acesso ao painel de WhatsApp por role e assinatura.
-- Não exponha EVOLUTION_API_KEY.
-- Evite apontar múltiplos backends para a mesma instância sem coordenação.
-- Priorize webhooks com JID direto do cliente; quando o payload vier ambiguo, a resposta deve permanecer bloqueada.
+- QR Code não aparece: valide `EVOLUTION_API_URL`, `EVOLUTION_API_KEY` e conectividade da Evolution.
+- Webhook não processa: confirme URL pública, evento `MESSAGES_UPSERT` e logs do backend.
+- Tenant incorreto: confira `barbershops.whatsapp_instance_name`.
+- Payload 413: remova eventos pesados e aumente `WHATSAPP_WEBHOOK_BODY_LIMIT` apenas se necessário.
+- Feature bloqueada: confira plano/status em PLANOS.md.

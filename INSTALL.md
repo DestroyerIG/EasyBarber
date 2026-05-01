@@ -1,6 +1,6 @@
 # Instalação Completa
 
-Guia completo para instalação local do projeto em Linux, macOS ou Windows.
+Guia completo para instalar o EasyBarber SaaS 2.0 em ambiente local.
 
 ## 1. Pré-requisitos
 
@@ -8,8 +8,9 @@ Guia completo para instalação local do projeto em Linux, macOS ou Windows.
 - npm 10+
 - PostgreSQL 14+ (recomendado 16)
 - Git
+- Projeto Supabase com Auth habilitado
 
-Verificações:
+Verifique:
 
 ```bash
 node -v
@@ -18,7 +19,7 @@ psql --version
 git --version
 ```
 
-## 2. Clonar o Repositório
+## 2. Clonar
 
 ```bash
 git clone <url-do-repositorio>
@@ -27,20 +28,18 @@ cd Barberpro-saas-2.0
 
 ## 3. Instalar Dependências
 
-Opção única:
-
 ```bash
 npm run install:all
 ```
 
-Ou manual:
+Equivalente manual:
 
 ```bash
 cd backend && npm install
 cd ../frontend && npm install
 ```
 
-## 4. Configurar Arquivos de Ambiente
+## 4. Variáveis de Ambiente
 
 ### Backend
 
@@ -48,32 +47,32 @@ cd ../frontend && npm install
 cp backend/.env.example backend/.env
 ```
 
-Editar backend/.env com no mínimo:
+Campos mínimos:
 
 ```env
 PORT=5000
 NODE_ENV=development
 LOG_LEVEL=info
 DATABASE_URL=postgresql://postgres:senha@localhost:5432/barberpro
-JWT_SECRET=troque_esta_chave
+JWT_SECRET=troque_por_uma_chave_forte
 FRONTEND_URL=http://localhost:3000
 APP_URL=http://localhost:3000
-AUTH_PROVIDER_MODE=dual
-EMAIL_VERIFICATION_TTL_MINUTES=60
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_ANON_KEY=<anon-key>
 SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 AUTH_SUPABASE_REDIRECT_TO=http://localhost:3000/auth/confirm
-
-# fallback legado (AUTH_PROVIDER_MODE=legacy)
-SMTP_HOST=smtp.seudominio.com
-SMTP_PORT=587
-SMTP_USER=usuario_smtp
-SMTP_PASS=senha_smtp
-SMTP_FROM="EasyBarber <no-reply@seudominio.com>"
 ```
 
-Observacao: `SUPABASE_SERVICE_ROLE_KEY` e obrigatoria para scripts administrativos de sincronizacao (`seed:auth-admin` e `seed:system-users`).
+O `SUPABASE_SERVICE_ROLE_KEY` é necessário para scripts administrativos como `seed:auth-admin` e `seed:system-users`.
+
+Variáveis opcionais por módulo:
+
+- Stripe: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` e price IDs.
+- Asaas Pix: `ASAAS_API_KEY`, `ASAAS_BASE_URL`, `ASAAS_WEBHOOK_TOKEN`.
+- WhatsApp: `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE_NAME`, `EVOLUTION_WEBHOOK_URL`.
+- SMTP: opcional; não é usado para confirmação de autenticação no fluxo atual.
+
+`AUTH_PROVIDER_MODE` é obsoleto. Supabase Auth é obrigatório.
 
 ### Frontend
 
@@ -81,163 +80,109 @@ Observacao: `SUPABASE_SERVICE_ROLE_KEY` e obrigatoria para scripts administrativ
 cp frontend/.env.example frontend/.env.local
 ```
 
-Configuração mínima:
+Campos mínimos:
 
 ```env
+BACKEND_API_URL=http://localhost:5000/api/v1
 NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1
-NEXT_PUBLIC_WHATSAPP_CONTACT_URL=https://wa.me/5500000000000?text=Ola
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
 ```
 
-## 5. Preparar Banco de Dados
+## 5. Banco PostgreSQL
 
-### 5.1 Criar banco UTF-8
-
-Linux/macOS:
+Crie o banco:
 
 ```bash
 createdb -h localhost -p 5432 -U postgres --encoding=UTF8 barberpro
-```
-
-Windows PowerShell:
-
-```powershell
-createdb -h localhost -p 5432 -U postgres --encoding=UTF8 barberpro
-```
-
-### 5.2 Garantir extensão para UUID
-
-```bash
 psql -h localhost -p 5432 -U postgres -d barberpro -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
 ```
 
-### 5.3 Aplicar schema e migrations
+Aplique os arquivos SQL nesta ordem:
 
-Sequência recomendada para ambiente novo:
-
-1. backend/src/config/database.sql
-2. backend/src/config/migration_v3.sql
-3. backend/src/config/migration_v4.sql
-4. backend/src/config/migration_v5.sql
-5. backend/src/config/migration_v6.sql
-6. backend/src/config/migration_v7.sql
-7. backend/src/config/migration_v8.sql
-8. backend/src/config/migration_v9.sql
-9. backend/src/config/migration_v10.sql
-10. backend/src/config/migration_v11.sql
+1. `backend/src/config/database.sql`
+2. `backend/src/config/migration_v3.sql`
+3. `backend/src/config/migration_v4.sql`
+4. `backend/src/config/migration_v5.sql`
+5. `backend/src/config/migration_v6.sql`
+6. `backend/src/config/migration_v7.sql`
+7. `backend/src/config/migration_v8.sql`
+8. `backend/src/config/migration_v9.sql`
+9. `backend/src/config/migration_v10.sql`
+10. `backend/src/config/migration_v11.sql`
+11. `backend/src/config/migration_v12.sql`
+12. `backend/src/config/migration_v13.sql`
+13. `backend/src/config/migration_v14.sql`
+14. `backend/src/config/migration_v15.sql`
+15. `backend/src/config/migration_v16_supabase_only_auth.sql`
+16. `backend/src/config/migration_v17_subscription_access_gate.sql`
+17. `backend/src/config/migration_v18_asaas_customer_id.sql`
 
 Linux/macOS:
 
 ```bash
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/database.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v3.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v7.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v10.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v11.sql
+for file in backend/src/config/database.sql backend/src/config/migration_v3.sql backend/src/config/migration_v4.sql backend/src/config/migration_v5.sql backend/src/config/migration_v6.sql backend/src/config/migration_v7.sql backend/src/config/migration_v8.sql backend/src/config/migration_v9.sql backend/src/config/migration_v10.sql backend/src/config/migration_v11.sql backend/src/config/migration_v12.sql backend/src/config/migration_v13.sql backend/src/config/migration_v14.sql backend/src/config/migration_v15.sql backend/src/config/migration_v16_supabase_only_auth.sql backend/src/config/migration_v17_subscription_access_gate.sql backend/src/config/migration_v18_asaas_customer_id.sql; do
+  psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f "$file"
+done
 ```
 
-Windows PowerShell:
+PowerShell:
 
 ```powershell
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\database.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v3.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v4.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v5.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v6.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v7.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v8.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v9.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v10.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v11.sql
+$files = @(
+  "backend/src/config/database.sql",
+  "backend/src/config/migration_v3.sql",
+  "backend/src/config/migration_v4.sql",
+  "backend/src/config/migration_v5.sql",
+  "backend/src/config/migration_v6.sql",
+  "backend/src/config/migration_v7.sql",
+  "backend/src/config/migration_v8.sql",
+  "backend/src/config/migration_v9.sql",
+  "backend/src/config/migration_v10.sql",
+  "backend/src/config/migration_v11.sql",
+  "backend/src/config/migration_v12.sql",
+  "backend/src/config/migration_v13.sql",
+  "backend/src/config/migration_v14.sql",
+  "backend/src/config/migration_v15.sql",
+  "backend/src/config/migration_v16_supabase_only_auth.sql",
+  "backend/src/config/migration_v17_subscription_access_gate.sql",
+  "backend/src/config/migration_v18_asaas_customer_id.sql"
+)
+foreach ($file in $files) {
+  psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f $file
+}
 ```
 
-Observação:
-
-- migration_v2.sql é migração de compatibilidade com schema legado e não costuma ser necessária para banco novo.
-
-## 6. Subir Ambiente de Desenvolvimento
-
-Terminal 1:
-
-```bash
-cd backend
-npm run dev
-```
-
-Terminal 2:
-
-```bash
-cd frontend
-npm run dev
-```
-
-## 7. Validar Setup
-
-- Frontend: http://localhost:3000
-- Backend: http://localhost:5000
-- Health check: http://localhost:5000/health
-
-Teste básico da API:
-
-```bash
-curl http://localhost:5000/health
-```
-
-Para acesso rápido no ambiente local, execute no diretório backend:
-
-```bash
-npm run seed:system-users
-```
-
-Para sincronizar somente o admin da plataforma:
-
-```bash
-npm run seed:auth-admin
-```
-
-As credenciais e permissões dos usuários padrão de desenvolvimento estão centralizadas em README.md, na seção "Usuários de teste (ambiente local)".
-
-## 8. Executar Testes
+## 6. Executar
 
 Backend:
 
 ```bash
 cd backend
-npm test
+npm run dev
 ```
 
-Frontend lint:
+Frontend:
 
 ```bash
 cd frontend
-npm run lint
+npm run dev
 ```
 
-## 9. Setup com Docker (Opcional)
+## 7. Seeds Administrativos
+
+Depois de configurar Supabase e banco:
 
 ```bash
-docker compose up -d
+npm run seed:auth-admin
+npm run seed:system-users
 ```
 
-O compose atual aplica database.sql + migration_v3..v11 no primeiro bootstrap do volume.
-Se o volume do PostgreSQL já existia antes dessa configuração, aplique as migrations manualmente ou recrie o volume.
+## 8. Docker
 
-## 10. Ordem Correta de Setup (Resumo)
+```bash
+docker compose up --build
+```
 
-1. Clonar repositório.
-2. Instalar dependências.
-3. Configurar backend/.env e frontend/.env.local.
-4. Criar banco e aplicar SQL/migrations.
-5. Subir backend.
-6. Subir frontend.
-7. Validar /health, fluxo de cadastro, verificação de e-mail e login.
-
-## Documentos Relacionados
-
-- Setup rápido: QUICK_START.md
-- Banco e migrations detalhadas: POSTGRESQL_SETUP.md
-- Problemas frequentes: TROUBLESHOOTING.md
+Observação: o compose atual inicializa o banco até `migration_v15.sql`; aplique v16-v18 manualmente em bancos criados por ele.

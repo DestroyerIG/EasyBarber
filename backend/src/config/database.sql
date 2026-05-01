@@ -300,7 +300,9 @@ CREATE TABLE IF NOT EXISTS barbershop_settings (
     opening_time TIME NOT NULL DEFAULT '09:00:00',
     closing_time TIME NOT NULL DEFAULT '20:00:00',
     slot_interval_minutes INTEGER NOT NULL DEFAULT 30
-        CHECK (slot_interval_minutes IN (15, 20, 30, 45, 60)),
+        CHECK (slot_interval_minutes IN (0, 15, 20, 30, 45, 60, 90, 120)),
+    dias_abertos TEXT[] NOT NULL DEFAULT ARRAY['seg','ter','qua','qui','sex']::TEXT[]
+        CHECK (dias_abertos <@ ARRAY['seg','ter','qua','qui','sex','sab','dom']::TEXT[] AND cardinality(dias_abertos) > 0),
     allow_walkins BOOLEAN NOT NULL DEFAULT true,
     auto_confirm_appointments BOOLEAN NOT NULL DEFAULT false,
     email_reminders BOOLEAN NOT NULL DEFAULT true,

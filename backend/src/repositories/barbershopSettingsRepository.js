@@ -2,6 +2,7 @@ import { BaseRepository } from './BaseRepository.js';
 
 const mapRowToSettings = (row) => ({
   whatsappInstanceName: row.whatsapp_instance_name,
+  diasAbertos: row.dias_abertos,
   openingTime: row.opening_time,
   closingTime: row.closing_time,
   slotIntervalMinutes: row.slot_interval_minutes,
@@ -44,6 +45,7 @@ const mapRowToOperationalSettings = (row) => ({
   openingTime: row.opening_time,
   closingTime: row.closing_time,
   slotIntervalMinutes: row.slot_interval_minutes,
+  diasAbertos: row.dias_abertos,
   allowWalkins: row.allow_walkins,
   autoConfirmAppointments: row.auto_confirm_appointments,
   timezone: row.timezone,
@@ -61,6 +63,7 @@ class BarbershopSettingsRepository extends BaseRepository {
          COALESCE(to_char(s.opening_time, 'HH24:MI'), '09:00') AS opening_time,
          COALESCE(to_char(s.closing_time, 'HH24:MI'), '20:00') AS closing_time,
          COALESCE(s.slot_interval_minutes, 30) AS slot_interval_minutes,
+         COALESCE(s.dias_abertos, ARRAY['seg','ter','qua','qui','sex']::text[]) AS dias_abertos,
          COALESCE(s.allow_walkins, true) AS allow_walkins,
          COALESCE(s.auto_confirm_appointments, false) AS auto_confirm_appointments,
          COALESCE(s.email_reminders, true) AS email_reminders,
@@ -86,6 +89,7 @@ class BarbershopSettingsRepository extends BaseRepository {
          to_char(s.opening_time, 'HH24:MI') AS opening_time,
          to_char(s.closing_time, 'HH24:MI') AS closing_time,
          s.slot_interval_minutes,
+         COALESCE(s.dias_abertos, ARRAY['seg','ter','qua','qui','sex']::text[]) AS dias_abertos,
          s.allow_walkins,
          s.auto_confirm_appointments,
          COALESCE(NULLIF(to_jsonb(s) ->> 'timezone', ''), NULLIF(to_jsonb(b) ->> 'timezone', '')) AS timezone
@@ -355,17 +359,19 @@ class BarbershopSettingsRepository extends BaseRepository {
            opening_time,
            closing_time,
            slot_interval_minutes,
+           dias_abertos,
            allow_walkins,
            auto_confirm_appointments,
            email_reminders,
            whatsapp_reminders,
            google_calendar_enabled,
            custom_webhook_url
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (barbershop_id) DO UPDATE SET
            opening_time = EXCLUDED.opening_time,
            closing_time = EXCLUDED.closing_time,
            slot_interval_minutes = EXCLUDED.slot_interval_minutes,
+           dias_abertos = EXCLUDED.dias_abertos,
            allow_walkins = EXCLUDED.allow_walkins,
            auto_confirm_appointments = EXCLUDED.auto_confirm_appointments,
            email_reminders = EXCLUDED.email_reminders,
@@ -378,6 +384,7 @@ class BarbershopSettingsRepository extends BaseRepository {
           payload.openingTime,
           payload.closingTime,
           payload.slotIntervalMinutes,
+          payload.diasAbertos,
           payload.allowWalkins,
           payload.autoConfirmAppointments,
           payload.emailReminders,

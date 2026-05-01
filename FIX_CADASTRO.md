@@ -1,66 +1,74 @@
 # Correção Rápida para Falha no Cadastro
 
-Guia objetivo para quando o cadastro/login falha no ambiente local.
+Checklist objetivo para quando cadastro, confirmação de e-mail ou login falham no ambiente local.
 
 ## Sintomas
 
-- Tela de cadastro retorna erro genérico.
-- Backend responde 500/401/400 sem concluir fluxo.
-- Dashboard não abre após registrar conta.
+- Cadastro retorna erro genérico.
+- Link de confirmação abre, mas a conta não é ativada.
+- Login retorna 401 após cadastro.
+- Dashboard não abre depois da autenticação.
 
-## Checklist de Correção
+## Checklist
 
-1. Verificar backend/.env com DATABASE_URL e JWT_SECRET válidos.
-2. Verificar frontend/.env.local com NEXT_PUBLIC_API_URL apontando para /api/v1.
-3. Verificar se banco foi criado com UTF-8 e extensão pgcrypto.
-4. Verificar se migration_v3..v9 foram aplicadas (não apenas database.sql).
-5. Verificar variáveis SMTP_* e APP_URL para envio de verificação por e-mail.
-
-## Comandos de Verificação
-
-### Backend health
+1. Confirme que o backend inicia sem erro:
 
 ```bash
 curl http://localhost:5000/health
 ```
 
-### Teste de conexão DB
+2. Revise `backend/.env`:
 
-```bash
-psql -h localhost -p 5432 -U postgres -d barberpro -c "SELECT 1;"
+```env
+DATABASE_URL=postgresql://postgres:senha@localhost:5432/barberpro
+JWT_SECRET=uma_chave_forte_com_32_ou_mais_caracteres
+FRONTEND_URL=http://localhost:3000
+APP_URL=http://localhost:3000
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_ANON_KEY=<anon-key>
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+AUTH_SUPABASE_REDIRECT_TO=http://localhost:3000/auth/confirm
 ```
 
-### Verificar tabela crítica do módulo atual
+3. Revise `frontend/.env.local`:
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1
+BACKEND_API_URL=http://localhost:5000/api/v1
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
+```
+
+4. No Supabase, confira:
+
+- Email confirmation habilitado conforme o ambiente.
+- Redirect URL `http://localhost:3000/auth/confirm` cadastrada.
+- Chaves anon/service role corretas.
+
+5. Confirme schema completo:
 
 ```bash
+psql -h localhost -p 5432 -U postgres -d barberpro -c "SELECT to_regclass('public.auth_signup_pending');"
+psql -h localhost -p 5432 -U postgres -d barberpro -c "SELECT to_regclass('public.billing_events');"
 psql -h localhost -p 5432 -U postgres -d barberpro -c "SELECT to_regclass('public.whatsapp_menu_options');"
 ```
 
-## Reaplicar Schema Completo (Banco Novo)
+## Pontos que Mais Quebram
 
-```bash
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/database.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v3.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v7.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
-```
-
-## Pontos que Mais Quebram Cadastro
-
-- DATABASE_URL com senha/host incorretos.
-- JWT_SECRET ausente.
-- API URL do frontend sem /api/v1.
-- Banco criado sem migrations adicionais (v3..v9).
-- SMTP_* não configuradas corretamente para envio de e-mail de verificação.
+- `DATABASE_URL` incorreto.
+- `JWT_SECRET` ausente.
+- Frontend sem `/api/v1` em `NEXT_PUBLIC_API_URL`.
+- `SUPABASE_SERVICE_ROLE_KEY` ausente em scripts administrativos.
+- Redirect do Supabase divergente de `AUTH_SUPABASE_REDIRECT_TO`.
+- Banco criado só com `database.sql`, sem migrations até v18.
+- Cookies bloqueados por domínio/CORS em produção.
 
 ## Se Persistir
 
 Siga TROUBLESHOOTING.md e anexe:
 
-- log do backend no momento do erro
-- comando executado
-- resposta HTTP recebida
+- Log do backend no momento do erro.
+- Payload ou rota chamada.
+- Status HTTP e resposta recebida.
+- Confirmação de que as migrations chegaram até `migration_v18_asaas_customer_id.sql`.

@@ -1,14 +1,15 @@
 # Quick Start
 
-Fluxo mais curto para subir o projeto em ambiente de desenvolvimento.
+Fluxo curto para subir o projeto em desenvolvimento.
 
 ## Pré-requisitos
 
 - Node.js 20+
 - npm 10+
 - PostgreSQL 14+ (recomendado 16)
+- Conta/projeto Supabase configurado para Auth
 
-## 1) Instalar dependências
+## 1. Instalar Dependências
 
 ```bash
 git clone <url-do-repositorio>
@@ -16,67 +17,76 @@ cd Barberpro-saas-2.0
 npm run install:all
 ```
 
-## 2) Configurar variáveis de ambiente
-
-Backend:
+## 2. Configurar Ambiente
 
 ```bash
 cp backend/.env.example backend/.env
-```
-
-Frontend:
-
-```bash
 cp frontend/.env.example frontend/.env.local
 ```
 
-Edite backend/.env e frontend/.env.local conforme seu ambiente.
+No mínimo, configure no `backend/.env`:
 
-Para usar os scripts administrativos de seed (`seed:auth-admin` e `seed:system-users`), configure tambem `SUPABASE_SERVICE_ROLE_KEY` no backend/.env.
-
-## 3) Preparar banco (obrigatório)
-
-Banco novo: execute SQL base + migrations na ordem abaixo:
-
-```bash
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/database.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v3.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v7.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v10.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f backend/src/config/migration_v11.sql
+```env
+PORT=5000
+NODE_ENV=development
+DATABASE_URL=postgresql://postgres:senha@localhost:5432/barberpro
+JWT_SECRET=troque_por_uma_chave_forte
+FRONTEND_URL=http://localhost:3000
+APP_URL=http://localhost:3000
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_ANON_KEY=<anon-key>
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+AUTH_SUPABASE_REDIRECT_TO=http://localhost:3000/auth/confirm
 ```
 
-Se ainda não existe banco:
+No `frontend/.env.local`:
+
+```env
+BACKEND_API_URL=http://localhost:5000/api/v1
+NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
+```
+
+## 3. Preparar Banco
+
+Crie o banco se ainda não existir:
 
 ```bash
 createdb -h localhost -p 5432 -U postgres --encoding=UTF8 barberpro
 psql -h localhost -p 5432 -U postgres -d barberpro -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
 ```
 
-PowerShell (Windows):
+Aplique o schema:
 
-```powershell
-createdb -h localhost -p 5432 -U postgres --encoding=UTF8 barberpro
-psql -h localhost -p 5432 -U postgres -d barberpro -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
-
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\database.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v3.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v4.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v5.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v6.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v7.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v8.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v9.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v10.sql
-psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f .\backend\src\config\migration_v11.sql
+```bash
+for file in \
+  backend/src/config/database.sql \
+  backend/src/config/migration_v3.sql \
+  backend/src/config/migration_v4.sql \
+  backend/src/config/migration_v5.sql \
+  backend/src/config/migration_v6.sql \
+  backend/src/config/migration_v7.sql \
+  backend/src/config/migration_v8.sql \
+  backend/src/config/migration_v9.sql \
+  backend/src/config/migration_v10.sql \
+  backend/src/config/migration_v11.sql \
+  backend/src/config/migration_v12.sql \
+  backend/src/config/migration_v13.sql \
+  backend/src/config/migration_v14.sql \
+  backend/src/config/migration_v15.sql \
+  backend/src/config/migration_v16_supabase_only_auth.sql \
+  backend/src/config/migration_v17_subscription_access_gate.sql \
+  backend/src/config/migration_v18_asaas_customer_id.sql
+do
+  psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f "$file"
+done
 ```
 
-## 4) Subir backend e frontend
+No Windows PowerShell, use os comandos detalhados em POSTGRESQL_SETUP.md.
+
+## 4. Subir Serviços
 
 Terminal 1:
 
@@ -92,40 +102,29 @@ cd frontend
 npm run dev
 ```
 
-Para acesso rápido no ambiente local, execute no diretório backend:
-
-```bash
-npm run seed:system-users
-```
-
-Para sincronizar apenas o admin da plataforma:
-
-```bash
-npm run seed:auth-admin
-```
-
-Após subir o projeto, utilize os usuários de teste documentados no README para acessar o sistema.
-
-## 5) Validar execução
+URLs:
 
 - Frontend: http://localhost:3000
 - Backend health: http://localhost:5000/health
-- API base: http://localhost:5000/api/v1
+- API: http://localhost:5000/api/v1
 
-## Docker (atalho)
+## 5. Validar
 
 ```bash
-docker compose up -d
+curl http://localhost:5000/health
 ```
 
-Observação importante:
+Depois teste:
 
-- O container de banco aplica automaticamente database.sql + migration_v3..v11 no primeiro bootstrap do volume.
-- Se o volume já existia antes dessa configuração, aplique migrations manualmente ou recrie o volume.
+- Cadastro em `/cadastro`.
+- Confirmação de e-mail via Supabase.
+- Login em `/login`.
+- Acesso ao `/dashboard`.
 
-Para manter o fluxo antigo de verificação por SMTP em ambiente local, configure `AUTH_PROVIDER_MODE=legacy` no backend/.env.
+## Docker Compose
 
-## Próximo Passo
+```bash
+docker compose up --build
+```
 
-- Setup detalhado: INSTALL.md
-- Banco e troubleshooting de migrations: POSTGRESQL_SETUP.md
+Atenção: o compose atual aplica automaticamente até `migration_v15.sql` no primeiro bootstrap do volume. Para usar o schema atual completo, aplique v16, v17 e v18 manualmente no banco do container, conforme POSTGRESQL_SETUP.md.

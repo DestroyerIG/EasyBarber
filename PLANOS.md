@@ -1,107 +1,94 @@
 # Planos e Controle de Acesso
 
-Documento técnico sobre regras de plano/assinatura implementadas no backend.
+Documento técnico sobre regras de plano, assinatura e feature gate implementadas no backend.
 
-## 1. Planos Reconhecidos
+## Planos Reconhecidos
 
-- basico
-- profissional
-- premium
+- `basico`
+- `profissional`
+- `premium`
 
-## 2. Matriz de Features por Plano
+## Features por Plano
 
-Configuração atual em backend/src/config/planPermissions.js:
+Fonte: `backend/src/config/planPermissions.js`.
 
-- dashboard: basico
-- appointments: basico
-- clients: basico
-- services: basico
-- finance: basico
-- reports: profissional
-- exports: profissional
-- whatsapp_automation: profissional
-- advanced_admin: premium
-- billing: basico
-- subscription_status: basico
+| Feature | Plano mínimo |
+| --- | --- |
+| `dashboard` | basico |
+| `appointments` | basico |
+| `clients` | basico |
+| `services` | basico |
+| `finance` | basico |
+| `reports` | profissional |
+| `exports` | profissional |
+| `whatsapp_automation` | profissional |
+| `advanced_admin` | basico |
+| `billing` | basico |
+| `subscription_status` | basico |
 
-## 3. Comportamento por Status de Assinatura
+## Status de Assinatura
 
-Status reconhecidos:
+Status reconhecidos no gate:
 
-- active
-- trialing
-- past_due
-- incomplete
-- canceled
+- `active`
+- `trialing`
+- `pending`
+- `past_due`
+- `unpaid`
+- `incomplete`
+- `canceled`
 
-Regras de acesso:
+Regras:
 
-- active/trialing: segue somente regra de plano.
-- past_due: acesso parcial (dashboard, appointments, clients, services, billing, subscription_status).
-- incomplete/canceled: acesso reduzido (dashboard, billing, subscription_status).
+- `active` e `trialing`: acesso conforme plano.
+- `pending`, `past_due`, `unpaid`, `incomplete` e `canceled`: acesso restrito a `billing` e `subscription_status`.
 
-## 4. Limites Diretos Implementados no Código
+## Limites de Barbeiros
 
-### Barbeiros ativos por plano
+Fonte: `backend/src/services/barberService.js`.
 
-Regra em backend/src/services/barberService.js:
+- `basico`: 1 barbeiro ativo.
+- `profissional`: 5 barbeiros ativos.
+- `premium`: 999 barbeiros ativos, tratado como ilimitado na prática.
 
-- basico: 1
-- profissional: 5
-- premium: 999 (equivalente prático a ilimitado)
+## Billing
 
-## 5. Billing e Preços
+O backend não fixa valores monetários em código. Preço e moeda ficam nos provedores.
 
-O backend não fixa valores monetários em código.
+### Stripe
 
-A cobrança usa price IDs do Stripe:
+Usado para cartão/assinatura recorrente e portal de cliente.
 
-Recorrente (assinatura por cartão):
+Variáveis:
 
-- STRIPE_PRICE_ID_BASICO
-- STRIPE_PRICE_ID_PROFISSIONAL
-- STRIPE_PRICE_ID_PREMIUM
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_PRICE_ID_BASICO`
+- `STRIPE_PRICE_ID_PROFISSIONAL`
+- `STRIPE_PRICE_ID_PREMIUM`
+- `STRIPE_PRICE_ID_BASICO_ONE_TIME`
+- `STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME`
+- `STRIPE_PRICE_ID_PREMIUM_ONE_TIME`
 
-Avulso (Pix/Boleto):
+### Asaas
 
-- STRIPE_PRICE_ID_BASICO_ONE_TIME
-- STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME
-- STRIPE_PRICE_ID_PREMIUM_ONE_TIME
+Usado para Pix com QR Code e webhook de confirmação.
 
-Mapeamento de fluxo:
+Variáveis:
 
-- card: mode subscription + price recorrente.
-- pix: mode payment + price one-time.
-- boleto: mode payment + price one-time.
+- `ASAAS_API_KEY`
+- `ASAAS_BASE_URL`
+- `ASAAS_WEBHOOK_TOKEN`
+- `ASAAS_BILLING_DESCRIPTION`
+- `ASAAS_TIMEOUT_MS`
 
-Ou seja, preço e moeda são controlados no Stripe Dashboard.
+## Trial
 
-Regra de trial:
+O fluxo Stripe suporta trial de 7 dias apenas na primeira assinatura recorrente da barbearia. Pix via Asaas inicia como `pending` e só libera acesso após confirmação do pagamento pelo webhook.
 
-- O trial de 7 dias é aplicado somente no fluxo recorrente (card).
-- O trial de 7 dias é concedido somente na primeira assinatura da barbearia.
-- Se a barbearia já tiver histórico de assinatura Stripe, novos checkouts recorrentes são criados sem trial.
+## Onde o Gate é Aplicado
 
-Regra de expiração do fluxo one-time:
+- Backend: `backend/src/middleware/subscriptionGuard.js`.
+- Frontend: hooks e componentes em `frontend/src/hooks/useSubscriptionAccess.ts` e `frontend/src/components/billing/FeatureGate.tsx`.
 
-- Pagamentos avulsos aprovados ativam o plano por 30 dias.
-- A expiração é controlada no backend por `subscription_current_period_end` e job de expiração automática.
-
-## 6. Endpoints Relacionados
-
-- POST /api/v1/subscriptions/checkout-session
-- GET /api/v1/subscriptions/status
-- POST /api/v1/subscriptions/portal
-- POST /api/v1/subscriptions/webhook
-
-## 7. Regras Admin
-
-Rotas /api/v1/admin exigem role platform_admin.
-
-Funcionalidade advanced_admin está mapeada para premium no planPermissions, mas o controle de acesso do módulo admin atualmente usa guard de role (platform_admin) e não o requireFeature.
-
-## 8. Observações de Produto
-
-Este documento descreve comportamento técnico do código atual.
-
-Se houver tabela comercial pública com preços e benefícios de marketing, ela deve ser mantida separada do contrato técnico para evitar divergência.
+O frontend melhora a experiência, mas a regra final de autorização é sempre do backend.

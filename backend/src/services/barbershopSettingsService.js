@@ -7,7 +7,9 @@ import { isValidCpfCnpj, normalizeDocumentDigits } from '../utils/cpfCnpj.js';
 import { normalizeWhatsAppInstanceName } from './whatsapp/whatsappInstanceService.js';
 import logger from '../utils/logger.js';
 
-const ALLOWED_SLOT_INTERVALS = new Set([15, 20, 30, 45, 60]);
+const ALLOWED_SLOT_INTERVALS = new Set([0, 15, 20, 30, 45, 60, 90, 120]);
+const ALLOWED_OPEN_DAYS = new Set(['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom']);
+const DEFAULT_OPEN_DAYS = ['seg', 'ter', 'qua', 'qui', 'sex'];
 const TENANT_ACCOUNT_ROLE = 'tenant_admin';
 
 const toMinutes = (timeValue) => {
@@ -29,6 +31,22 @@ const normalizeText = (value) => String(value || '').trim();
 const normalizePhoneDigits = (value) => {
   const digits = String(value || '').replace(/\D+/g, '');
   return digits || '';
+};
+
+const normalizeOpenDays = (value) => {
+  if (!Array.isArray(value)) {
+    return [...DEFAULT_OPEN_DAYS];
+  }
+
+  const uniqueDays = [];
+  for (const day of value) {
+    const normalizedDay = String(day || '').trim().toLowerCase();
+    if (ALLOWED_OPEN_DAYS.has(normalizedDay) && !uniqueDays.includes(normalizedDay)) {
+      uniqueDays.push(normalizedDay);
+    }
+  }
+
+  return uniqueDays.length ? uniqueDays : [...DEFAULT_OPEN_DAYS];
 };
 
 const maskEmailForLog = (value) => {
@@ -104,7 +122,7 @@ export const barbershopSettingsService = {
 
   async updateSettings(barbershopId, data) {
     if (!ALLOWED_SLOT_INTERVALS.has(data.slotIntervalMinutes)) {
-      throw new ValidationError('Intervalo de agenda inválido', ['Use 15, 20, 30, 45 ou 60 minutos.']);
+      throw new ValidationError('Intervalo de agenda inválido', ['Use sem intervalo, 15, 20, 30, 45, 60, 90 ou 120 minutos.']);
     }
 
     const openingMinutes = toMinutes(data.openingTime);
@@ -119,6 +137,7 @@ export const barbershopSettingsService = {
 
     const payload = {
       whatsappInstanceName: normalizeOptionalInstanceName(data.whatsappInstanceName),
+      diasAbertos: normalizeOpenDays(data.diasAbertos),
       openingTime: data.openingTime,
       closingTime: data.closingTime,
       slotIntervalMinutes: data.slotIntervalMinutes,

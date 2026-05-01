@@ -73,6 +73,7 @@ jest.unstable_mockModule('../services/whatsapp/whatsappConfigService.js', () => 
 jest.unstable_mockModule('../services/barbershopBusinessSettingsService.js', () => ({
   getBarbershopBusinessSettings: mockGetBarbershopBusinessSettings,
   isWithinBusinessHours: mockIsWithinBusinessHours,
+  isBusinessOpenOnDate: jest.fn(() => true),
   generateAvailableTimeSlots: mockGenerateAvailableTimeSlots,
   formatBusinessHoursRange: mockFormatBusinessHoursRange,
 }));

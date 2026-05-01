@@ -81,6 +81,44 @@ describe('barbershopBusinessSettingsService', () => {
     expect(slots).not.toContain('09:00');
   });
 
+  it('nao gera slots para dia fechado', () => {
+    const settings = {
+      openingTime: '08:00',
+      closingTime: '18:00',
+      slotIntervalMinutes: 30,
+      diasAbertos: ['seg', 'ter', 'qua', 'qui', 'sex'],
+      allowWalkins: false,
+      autoConfirmAppointments: true,
+      timezone: 'America/Sao_Paulo',
+    };
+
+    const slots = generateAvailableTimeSlots(settings, '2026-04-19', {
+      serviceDurationMinutes: 30,
+      currentDate: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(slots).toEqual([]);
+  });
+
+  it('trata intervalo zero como agenda continua pela duracao do servico', () => {
+    const settings = {
+      openingTime: '08:00',
+      closingTime: '11:00',
+      slotIntervalMinutes: 0,
+      diasAbertos: ['seg', 'ter', 'qua', 'qui', 'sex'],
+      allowWalkins: false,
+      autoConfirmAppointments: true,
+      timezone: 'America/Sao_Paulo',
+    };
+
+    const slots = generateAvailableTimeSlots(settings, '2026-04-20', {
+      serviceDurationMinutes: 60,
+      currentDate: new Date('2026-04-18T10:00:00-03:00'),
+    });
+
+    expect(slots).toEqual(['08:00', '09:00', '10:00']);
+  });
+
   it('carrega configuracao dinamicamente sem cache e aplica mudanca apos salvar', async () => {
     mockFindOperationalSettingsByBarbershopId
       .mockResolvedValueOnce({

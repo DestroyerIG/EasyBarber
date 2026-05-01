@@ -1,60 +1,46 @@
 # Deploy
 
-Guia técnico para publicação em produção com foco em previsibilidade operacional.
+Guia técnico para publicar o EasyBarber SaaS 2.0 em produção.
 
-## 1. Escopo de Deploy
-
-Este documento cobre:
-
-- Requisitos mínimos de infraestrutura.
-- Variáveis obrigatórias de backend/frontend.
-- Build e execução.
-- Ordem de migration SQL antes de produção.
-- Verificação pós-deploy.
-- Riscos comuns e rollback.
-
-## 2. Requisitos Mínimos
-
-### Aplicação
+## Requisitos
 
 - Node.js 20+
 - npm 10+
-- PostgreSQL 14+ (recomendado 16)
-- HTTPS no frontend e backend público
+- PostgreSQL 14+; recomendado 16 com backup automático.
+- HTTPS no frontend e backend.
+- Supabase Auth configurado.
+- Variáveis de billing e WhatsApp conforme módulos usados.
 
-### Infra recomendada inicial
+## Variáveis de Ambiente
 
-- Backend: 2 vCPU, 2 GB RAM
-- Frontend: 1 vCPU, 1 GB RAM
-- Banco: plano gerenciado com backup automático diário
-
-## 3. Variáveis de Ambiente
-
-## 3.1 Backend (obrigatórias)
+### Backend Obrigatórias
 
 ```env
 DATABASE_URL=postgresql://user:password@host:5432/barberpro
 JWT_SECRET=chave_forte_com_32_ou_mais_caracteres
 NODE_ENV=production
+PORT=5000
 FRONTEND_URL=https://seu-frontend.com
 APP_URL=https://seu-frontend.com
-AUTH_PROVIDER_MODE=dual
-EMAIL_VERIFICATION_TTL_MINUTES=60
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_ANON_KEY=<anon-key>
 SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 AUTH_SUPABASE_REDIRECT_TO=https://seu-frontend.com/auth/confirm
-# fallback legado (AUTH_PROVIDER_MODE=legacy)
-SMTP_HOST=smtp.seudominio.com
-SMTP_PORT=587
-SMTP_USER=usuario_smtp
-SMTP_PASS=senha_smtp
-SMTP_FROM="EasyBarber <no-reply@seudominio.com>"
 ```
 
-Observacao: `SUPABASE_SERVICE_ROLE_KEY` e necessaria para scripts administrativos de sincronizacao de usuarios (`seed:auth-admin` e `seed:system-users`).
+`AUTH_PROVIDER_MODE` é obsoleto. O fluxo atual usa Supabase Auth obrigatoriamente.
 
-### Backend (billing/Stripe)
+### Backend Opcionais
+
+```env
+LOG_LEVEL=info
+AUTH_COOKIE_DOMAIN=.seudominio.com
+API_JSON_BODY_LIMIT=1mb
+WHATSAPP_WEBHOOK_BODY_LIMIT=6mb
+VERCEL_PROJECT_PREFIX=barberpro-saas-2-0
+```
+
+### Stripe
 
 ```env
 STRIPE_SECRET_KEY=sk_live_xxx
@@ -67,7 +53,7 @@ STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME=price_xxx
 STRIPE_PRICE_ID_PREMIUM_ONE_TIME=price_xxx
 ```
 
-### Backend (billing/Asaas Pix)
+### Asaas Pix
 
 ```env
 ASAAS_API_KEY=<api-key>
@@ -77,54 +63,56 @@ ASAAS_BILLING_DESCRIPTION=EasyBarber - Plano {plan} ({barbershop})
 ASAAS_TIMEOUT_MS=12000
 ```
 
-Mapeamento de fluxo no checkout híbrido:
-
-- card -> Stripe recorrente.
-- pix -> Asaas com QR Code.
-- boleto -> fluxo legado opcional Stripe one-time.
-
-### Backend (opcionais)
+### WhatsApp Evolution API
 
 ```env
-PORT=5000
-LOG_LEVEL=info
-DB_POOL_MIN=2
-DB_POOL_MAX=20
-DB_IDLE_TIMEOUT=30000
-DB_CONNECT_TIMEOUT=5000
-DB_STATEMENT_TIMEOUT=30000
-DB_CA_CERT=<certificado-ca>
-# WhatsApp provider (Evolution API externa)
 WHATSAPP_PROVIDER=evolution
-EVOLUTION_API_URL=https://sua-evolution.onrender.com
-EVOLUTION_API_KEY=sua_chave
+EVOLUTION_API_URL=https://sua-evolution.com
+EVOLUTION_API_KEY=<api-key>
 EVOLUTION_INSTANCE_NAME=easybarber
 EVOLUTION_WEBHOOK_URL=https://sua-api.com/api/v1/whatsapp/webhook
 EVOLUTION_API_TIMEOUT_MS=10000
 WHATSAPP_SESSION_TIMEOUT_MS=1800000
+WHATSAPP_INSTANCE_BARBERSHOP_MAP=
 ```
 
-## 3.2 Frontend
+`WHATSAPP_INSTANCE_BARBERSHOP_MAP` é fallback legado. A fonte de verdade deve ser `barbershops.whatsapp_instance_name`.
+
+### Frontend
 
 ```env
+BACKEND_API_URL=https://sua-api.com/api/v1
 NEXT_PUBLIC_API_URL=https://sua-api.com/api/v1
-NEXT_PUBLIC_WHATSAPP_CONTACT_URL=https://wa.me/5500000000000?text=Ola
+NEXT_PUBLIC_APP_URL=https://seu-frontend.com
+NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
+NEXT_PUBLIC_WHATSAPP_CONTACT_URL=https://wa.me/55...
 ```
 
-## 4. Checklist Pré-Deploy
+## Banco em Produção
 
-- Banco de produção criado com UTF-8.
-- Extensão pgcrypto habilitada.
-- Backup inicial executado.
-- Variáveis de ambiente revisadas.
-- Endpoint /api/v1/subscriptions/webhook planejado no Stripe.
-- Endpoint /api/v1/billing/webhooks/asaas configurado no Asaas.
-- FRONTEND_URL apontando para domínio real do frontend.
-- Testes de backend e lint do frontend executados.
+1. Faça backup.
+2. Aplique `database.sql` apenas em banco novo.
+3. Aplique migrations em ordem até `migration_v18_asaas_customer_id.sql`.
+4. Valide tabelas críticas.
 
-## 5. Build e Execução
+Comandos:
 
-### Backend
+```bash
+pg_dump "$DATABASE_URL" > backup_barberpro_$(date +%Y%m%d_%H%M%S).sql
+```
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v16_supabase_only_auth.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v17_subscription_access_gate.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v18_asaas_customer_id.sql
+```
+
+Para banco novo, consulte POSTGRESQL_SETUP.md para a lista completa desde `database.sql`.
+
+## Build e Start
+
+Backend:
 
 ```bash
 cd backend
@@ -132,7 +120,7 @@ npm ci
 npm start
 ```
 
-### Frontend
+Frontend:
 
 ```bash
 cd frontend
@@ -141,215 +129,69 @@ npm run build
 npm start
 ```
 
-## 6. Migrations Antes de Produção
+## Webhooks
 
-## 6.1 Ordem recomendada para ambiente novo
+### Stripe
 
-1. database.sql
-2. migration_v3.sql
-3. migration_v4.sql
-4. migration_v5.sql
-5. migration_v6.sql
-6. migration_v7.sql
-7. migration_v8.sql
-8. migration_v9.sql
-9. migration_v10.sql
-10. migration_v11.sql
-11. migration_v12.sql
+Configure um ou mais endpoints aceitos:
 
-## 6.2 Comandos (host com psql)
+- `https://sua-api.com/api/v1/billing/webhooks/stripe`
+- `https://sua-api.com/api/v1/billing/webhook/stripe`
+- `https://sua-api.com/api/v1/subscriptions/webhook`
 
-```bash
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/database.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v3.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v7.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v10.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v11.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v12.sql
-```
+Use o signing secret em `STRIPE_WEBHOOK_SECRET`.
 
-## 6.3 Upgrade legado
+### Asaas
 
-Se estiver migrando base antiga, inclua migration_v2.sql antes de v3.
+Endpoint:
 
-## 6.4 Validação pós-migration
+- `https://sua-api.com/api/v1/billing/webhooks/asaas`
 
-```bash
-psql "$DATABASE_URL" -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';"
-psql "$DATABASE_URL" -c "SELECT to_regclass('public.whatsapp_menu_options');"
-psql "$DATABASE_URL" -c "SELECT conname FROM pg_constraint WHERE conname='chk_users_role';"
-```
+Configure o mesmo token em `ASAAS_WEBHOOK_TOKEN`.
 
-## 7. Deploy com Docker Compose
+### Evolution API
 
-O compose do repositório é útil para ambientes simples, mas não deve ser tratado como blueprint final de produção sem ajustes.
+Endpoint:
 
-### 7.1 Subir stack
+- `https://sua-api.com/api/v1/whatsapp/webhook`
+- Opcional por evento: `https://sua-api.com/api/v1/whatsapp/webhook/:event`
 
-```bash
-docker compose up -d --build
-```
+Eventos recomendados:
 
-### 7.2 Aplicar migrations adicionais
+- `MESSAGES_UPSERT`
+- `CONNECTION_UPDATE`
 
-O bootstrap automático do db aplica database.sql + migration_v3..v12 no primeiro bootstrap do volume.
+Evite `MESSAGES_SET` em produção por payload alto.
 
-Se o volume já existia antes dessa configuração, execute migration_v3..v12 manualmente.
-
-Com psql local:
-
-```bash
-psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v3.sql
-psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v4.sql
-psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v5.sql
-psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v6.sql
-psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v7.sql
-psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v8.sql
-psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v9.sql
-psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v10.sql
-psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v11.sql
-psql "postgresql://barberpro:changeme@localhost:5432/barberpro" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v12.sql
-```
-
-## 8. Deploy em PaaS (Backend/Frontend separados)
-
-### Backend
-
-- Publicar pasta backend.
-- Garantir NODE_ENV=production.
-- Definir DATABASE_URL e JWT_SECRET.
-- Definir AUTH_PROVIDER_MODE e variáveis SUPABASE_*.
-- Se usar Stripe, definir variáveis Stripe.
-
-### Frontend
-
-- Publicar pasta frontend.
-- Definir NEXT_PUBLIC_API_URL para URL pública da API com /api/v1.
-
-### Evolution API (serviço separado)
-
-- Publicar Evolution API em serviço próprio (ex.: Render), separado do backend EasyBarber.
-- Configurar instância e API key no serviço da Evolution.
-- Configurar EVOLUTION_WEBHOOK_URL apontando para o backend EasyBarber: /api/v1/whatsapp/webhook.
-- Garantir conectividade de rede: backend EasyBarber precisa alcançar a URL pública da Evolution.
-
-## 9. Configuração Manual no Supabase (Auth)
-
-No painel do Supabase, configure:
-
-1. Authentication -> URL Configuration
-  - Site URL: URL pública do frontend (ex.: https://seu-frontend.com)
-  - Redirect URLs: incluir exatamente a callback do projeto (ex.: https://seu-frontend.com/auth/confirm)
-2. Authentication -> Providers -> Email
-  - Habilitar provider Email
-  - Confirm email: habilitado
-3. Authentication -> Email Templates -> Confirm signup
-  - Manter template com `{{ .TokenHash }}`
-  - Garantir link final redirecionando para `/auth/confirm` com `token_hash` e `type`
-4. Project Settings -> API
-  - Copiar `Project URL` para `SUPABASE_URL`
-  - Copiar `anon public` para `SUPABASE_ANON_KEY`
-
-Observação:
-
-- Não usar `service_role` no frontend.
-- Em rollout, usar `AUTH_PROVIDER_MODE=dual`; rollback imediato via `AUTH_PROVIDER_MODE=legacy`.
-
-## 10. Configuração de Webhook Stripe
-
-No painel Stripe:
-
-- Endpoint: https://sua-api.com/api/v1/subscriptions/webhook
-- Eventos mínimos:
-  - checkout.session.completed
-  - customer.subscription.updated
-  - customer.subscription.deleted
-  - invoice.payment_succeeded
-  - invoice.payment_failed
-
-Salvar signing secret em STRIPE_WEBHOOK_SECRET.
-
-## 10.1 Configuração de Webhook Asaas
-
-No painel Asaas:
-
-- Endpoint: https://sua-api.com/api/v1/billing/webhooks/asaas
-- Token de autenticação do webhook: usar o mesmo valor de ASAAS_WEBHOOK_TOKEN
-- Eventos recomendados:
-  - PAYMENT_CREATED
-  - PAYMENT_RECEIVED
-  - PAYMENT_CONFIRMED
-  - PAYMENT_OVERDUE
-  - PAYMENT_DELETED
-  - PAYMENT_REFUNDED
-  - PAYMENT_CHARGEBACK_REQUESTED
-
-Observação: o backend registra idempotência por provider + event_id em billing_webhook_events.
-
-## 11. Verificação Pós-Deploy
-
-- Health check backend:
+## Smoke Test
 
 ```bash
 curl https://sua-api.com/health
+curl https://sua-api.com/api/v1/auth/me
 ```
 
-- Smoke tests:
-  - Registro -> verificação de e-mail -> login.
-  - Criação de agendamento.
-  - Criação de despesa.
-  - Consulta de /api/v1/billing/status.
-  - Fluxo Pix: checkout /api/v1/billing/checkout/session + leitura de /api/v1/billing/pix/:paymentId.
-  - WhatsApp: GET /api/v1/whatsapp/status retornando status coerente.
-  - WhatsApp: POST /api/v1/whatsapp/connect e GET /api/v1/whatsapp/qrcode com resposta sem crash.
+Valide no navegador:
 
-- Frontend:
-  - Login e navegação dashboard.
-  - Consumo de dados sem erro de CORS.
-  - Aba WhatsApp exibindo estados: unavailable, disconnected, pairing, connected, error.
+- Cadastro e confirmação de e-mail.
+- Login.
+- Dashboard.
+- Status de assinatura.
+- Checkout cartão/Pix.
+- Webhook de billing em ambiente sandbox antes de produção real.
+- Conexão WhatsApp.
 
-## 12. Riscos Comuns
+## Rollback
 
-- Banco sem migration_v3 (quebra módulo WhatsApp).
-- Banco sem migration_v9/v10/v11/v12 (quebra fluxo de verificação, sincronização Supabase e billing híbrido).
-- FRONTEND_URL incorreta (erro CORS).
-- SUPABASE_URL/SUPABASE_ANON_KEY ausentes com AUTH_PROVIDER_MODE=dual|supabase (falha de cadastro/verificação).
-- SMTP_* ausentes ou inválidas quando AUTH_PROVIDER_MODE=legacy (fallback legado indisponível).
-- DB_CONNECT_TIMEOUT ausente ou configurado incorretamente no backend.
-- Webhook Stripe sem assinatura válida.
-- Webhook Asaas sem token válido (ASAAS_WEBHOOK_TOKEN divergente do painel Asaas).
-- EVOLUTION_API_URL ou EVOLUTION_API_KEY inválidas.
-- Evolution API offline sem monitoramento ativo.
-- Deploy sem backup anterior.
+- Aplicação: volte para a release anterior.
+- Banco: restaure backup se a migration aplicada causou incompatibilidade.
+- Billing: pause webhooks no provedor se houver duplicidade ou erro crítico.
 
-## 13. Rollback
+## Riscos Comuns
 
-## 13.1 Rollback de aplicação
-
-- Reverter versão de backend/frontend para release anterior (tag ou commit estável).
-
-## 13.2 Rollback de banco
-
-1. Restaurar backup pré-deploy.
-2. Reaplicar versão compatível da aplicação.
-
-Exemplo restore:
-
-```bash
-pg_restore -d barberpro -c backup_pre_deploy.dump
-```
-
-## 14. Correções de Configuração Aplicadas
-
-As seguintes correções já estão aplicadas no repositório:
-
-- backend/.env.example com DB_CONNECT_TIMEOUT.
-- docker-compose.yml com FRONTEND_URL no backend.
-- docker-compose.yml com NEXT_PUBLIC_API_URL em /api/v1 no frontend.
-- setup.ps1 aplicando database.sql + migration_v3..v12.
-- fix-env.ps1 sem variáveis legadas WHATSAPP_API_*.
+- Banco sem v16-v18.
+- Supabase redirect diferente de `AUTH_SUPABASE_REDIRECT_TO`.
+- CORS sem `FRONTEND_URL` correto.
+- Cookies com domínio incorreto.
+- Webhook Stripe com secret errado.
+- Webhook Asaas sem token ou endpoint incorreto.
+- Evolution API configurada para eventos pesados.

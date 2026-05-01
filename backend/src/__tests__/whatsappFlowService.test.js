@@ -12,6 +12,7 @@ const mockGetBotConfig = jest.fn();
 const mockGetMenuOptions = jest.fn();
 const mockGetBarbershopBusinessSettings = jest.fn();
 const mockIsWithinBusinessHours = jest.fn();
+const mockIsBusinessOpenOnDate = jest.fn();
 const mockGenerateAvailableTimeSlots = jest.fn();
 const mockFormatBusinessHoursRange = jest.fn();
 const mockAppointmentServiceCreate = jest.fn();
@@ -58,6 +59,7 @@ jest.unstable_mockModule('../services/whatsapp/whatsappConfigService.js', () => 
 jest.unstable_mockModule('../services/barbershopBusinessSettingsService.js', () => ({
   getBarbershopBusinessSettings: mockGetBarbershopBusinessSettings,
   isWithinBusinessHours: mockIsWithinBusinessHours,
+  isBusinessOpenOnDate: mockIsBusinessOpenOnDate,
   generateAvailableTimeSlots: mockGenerateAvailableTimeSlots,
   formatBusinessHoursRange: mockFormatBusinessHoursRange,
 }));
@@ -109,6 +111,7 @@ describe('whatsappFlowService guards', () => {
       timezone: 'America/Sao_Paulo',
     });
     mockIsWithinBusinessHours.mockReturnValue(true);
+    mockIsBusinessOpenOnDate.mockReturnValue(true);
     mockGenerateAvailableTimeSlots.mockReturnValue([]);
     mockFormatBusinessHoursRange.mockReturnValue('08:00 as 18:00');
   });

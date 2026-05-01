@@ -1,43 +1,46 @@
 # EasyBarber SaaS 2.0
 
-Plataforma SaaS para gestão de barbearias com agenda, clientes, financeiro, automações de WhatsApp, assinatura recorrente e painel administrativo de plataforma.
+Plataforma SaaS para gestão de barbearias com agenda, clientes, serviços/barbeiros, financeiro, automações de WhatsApp, assinaturas e painel administrativo de plataforma.
 
 ## Visão Geral
 
-O projeto é dividido em dois serviços principais:
+O projeto é dividido em:
 
-- Backend Node.js/Express em backend.
-- Frontend Next.js (App Router) em frontend.
+- `backend`: API Node.js/Express.
+- `frontend`: aplicação Next.js com App Router.
+- PostgreSQL como banco principal.
+- Supabase Auth como provedor obrigatório de identidade.
+- Stripe e Asaas para billing.
+- Evolution API v1 externa para WhatsApp.
 
-Também há suporte a execução via Docker Compose com PostgreSQL.
+## Funcionalidades
 
-## Principais Funcionalidades
-
-- Autenticação com JWT (access + refresh token em cookies httpOnly).
-- Cadastro com verificação obrigatória de e-mail usando apenas Supabase Auth como provedor de autenticação.
+- Cadastro, confirmação de e-mail e login via Supabase Auth.
+- Sessão com cookies httpOnly e refresh token.
+- Dashboard tenant.
 - Gestão de agendamentos, clientes, serviços e barbeiros.
-- Módulo financeiro com resumo diário/mensal e despesas.
-- Bot de WhatsApp via Evolution API v1 (serviço externo) com configuração de mensagens e menu dinâmico.
-- Billing com Stripe em fluxo híbrido (assinatura recorrente no cartão + checkout avulso em Pix/Boleto), com 7 dias grátis apenas na primeira assinatura recorrente da barbearia.
-- Painel administrativo de plataforma com bloqueio de contas/usuários e auditoria.
+- Financeiro com receitas, despesas e relatórios.
+- Automação WhatsApp via Evolution API v1.
+- Billing híbrido: Stripe para cartão/assinatura e Asaas para Pix.
 - Controle de acesso por plano e status de assinatura.
+- Admin de plataforma com métricas, tenants, assinaturas, bloqueios e logs.
 
 ## Stack
 
-### Backend
+Backend:
 
 - Node.js 20+
 - Express 4
-- PostgreSQL (driver pg)
-- Zod (validação)
-- jsonwebtoken
-- @supabase/supabase-js (cadastro/verificação de e-mail)
-- nodemailer (SMTP)
-- Pino (logs)
-- stripe
-- Integração HTTP com Evolution API v1 (serviço externo)
+- PostgreSQL com `pg`
+- Zod
+- JWT
+- Supabase JS
+- Pino
+- Stripe
+- Asaas via HTTP
+- Jest/Supertest
 
-### Frontend
+Frontend:
 
 - Next.js 15
 - React 18
@@ -45,441 +48,194 @@ Também há suporte a execução via Docker Compose com PostgreSQL.
 - Tailwind CSS
 - Axios
 - Recharts
+- lucide-react
 
 ## Arquitetura
 
-No backend, o fluxo principal segue:
+Backend:
 
-Controller -> Service -> Repository -> PostgreSQL
+```text
+Route -> Middleware -> Controller -> Service -> Repository -> PostgreSQL
+```
 
-Fluxo da automação WhatsApp:
+WhatsApp:
 
-Frontend -> Backend EasyBarber -> Evolution API v1 (serviço externo)
+```text
+Frontend -> Backend EasyBarber -> Evolution API v1 externa
+```
 
-Importante:
+Billing:
 
-- A Evolution API não roda dentro do backend principal.
-- O frontend nunca chama a Evolution API diretamente.
+```text
+Frontend -> Backend -> Stripe/Asaas -> Webhook -> Backend -> PostgreSQL
+```
 
-Componentes de apoio:
+O frontend nunca chama Evolution API, Stripe secret ou Asaas diretamente.
 
-- Middleware de auth e RBAC.
-- Middleware de feature gate por plano/status de assinatura.
-- Error handler global com payload padronizado.
-
-No frontend, o App Router organiza páginas públicas, dashboard tenant e área admin, com contexto de autenticação e cliente Axios com refresh automático.
-
-## Estrutura de Pastas Relevante
+## Estrutura
 
 ```text
 backend/
   src/
-    config/        # database.sql e migration_v2..v11.sql
+    config/        # database.sql e migrations até v18
     controllers/
+    integrations/  # Asaas
     middleware/
     repositories/
     routes/
     services/
     validators/
+    __tests__/
+
 frontend/
   src/
-    app/           # Rotas Next.js
+    app/
     components/
     contexts/
+    hooks/
     lib/
+    styles/
+    types/
 ```
 
-Detalhes: PROJECT_STRUCTURE.md
+Veja PROJECT_STRUCTURE.md para detalhes.
 
-## Pré-requisitos
+## Começar Rápido
 
-- Node.js 20+ (recomendado).
-- npm 10+.
-- PostgreSQL 14+ (recomendado 16).
-- Git.
+```bash
+npm run install:all
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env.local
+```
 
-Opcional:
-- Docker + Docker Compose para stack containerizada.
+Configure Supabase e banco, depois:
 
-## Variáveis de Ambiente
+```bash
+cd backend && npm run dev
+```
 
-### Backend (backend/.env)
+```bash
+cd frontend && npm run dev
+```
 
-Base no arquivo backend/.env.example:
+URLs:
+
+- Frontend: http://localhost:3000
+- Backend: http://localhost:5000
+- Health: http://localhost:5000/health
+- API: http://localhost:5000/api/v1
+
+## Variáveis Principais
+
+Backend mínimo:
 
 ```env
-PORT=5000
-NODE_ENV=development
-LOG_LEVEL=info
 DATABASE_URL=postgresql://postgres:senha@localhost:5432/barberpro
-JWT_SECRET=troque_esta_chave
+JWT_SECRET=troque_por_uma_chave_forte
 FRONTEND_URL=http://localhost:3000
 APP_URL=http://localhost:3000
-
-# Supabase Auth obrigatório (cadastro/verificação/login)
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_ANON_KEY=<anon-key>
 SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 AUTH_SUPABASE_REDIRECT_TO=http://localhost:3000/auth/confirm
-
-# SMTP (opcional; não é usado para verificação de autenticação)
-SMTP_HOST=smtp.seudominio.com
-SMTP_PORT=587
-SMTP_USER=usuario_smtp
-SMTP_PASS=senha_smtp
-SMTP_FROM="EasyBarber <no-reply@seudominio.com>"
-
-# Stripe (obrigatório somente para billing em produção)
-STRIPE_SECRET_KEY=sk_test_xxx
-STRIPE_WEBHOOK_SECRET=whsec_xxx
-STRIPE_PRICE_ID_BASICO=price_xxx
-STRIPE_PRICE_ID_PROFISSIONAL=price_xxx
-STRIPE_PRICE_ID_PREMIUM=price_xxx
-STRIPE_PRICE_ID_BASICO_ONE_TIME=price_xxx
-STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME=price_xxx
-STRIPE_PRICE_ID_PREMIUM_ONE_TIME=price_xxx
-
-# Asaas (Pix)
-ASAAS_API_KEY=<api-key>
-ASAAS_BASE_URL=https://api.asaas.com/v3
-ASAAS_WEBHOOK_TOKEN=<token-webhook>
-ASAAS_BILLING_DESCRIPTION=EasyBarber - Plano {plan} ({barbershop})
-ASAAS_TIMEOUT_MS=12000
-
-# WhatsApp Provider (Evolution API v1 externa)
-WHATSAPP_PROVIDER=evolution
-EVOLUTION_API_URL=https://sua-evolution.onrender.com
-EVOLUTION_API_KEY=chave_da_evolution
-EVOLUTION_INSTANCE_NAME=easybarber
-EVOLUTION_WEBHOOK_URL=https://sua-api.com/api/v1/whatsapp/webhook
-EVOLUTION_API_TIMEOUT_MS=10000
-WHATSAPP_SESSION_TIMEOUT_MS=1800000
 ```
 
-Fluxo híbrido de billing (produção):
-
-- card: Stripe recorrente (checkout + webhook Stripe).
-- pix: Asaas (checkout Pix com QR Code e confirmação por webhook Asaas).
-- boleto: legado opcional via Stripe one-time (mantido para compatibilidade).
-
-No fluxo recorrente (card), o trial de 7 dias é aplicado apenas na primeira assinatura da barbearia.
-No fluxo Pix (Asaas), a assinatura interna inicia como pending e passa para active após confirmação de pagamento.
-
-### Frontend (frontend/.env.local)
-
-Base no arquivo frontend/.env.example:
+Frontend mínimo:
 
 ```env
+BACKEND_API_URL=http://localhost:5000/api/v1
 NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
-NEXT_PUBLIC_WHATSAPP_CONTACT_URL=https://wa.me/5500000000000?text=Ola
 ```
 
-Para confirmação de e-mail com Supabase Auth, garanta no dashboard do Supabase:
+`AUTH_PROVIDER_MODE` é obsoleto. SMTP é opcional e não participa da confirmação de autenticação no fluxo atual.
 
-- Site URL: domínio público do frontend (ex.: `https://seu-frontend.com`).
-- Redirect URLs permitidas:
-  - `http://localhost:3000/auth/confirm`
-  - `https://seu-frontend.com/auth/confirm`
-  - URL de preview usada no deploy (se aplicável).
+## Banco
 
-## Instalação e Execução (Desenvolvimento)
+Banco novo exige:
 
-### 1. Clonar e instalar dependências
+- `backend/src/config/database.sql`
+- Migrations v3 até `migration_v18_asaas_customer_id.sql`
 
-```bash
-git clone <url-do-repositorio>
-cd Barberpro-saas-2.0
-npm run install:all
-```
+Consulte POSTGRESQL_SETUP.md para a ordem completa e comandos por sistema operacional.
 
-Ou instalar separado:
+## Scripts
 
-```bash
-cd backend && npm install
-cd ../frontend && npm install
-```
+Raiz:
 
-### 2. Configurar .env
-
-- Copiar backend/.env.example para backend/.env e ajustar valores.
-- Copiar frontend/.env.example para frontend/.env.local e ajustar valores.
-
-### 3. Preparar banco e migrations SQL
-
-A sequência recomendada para banco novo é:
-
-1. backend/src/config/database.sql
-2. backend/src/config/migration_v3.sql
-3. backend/src/config/migration_v4.sql
-4. backend/src/config/migration_v5.sql
-5. backend/src/config/migration_v6.sql
-6. backend/src/config/migration_v7.sql
-7. backend/src/config/migration_v8.sql
-8. backend/src/config/migration_v9.sql
-9. backend/src/config/migration_v10.sql
-10. backend/src/config/migration_v11.sql
-11. backend/src/config/migration_v12.sql
-12. backend/src/config/migration_v13.sql
-13. backend/src/config/migration_v14.sql
-14. backend/src/config/migration_v15.sql
-15. backend/src/config/migration_v16_supabase_only_auth.sql
-
-Observação: migration_v2.sql é voltada a upgrade legado e normalmente não é necessária em ambiente novo.
-
-Passo a passo detalhado e comandos por sistema operacional: POSTGRESQL_SETUP.md
-
-### 4. Iniciar serviços
-
-Terminal 1 (backend):
-
-```bash
-cd backend
-npm run dev
-```
-
-Terminal 2 (frontend):
-
-```bash
-cd frontend
-npm run dev
-```
-
-## Usuários de teste (ambiente local)
-
-Antes de utilizar os usuários abaixo, execute:
-
-```bash
-npm run seed:system-users
-```
-
-O comando deve ser executado no diretório backend.
-
-Para sincronizar apenas o admin da plataforma:
-
-```bash
-npm run seed:auth-admin
-```
-
-### Admin (plataforma)
-
-- Email: contato@easyconnectcg.com.br
-- Senha: @Easyconnect08
-- Role: platform_admin
-
-Permissões:
-
-- Acesso total ao sistema
-- Acesso à área administrativa
-- Gerenciamento global de tenants
-
-### Usuário de teste (tenant)
-
-- Email: teste@easybarber.com
-- Senha: @Easyconnect08
-- Role: tenant_admin
-
-Contexto:
-
-- Barbearia: EasyBarber Teste Premium
-- Plano: premium
-- Status da assinatura: active
-
-Acesso liberado:
-
-- Dashboard
-- Clientes
-- Agenda
-- Financeiro
-- Relatórios
-- Funcionalidades premium
-
-> Observação:
-> O controle de acesso no sistema é baseado no tenant (barbershop), não diretamente no usuário.
-> Ou seja, o plano e o status da assinatura são definidos na barbearia vinculada ao usuário.
-
-## Portas Utilizadas
-
-- Frontend: 3000
-- Backend: 5000
-- PostgreSQL: 5432
-
-## Fluxo Básico de Autenticação
-
-1. Usuário cadastra tenant em /api/v1/auth/register.
-2. O cadastro é iniciado no Supabase Auth e salvo como pendência interna.
-3. Usuário confirma no link do Supabase (callback em /auth/confirm), que aciona /api/auth/verify-email.
-4. A API valida `token_hash` no Supabase, sincroniza `email_verified_at`, `supabase_user_id`, `auth_provider='supabase'` e cria/sincroniza usuário interno.
-5. Somente após verificação, login em /api/v1/auth/login valida exclusivamente no Supabase Auth e sincroniza identidade local (`supabase_user_id`, `last_identity_sync_at`).
-6. Frontend consulta /api/v1/auth/me para montar sessão e usa /api/v1/auth/refresh em expiração do access token.
-7. Rotas protegidas exigem auth, role e feature permission.
-
-## Pagamentos híbridos: Stripe + Asaas
-
-Arquitetura ativa no backend:
-
-- Stripe como provider principal para assinatura recorrente em cartão.
-- Asaas como provider de Pix com geração de QR Code e payload copia/cola.
-- Regras internas unificadas por status: trialing, pending, active, past_due, unpaid, canceled, incomplete.
-- Persistência de dados externos por provider na barbershop + tabela de snapshots em billing_payments.
-- Idempotência de webhook via billing_webhook_events.
-
-Endpoints principais em /api/v1/billing:
-
-- POST /checkout/session
-- GET /status
-- POST /cancel
-- POST /reactivate
-- GET /pix/:paymentId
-- POST /webhooks/asaas
-
-Fluxo de webhook:
-
-1. Stripe: endpoint legado em /api/v1/subscriptions/webhook (mantido).
-2. Asaas: endpoint novo em /api/v1/billing/webhooks/asaas.
-3. O processamento Asaas usa lock transacional + tabela de eventos para evitar reprocessamento.
-
-Testes locais de billing:
-
-```bash
-cd backend
-npm test -- billingStatusMapper.test.js billingService.test.js billingWebhookIdempotency.test.js
-```
-
-Troubleshooting rápido de billing:
-
-- Erro BILLING_NOT_CONFIGURED: revisar variáveis STRIPE_* e ASAAS_* no backend/.env.
-- Pix sem QR Code: consultar GET /api/v1/billing/pix/:paymentId para regenerar estado/payload.
-- Webhook Asaas rejeitado: validar ASAAS_WEBHOOK_TOKEN e cabeçalho enviado pelo Asaas.
-- Status preso em pending: validar recebimento do webhook e registro em billing_webhook_events.
-
-## Módulos Principais
-
-- Tenant app:
-  - Dashboard
-  - Agendamentos
-  - Clientes
-  - Financeiro
-  - Serviços/Barbeiros
-  - WhatsApp
-  - Assinatura
-- Platform admin:
-  - Métricas globais
-  - Gestão de contas (tenants)
-  - Gestão de assinaturas
-  - Auditoria
-
-## Banco de Dados e Migrations SQL
-
-O projeto usa PostgreSQL.
-
-Arquivos SQL em backend/src/config:
-
-- database.sql (schema base)
-- migration_v2.sql (upgrade legado)
-- migration_v3.sql (bot WhatsApp: colunas novas + tabela whatsapp_menu_options)
-- migration_v4.sql (índices de performance)
-- migration_v5.sql (campos e eventos Stripe)
-- migration_v6.sql (RBAC admin/tenant/employee e audit logs)
-- migration_v7.sql (preferência de plano no onboarding: desired_plan)
-- migration_v8.sql (barbershop settings)
-- migration_v9.sql (verificação de e-mail de conta)
-- migration_v10.sql (vínculo de identidade Supabase + pendências de cadastro)
-- migration_v11.sql (billing híbrido Stripe: modo e método de pagamento)
-- migration_v12.sql (billing híbrido Stripe + Asaas: provider abstrato, eventos idempotentes e snapshots de pagamentos)
-- migration_v13.sql (CPF/CNPJ da barbearia para billing Pix)
-- migration_v14.sql (normalização/validação de CPF/CNPJ em pendências e barbearias)
-- migration_v15.sql (vínculo de instância WhatsApp por barbearia)
-- migration_v16_supabase_only_auth.sql (autenticação somente Supabase)
-
-A documentação completa de migrations manuais, validação, rollback e troubleshooting está em POSTGRESQL_SETUP.md.
-
-## Problemas Comuns
-
-- Erro de conexão PostgreSQL: revisar DATABASE_URL e serviço do banco.
-- Erro function gen_random_uuid() does not exist: habilitar extensão pgcrypto.
-- Erro de migration v3: conferir execução no banco correto e com UTF-8.
-- Erro de billing híbrido: confirmar aplicação da migration_v12.sql e variáveis ASAAS_* / STRIPE_*.
-- Erro de CORS: garantir FRONTEND_URL no backend.
-- Erro de porta ocupada: ajustar processo ou variável PORT.
-
-Guia completo: TROUBLESHOOTING.md
-
-## Deploy
-
-Guia completo de produção: DEPLOY.md
-
-Inclui:
-
-- Requisitos mínimos.
-- Variáveis obrigatórias.
-- Build e start.
-- Ordem de migrations antes de produção.
-- Check pós-deploy e rollback.
-
-## Comandos Úteis
-
-Na raiz:
-
-```bash
-npm run install:all
-npm run dev:backend
-npm run dev:frontend
-npm run build:backend
-npm run build:frontend
-npm run start:backend
-npm run start:frontend
-npm run seed:auth-admin
-npm run seed:system-users
-```
+- `npm run install:all`
+- `npm run dev:backend`
+- `npm run dev:frontend`
+- `npm run seed:auth-admin`
+- `npm run seed:system-users`
 
 Backend:
 
-```bash
-cd backend
-npm run dev
-npm start
-npm test
-npm run test:watch
-npm run seed:auth-admin
-npm run seed:system-users
-```
+- `npm run dev`
+- `npm start`
+- `npm test`
+- `npm run migrate:legacy-auth`
 
 Frontend:
 
+- `npm run dev`
+- `npm run build`
+- `npm start`
+- `npm run lint`
+
+## API
+
+Base URL:
+
+- `http://localhost:5000/api/v1`
+
+Principais grupos:
+
+- `/auth`
+- `/dashboard`
+- `/appointments`
+- `/clients`
+- `/finance`
+- `/barbershop`
+- `/whatsapp`
+- `/subscriptions`
+- `/billing`
+- `/admin`
+
+Veja API_DOCS.md para endpoints e contratos.
+
+## Billing
+
+- Stripe: assinatura recorrente/cartão, portal e webhooks.
+- Asaas: Pix com QR Code e webhook.
+- Status não ativos restringem acesso a billing/status conforme PLANOS.md.
+
+## WhatsApp
+
+- Provider atual: Evolution API v1 externa.
+- Webhook principal: `/api/v1/whatsapp/webhook`.
+- Tenant por instância: `barbershops.whatsapp_instance_name`.
+
+Veja WHATSAPP_BOT.md.
+
+## Docker
+
 ```bash
-cd frontend
-npm run dev
-npm run build
-npm start
-npm run lint
+docker compose up --build
 ```
 
-## Índice de Documentação
+Atenção: o compose atual aplica automaticamente até `migration_v15.sql`; aplique v16-v18 manualmente para schema completo.
 
-- START_HERE.md
-- QUICK_START.md
-- INSTALL.md
-- POSTGRESQL_SETUP.md
-- API_DOCS.md
-- PROJECT_STRUCTURE.md
-- WHATSAPP_BOT.md
-- PLANOS.md
-- DEPLOY.md
-- TROUBLESHOOTING.md
+## Documentação
 
-## Status de Configuração do Repositório
-
-As inconsistências operacionais críticas foram corrigidas no estado atual do projeto:
-
-- backend/.env.example usa DB_CONNECT_TIMEOUT.
-- backend/.env.example marca Supabase Auth como obrigatório e `AUTH_PROVIDER_MODE` como obsoleto.
-- docker-compose.yml usa FRONTEND_URL no backend e NEXT_PUBLIC_API_URL com /api/v1 no frontend.
-- setup.ps1 deve aplicar database.sql + migrations até migration_v16_supabase_only_auth.sql.
-- fix-env.ps1 remove variáveis legadas WHATSAPP_API_* e mantém defaults compatíveis com o backend atual.
-
-Observação:
-
-- No Docker, scripts de inicialização em /docker-entrypoint-initdb.d rodam apenas no primeiro bootstrap de um volume novo. Se o volume já existia, aplique migrations manualmente ou recrie o volume.
+- START_HERE.md: caminho de leitura.
+- QUICK_START.md: setup rápido.
+- INSTALL.md: instalação completa.
+- POSTGRESQL_SETUP.md: banco e migrations.
+- API_DOCS.md: API REST.
+- PLANOS.md: planos e gates.
+- WHATSAPP_BOT.md: WhatsApp/Evolution.
+- DEPLOY.md: produção.
+- TROUBLESHOOTING.md: diagnóstico.

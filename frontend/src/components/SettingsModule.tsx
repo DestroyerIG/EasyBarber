@@ -27,6 +27,28 @@ const FIELD_CLASS =
   'input min-h-[52px] rounded-2xl border-white/10 bg-black/40 px-4 py-3 text-[15px] placeholder:text-gray-500 focus:border-primary/70 focus:ring-primary/30';
 const ERROR_FIELD_CLASS = 'border-red-400/70 focus:border-red-400 focus:ring-red-400/30';
 const MUTED_TEXT_CLASS = 'text-sm leading-6 text-gray-400';
+const DIAS_SEMANA = [
+  { id: 'seg', label: 'Segunda' },
+  { id: 'ter', label: 'Terça' },
+  { id: 'qua', label: 'Quarta' },
+  { id: 'qui', label: 'Quinta' },
+  { id: 'sex', label: 'Sexta' },
+  { id: 'sab', label: 'Sábado' },
+  { id: 'dom', label: 'Domingo' },
+] as const;
+const INTERVALOS = [
+  { value: 0, label: 'Sem intervalo' },
+  { value: 15, label: '15 minutos' },
+  { value: 20, label: '20 minutos' },
+  { value: 30, label: '30 minutos' },
+  { value: 45, label: '45 minutos' },
+  { value: 60, label: '60 minutos' },
+  { value: 90, label: '90 minutos' },
+  { value: 120, label: '120 minutos' },
+] as const;
+
+type DiaSemanaId = (typeof DIAS_SEMANA)[number]['id'];
+type DiasAbertosState = Record<DiaSemanaId, boolean>;
 
 interface SettingsModuleProps {
   initialBarbershopName: string;
@@ -34,6 +56,7 @@ interface SettingsModuleProps {
 
 interface SettingsState {
   whatsappInstanceName: string;
+  diasAbertos: DiasAbertosState;
   openingTime: string;
   closingTime: string;
   slotIntervalMinutes: number;
@@ -63,6 +86,15 @@ type FormErrors<T extends string> = Partial<Record<T, string>>;
 
 const buildDefaultSettings = (): SettingsState => ({
   whatsappInstanceName: '',
+  diasAbertos: {
+    seg: true,
+    ter: true,
+    qua: true,
+    qui: true,
+    sex: true,
+    sab: false,
+    dom: false,
+  },
   openingTime: '09:00',
   closingTime: '20:00',
   slotIntervalMinutes: 30,
@@ -124,6 +156,46 @@ const formatPhoneInput = (value: string) => {
 
   return formatPhone(digits);
 };
+
+const normalizeDiasAbertos = (value: unknown, fallback: DiasAbertosState): DiasAbertosState => {
+  if (Array.isArray(value)) {
+    const selected = new Set(value.map((dia) => String(dia)));
+    return DIAS_SEMANA.reduce(
+      (acc, dia) => ({
+        ...acc,
+        [dia.id]: selected.has(dia.id),
+      }),
+      {} as DiasAbertosState
+    );
+  }
+
+  if (value && typeof value === 'object') {
+    const source = value as Partial<Record<DiaSemanaId, unknown>>;
+    return DIAS_SEMANA.reduce(
+      (acc, dia) => ({
+        ...acc,
+        [dia.id]: source[dia.id] === true,
+      }),
+      {} as DiasAbertosState
+    );
+  }
+
+  return { ...fallback };
+};
+
+const buildSettingsFromPayload = (
+  payload: Partial<SettingsState> & { diasAbertos?: unknown },
+  fallback: SettingsState
+): SettingsState => ({
+  ...fallback,
+  ...payload,
+  diasAbertos: normalizeDiasAbertos(payload.diasAbertos, fallback.diasAbertos),
+});
+
+const buildSettingsSavePayload = (settings: SettingsState) => ({
+  ...settings,
+  diasAbertos: DIAS_SEMANA.filter((dia) => settings.diasAbertos[dia.id]).map((dia) => dia.id),
+});
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
@@ -310,10 +382,7 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
 
       try {
         const response = await api.get('/barbershop/settings');
-        const merged = {
-          ...defaults,
-          ...(response.data as Partial<SettingsState>),
-        };
+        const merged = buildSettingsFromPayload(response.data as Partial<SettingsState>, defaults);
 
         setSettings(merged);
         localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(merged));
@@ -330,10 +399,7 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
           const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
           const parsed = raw ? (JSON.parse(raw) as Partial<SettingsState>) : {};
 
-          setSettings({
-            ...defaults,
-            ...parsed,
-          });
+          setSettings(buildSettingsFromPayload(parsed, defaults));
           setUsingLocalFallback(true);
         } catch {
           setSettings(defaults);
@@ -480,11 +546,8 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
     setSettingsSaving(true);
 
     try {
-      const response = await api.put('/barbershop/settings', settings);
-      const merged = {
-        ...settings,
-        ...(response.data as Partial<SettingsState>),
-      };
+      const response = await api.put('/barbershop/settings', buildSettingsSavePayload(settings));
+      const merged = buildSettingsFromPayload(response.data as Partial<SettingsState>, settings);
 
       setSettings(merged);
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(merged));
@@ -776,6 +839,30 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
             <LoadingBlock lines={4} />
           ) : (
             <div className="space-y-5">
+              <Field id="diasAbertos" label="Dias de funcionamento">
+                <div className="flex flex-wrap gap-3 rounded-2xl border border-white/10 bg-black/25 px-4 py-4">
+                  {DIAS_SEMANA.map((dia) => (
+                    <label
+                      key={dia.id}
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-xl px-1 py-1 text-sm font-medium text-gray-200 transition-colors hover:text-white"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={settings.diasAbertos[dia.id]}
+                        onChange={(event) =>
+                          updateSettingsField('diasAbertos', {
+                            ...settings.diasAbertos,
+                            [dia.id]: event.target.checked,
+                          })
+                        }
+                        className="h-4 w-4 shrink-0 accent-primary"
+                      />
+                      {dia.label}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                 <Field id="openingTime" label="Abre às">
                   <input
@@ -805,11 +892,11 @@ export function SettingsModule({ initialBarbershopName }: SettingsModuleProps) {
                   value={settings.slotIntervalMinutes}
                   onChange={(event) => updateSettingsField('slotIntervalMinutes', Number(event.target.value))}
                 >
-                  <option value={15}>15 minutos</option>
-                  <option value={20}>20 minutos</option>
-                  <option value={30}>30 minutos</option>
-                  <option value={45}>45 minutos</option>
-                  <option value={60}>60 minutos</option>
+                  {INTERVALOS.map((intervalo) => (
+                    <option key={intervalo.value} value={intervalo.value}>
+                      {intervalo.label}
+                    </option>
+                  ))}
                 </select>
               </Field>
 

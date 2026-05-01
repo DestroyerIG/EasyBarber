@@ -17,8 +17,13 @@ export const updateBarbershopSettingsSchema = z.object({
     .default(''),
   openingTime: z.string().regex(/^\d{2}:\d{2}$/, 'Horário de abertura deve estar no formato HH:MM'),
   closingTime: z.string().regex(/^\d{2}:\d{2}$/, 'Horário de fechamento deve estar no formato HH:MM'),
-  slotIntervalMinutes: z.number().int().refine((value) => [15, 20, 30, 45, 60].includes(value), {
-    message: 'Intervalo deve ser 15, 20, 30, 45 ou 60 minutos',
+  diasAbertos: z
+    .array(z.enum(['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom']))
+    .min(1, 'Selecione pelo menos um dia de funcionamento')
+    .optional()
+    .default(['seg', 'ter', 'qua', 'qui', 'sex']),
+  slotIntervalMinutes: z.number().int().refine((value) => [0, 15, 20, 30, 45, 60, 90, 120].includes(value), {
+    message: 'Intervalo deve ser sem intervalo, 15, 20, 30, 45, 60, 90 ou 120 minutos',
   }),
   allowWalkins: z.boolean(),
   autoConfirmAppointments: z.boolean(),

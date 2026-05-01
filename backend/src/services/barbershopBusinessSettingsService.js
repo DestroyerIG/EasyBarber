@@ -2,12 +2,23 @@ import { barbershopSettingsRepository } from '../repositories/barbershopSettings
 import logger from '../utils/logger.js';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
-const ALLOWED_SLOT_INTERVALS = new Set([15, 20, 30, 45, 60]);
+const ALLOWED_SLOT_INTERVALS = new Set([0, 15, 20, 30, 45, 60, 90, 120]);
+const DIAS_SEMANA = ['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'];
+const DEFAULT_DIAS_ABERTOS = {
+  seg: true,
+  ter: true,
+  qua: true,
+  qui: true,
+  sex: true,
+  sab: false,
+  dom: false,
+};
 
 export const DEFAULT_BUSINESS_SETTINGS = {
   openingTime: '08:00',
   closingTime: '18:00',
   slotIntervalMinutes: 30,
+  diasAbertos: { ...DEFAULT_DIAS_ABERTOS },
   allowWalkins: false,
   autoConfirmAppointments: true,
   timezone: DEFAULT_TIMEZONE,
@@ -66,6 +77,25 @@ const normalizeSlotInterval = (value) => {
   return DEFAULT_BUSINESS_SETTINGS.slotIntervalMinutes;
 };
 
+const normalizeDiasAbertos = (value) => {
+  if (Array.isArray(value)) {
+    const selected = new Set(value.map((day) => String(day || '').trim().toLowerCase()));
+    return DIAS_SEMANA.reduce((acc, day) => ({
+      ...acc,
+      [day]: selected.has(day),
+    }), {});
+  }
+
+  if (value && typeof value === 'object') {
+    return DIAS_SEMANA.reduce((acc, day) => ({
+      ...acc,
+      [day]: value[day] === true,
+    }), {});
+  }
+
+  return { ...DEFAULT_DIAS_ABERTOS };
+};
+
 const normalizeTimezone = (value) => {
   const candidate = typeof value === 'string' ? value.trim() : '';
   const fromEnv = process.env.BUSINESS_TIMEZONE || process.env.APP_TIMEZONE || process.env.TZ || '';
@@ -119,6 +149,16 @@ const getDateInTimezone = (currentDate, timeZone) => {
   return `${year}-${month}-${day}`;
 };
 
+const getDiaSemanaFromDate = (dateValue) => {
+  const date = dateValue instanceof Date ? dateValue : new Date(`${dateValue}T12:00:00`);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'][date.getDay()];
+};
+
 const normalizeBookedTimes = (bookedTimes = []) => {
   const normalized = new Set();
 
@@ -148,6 +188,7 @@ export const normalizeBusinessSettings = (settings = {}) => {
     openingTime: normalizedOpening,
     closingTime: normalizedClosing,
     slotIntervalMinutes: normalizeSlotInterval(settings.slotIntervalMinutes),
+    diasAbertos: normalizeDiasAbertos(settings.diasAbertos),
     allowWalkins: normalizeBoolean(settings.allowWalkins, DEFAULT_BUSINESS_SETTINGS.allowWalkins),
     autoConfirmAppointments: normalizeBoolean(settings.autoConfirmAppointments, DEFAULT_BUSINESS_SETTINGS.autoConfirmAppointments),
     timezone: normalizeTimezone(settings.timezone),
@@ -174,6 +215,7 @@ export const getBarbershopBusinessSettings = async (barbershopId) => {
         openingTime: normalized.openingTime,
         closingTime: normalized.closingTime,
         slotIntervalMinutes: normalized.slotIntervalMinutes,
+        diasAbertos: normalized.diasAbertos,
         allowWalkins: normalized.allowWalkins,
         autoConfirmAppointments: normalized.autoConfirmAppointments,
         timezone: normalized.timezone,
@@ -206,6 +248,17 @@ export const isWithinBusinessHours = (settings = {}, currentDate = new Date()) =
   return now >= openingMinutes && now < closingMinutes;
 };
 
+export const isBusinessOpenOnDate = (settings = {}, selectedDate = new Date()) => {
+  const normalized = normalizeBusinessSettings(settings);
+  const diaSemana = getDiaSemanaFromDate(selectedDate);
+
+  if (!diaSemana) {
+    return true;
+  }
+
+  return normalized.diasAbertos[diaSemana] === true;
+};
+
 export const generateAvailableTimeSlots = (
   settings = {},
   selectedDate,
@@ -216,12 +269,16 @@ export const generateAvailableTimeSlots = (
   } = {}
 ) => {
   const normalized = normalizeBusinessSettings(settings);
+  if (!isBusinessOpenOnDate(normalized, selectedDate || currentDate)) {
+    return [];
+  }
+
   const openingMinutes = toMinutes(normalized.openingTime);
   const closingMinutes = toMinutes(normalized.closingTime);
-  const slotInterval = normalized.slotIntervalMinutes;
   const duration = Number.isInteger(serviceDurationMinutes) && serviceDurationMinutes > 0
     ? serviceDurationMinutes
-    : slotInterval;
+    : DEFAULT_BUSINESS_SETTINGS.slotIntervalMinutes;
+  const slotStep = normalized.slotIntervalMinutes > 0 ? normalized.slotIntervalMinutes : duration;
 
   const normalizedBookedTimes = normalizeBookedTimes(bookedTimes);
 
@@ -233,14 +290,14 @@ export const generateAvailableTimeSlots = (
 
     if (nowMinutes > openingMinutes) {
       const elapsed = nowMinutes - openingMinutes;
-      const nextStep = Math.ceil(elapsed / slotInterval);
-      firstSlotMinute = openingMinutes + (nextStep * slotInterval);
+      const nextStep = Math.ceil(elapsed / slotStep);
+      firstSlotMinute = openingMinutes + (nextStep * slotStep);
     }
   }
 
   const availableSlots = [];
 
-  for (let minute = firstSlotMinute; minute + duration <= closingMinutes; minute += slotInterval) {
+  for (let minute = firstSlotMinute; minute + duration <= closingMinutes; minute += slotStep) {
     const slot = fromMinutes(minute);
     if (!normalizedBookedTimes.has(slot)) {
       availableSlots.push(slot);
