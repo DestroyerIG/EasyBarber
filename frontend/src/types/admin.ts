@@ -119,6 +119,30 @@ export interface AdminAuditLog {
   created_at: string;
 }
 
+export interface AdminCoupon {
+  id: string;
+  code: string;
+  description: string | null;
+  discount_type: 'percent' | 'fixed';
+  discount_value: string | number;
+  max_uses: number | null;
+  current_uses: number;
+  valid_until: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminCouponPayload {
+  code?: string;
+  description?: string | null;
+  discount_type?: 'percent' | 'fixed';
+  discount_value?: number;
+  max_uses?: number | null;
+  valid_until?: string | null;
+  active?: boolean;
+}
+
 export interface PaginationMeta {
   total: number;
   page: number;

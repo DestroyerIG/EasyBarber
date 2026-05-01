@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { Activity, Building2, CreditCard, LayoutDashboard, ScrollText } from 'lucide-react';
+import { Activity, Building2, CreditCard, LayoutDashboard, ScrollText, Tags } from 'lucide-react';
 import easyBarberLogo from '@/icons/easybarber.png';
 
 const links = [
@@ -11,6 +11,7 @@ const links = [
   { href: '/admin/metrics', label: 'Métricas', icon: Activity },
   { href: '/admin/tenants', label: 'Contas', icon: Building2 },
   { href: '/admin/subscriptions', label: 'Assinaturas', icon: CreditCard },
+  { href: '/admin/coupons', label: 'Cupons', icon: Tags },
   { href: '/admin/logs', label: 'Auditoria', icon: ScrollText },
 ];
 

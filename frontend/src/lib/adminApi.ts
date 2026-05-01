@@ -2,6 +2,8 @@ import api from '@/lib/api';
 import type {
   AdminActionPayload,
   AdminAuditLog,
+  AdminCoupon,
+  AdminCouponPayload,
   AdminMetricsResponse,
   AdminSubscription,
   AdminTenant,
@@ -120,5 +122,26 @@ export const adminApi = {
 
     const parsed = extractWithMeta<AdminAuditLog[]>(response as unknown as { data: AdminAuditLog[]; meta?: PaginationMeta });
     return { data: parsed.data, meta: parsed.meta };
+  },
+
+  async getCoupons(): Promise<AdminCoupon[]> {
+    const response = await api.get('/admin/coupons');
+    const payload = response.data as { data?: AdminCoupon[] } | AdminCoupon[];
+    return Array.isArray(payload) ? payload : payload.data || [];
+  },
+
+  async createCoupon(payload: AdminCouponPayload): Promise<AdminCoupon> {
+    const response = await api.post('/admin/coupons', payload);
+    return (response.data as { data: AdminCoupon }).data;
+  },
+
+  async updateCoupon(couponId: string, payload: AdminCouponPayload): Promise<AdminCoupon> {
+    const response = await api.patch(`/admin/coupons/${couponId}`, payload);
+    return (response.data as { data: AdminCoupon }).data;
+  },
+
+  async deleteCoupon(couponId: string) {
+    const response = await api.delete(`/admin/coupons/${couponId}`);
+    return response.data;
   },
 };

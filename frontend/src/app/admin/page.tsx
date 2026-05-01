@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ArrowRight, BarChart3, Building2, CreditCard, ScrollText, ShieldAlert, Users } from 'lucide-react';
+import { ArrowRight, BarChart3, Building2, CreditCard, ScrollText, ShieldAlert, Tags, Users } from 'lucide-react';
 import { adminApi } from '@/lib/adminApi';
 import { AdminMetricCard } from '@/components/admin/AdminMetricCard';
 import type { AdminMetricsResponse } from '@/types/admin';
@@ -78,6 +78,10 @@ export default function AdminHomePage() {
             </Link>
             <Link href="/admin/subscriptions" className="flex items-center justify-between rounded-lg border border-white/10 px-4 py-3 text-sm hover:bg-white/5">
               <span className="inline-flex items-center gap-2"><CreditCard size={16} /> Assinaturas</span>
+              <ArrowRight size={16} />
+            </Link>
+            <Link href="/admin/coupons" className="flex items-center justify-between rounded-lg border border-white/10 px-4 py-3 text-sm hover:bg-white/5">
+              <span className="inline-flex items-center gap-2"><Tags size={16} /> Cupons</span>
               <ArrowRight size={16} />
             </Link>
             <Link href="/admin/logs" className="flex items-center justify-between rounded-lg border border-white/10 px-4 py-3 text-sm hover:bg-white/5">
