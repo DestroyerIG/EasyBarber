@@ -19,7 +19,7 @@ Frontend -> Backend EasyBarber -> Evolution API v1
 ## Pré-requisitos
 
 - Backend rodando.
-- Banco com migrations até `migration_v18_asaas_customer_id.sql`.
+- Banco com migrations até `migration_v19_business_days_and_intervals.sql`.
 - Plano com feature `whatsapp_automation` liberada.
 - Evolution API v1 acessível por URL pública.
 - Webhook configurado para o backend.
@@ -118,6 +118,17 @@ O módulo permite:
 - Menu dinâmico.
 - Reordenação de opções.
 - Reset para configuração padrão.
+
+## Configuração Operacional
+
+O bot usa as preferências salvas em `/barbershop/settings` para gerar horários:
+
+- `diasAbertos`: array com ids dos dias abertos (`seg`, `ter`, `qua`, `qui`, `sex`, `sab`, `dom`). O padrão é segunda a sexta.
+- `openingTime` e `closingTime`: janela diária de atendimento.
+- `slotIntervalMinutes`: intervalo entre horários. O valor `0` significa sem intervalo e gera horários contínuos pela duração do serviço.
+- `allowWalkins`: quando ativo, o bot informa que encaixes são aceitos ao não encontrar slots.
+
+Se a data escolhida cair em um dia fechado, o bot responde: `Hoje não estamos atendendo. Escolha outro dia.`
 
 ## Simulador
 

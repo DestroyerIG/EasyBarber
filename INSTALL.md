@@ -118,11 +118,12 @@ Aplique os arquivos SQL nesta ordem:
 15. `backend/src/config/migration_v16_supabase_only_auth.sql`
 16. `backend/src/config/migration_v17_subscription_access_gate.sql`
 17. `backend/src/config/migration_v18_asaas_customer_id.sql`
+18. `backend/src/config/migration_v19_business_days_and_intervals.sql`
 
 Linux/macOS:
 
 ```bash
-for file in backend/src/config/database.sql backend/src/config/migration_v3.sql backend/src/config/migration_v4.sql backend/src/config/migration_v5.sql backend/src/config/migration_v6.sql backend/src/config/migration_v7.sql backend/src/config/migration_v8.sql backend/src/config/migration_v9.sql backend/src/config/migration_v10.sql backend/src/config/migration_v11.sql backend/src/config/migration_v12.sql backend/src/config/migration_v13.sql backend/src/config/migration_v14.sql backend/src/config/migration_v15.sql backend/src/config/migration_v16_supabase_only_auth.sql backend/src/config/migration_v17_subscription_access_gate.sql backend/src/config/migration_v18_asaas_customer_id.sql; do
+for file in backend/src/config/database.sql backend/src/config/migration_v3.sql backend/src/config/migration_v4.sql backend/src/config/migration_v5.sql backend/src/config/migration_v6.sql backend/src/config/migration_v7.sql backend/src/config/migration_v8.sql backend/src/config/migration_v9.sql backend/src/config/migration_v10.sql backend/src/config/migration_v11.sql backend/src/config/migration_v12.sql backend/src/config/migration_v13.sql backend/src/config/migration_v14.sql backend/src/config/migration_v15.sql backend/src/config/migration_v16_supabase_only_auth.sql backend/src/config/migration_v17_subscription_access_gate.sql backend/src/config/migration_v18_asaas_customer_id.sql backend/src/config/migration_v19_business_days_and_intervals.sql; do
   psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f "$file"
 done
 ```
@@ -147,7 +148,8 @@ $files = @(
   "backend/src/config/migration_v15.sql",
   "backend/src/config/migration_v16_supabase_only_auth.sql",
   "backend/src/config/migration_v17_subscription_access_gate.sql",
-  "backend/src/config/migration_v18_asaas_customer_id.sql"
+  "backend/src/config/migration_v18_asaas_customer_id.sql",
+  "backend/src/config/migration_v19_business_days_and_intervals.sql"
 )
 foreach ($file in $files) {
   psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f $file
@@ -185,4 +187,4 @@ npm run seed:system-users
 docker compose up --build
 ```
 
-Observação: o compose atual inicializa o banco até `migration_v15.sql`; aplique v16-v18 manualmente em bancos criados por ele.
+Observação: o compose atual inicializa o banco até `migration_v15.sql`; aplique v16-v19 manualmente em bancos criados por ele.

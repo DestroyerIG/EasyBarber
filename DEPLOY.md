@@ -93,7 +93,7 @@ NEXT_PUBLIC_WHATSAPP_CONTACT_URL=https://wa.me/55...
 
 1. Faça backup.
 2. Aplique `database.sql` apenas em banco novo.
-3. Aplique migrations em ordem até `migration_v18_asaas_customer_id.sql`.
+3. Aplique migrations em ordem até `migration_v19_business_days_and_intervals.sql`.
 4. Valide tabelas críticas.
 
 Comandos:
@@ -106,6 +106,7 @@ pg_dump "$DATABASE_URL" > backup_barberpro_$(date +%Y%m%d_%H%M%S).sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v16_supabase_only_auth.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v17_subscription_access_gate.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v18_asaas_customer_id.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v19_business_days_and_intervals.sql
 ```
 
 Para banco novo, consulte POSTGRESQL_SETUP.md para a lista completa desde `database.sql`.
@@ -188,7 +189,7 @@ Valide no navegador:
 
 ## Riscos Comuns
 
-- Banco sem v16-v18.
+- Banco sem v16-v19.
 - Supabase redirect diferente de `AUTH_SUPABASE_REDIRECT_TO`.
 - CORS sem `FRONTEND_URL` correto.
 - Cookies com domínio incorreto.

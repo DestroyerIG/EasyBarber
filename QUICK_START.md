@@ -78,7 +78,8 @@ for file in \
   backend/src/config/migration_v15.sql \
   backend/src/config/migration_v16_supabase_only_auth.sql \
   backend/src/config/migration_v17_subscription_access_gate.sql \
-  backend/src/config/migration_v18_asaas_customer_id.sql
+  backend/src/config/migration_v18_asaas_customer_id.sql \
+  backend/src/config/migration_v19_business_days_and_intervals.sql
 do
   psql -h localhost -p 5432 -U postgres -d barberpro -v ON_ERROR_STOP=1 -f "$file"
 done
@@ -127,4 +128,4 @@ Depois teste:
 docker compose up --build
 ```
 
-Atenção: o compose atual aplica automaticamente até `migration_v15.sql` no primeiro bootstrap do volume. Para usar o schema atual completo, aplique v16, v17 e v18 manualmente no banco do container, conforme POSTGRESQL_SETUP.md.
+Atenção: o compose atual aplica automaticamente até `migration_v15.sql` no primeiro bootstrap do volume. Para usar o schema atual completo, aplique v16, v17, v18 e v19 manualmente no banco do container, conforme POSTGRESQL_SETUP.md.

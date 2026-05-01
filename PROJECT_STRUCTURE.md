@@ -46,7 +46,7 @@ backend/
 
 - `database.js`: pool PostgreSQL.
 - `database.sql`: schema base.
-- `migration_v2.sql` até `migration_v18_asaas_customer_id.sql`: evoluções de schema.
+- `migration_v2.sql` até `migration_v19_business_days_and_intervals.sql`: evoluções de schema.
 - `authProviderMode.js`: legado; Supabase Auth é obrigatório no fluxo atual.
 - `planPermissions.js`: matriz de features por plano/status.
 - `stripe.js`: cliente e helpers Stripe.
@@ -176,4 +176,4 @@ Frontend:
 
 ## Observação Sobre Bootstrap
 
-`docker-compose.yml` e `setup.ps1` aplicam automaticamente migrations até `migration_v15.sql`. Para o schema mais recente, aplique manualmente `migration_v16_supabase_only_auth.sql`, `migration_v17_subscription_access_gate.sql` e `migration_v18_asaas_customer_id.sql` em bancos criados por esses fluxos.
+`docker-compose.yml` e `setup.ps1` aplicam automaticamente migrations até `migration_v15.sql`. Para o schema mais recente, aplique manualmente `migration_v16_supabase_only_auth.sql`, `migration_v17_subscription_access_gate.sql`, `migration_v18_asaas_customer_id.sql` e `migration_v19_business_days_and_intervals.sql` em bancos criados por esses fluxos.

@@ -175,6 +175,23 @@ Prefixo: `/barbershop`.
 | PUT | `/account-profile` | `tenant_admin` |
 | PUT | `/account-password` | `tenant_admin` + `advanced_admin` |
 
+### Configurações operacionais
+
+`GET /barbershop/settings` retorna as preferências da barbearia. `PUT /barbershop/settings` aceita, entre outros campos:
+
+```json
+{
+  "diasAbertos": ["seg", "ter", "qua", "qui", "sex"],
+  "openingTime": "09:00",
+  "closingTime": "20:00",
+  "slotIntervalMinutes": 30,
+  "allowWalkins": true,
+  "autoConfirmAppointments": false
+}
+```
+
+`diasAbertos` deve conter ids de dias (`seg`, `ter`, `qua`, `qui`, `sex`, `sab`, `dom`). `slotIntervalMinutes` aceita `0`, `15`, `20`, `30`, `45`, `60`, `90` e `120`; `0` significa sem intervalo.
+
 ## WhatsApp
 
 Prefixo: `/whatsapp`.

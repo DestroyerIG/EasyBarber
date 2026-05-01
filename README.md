@@ -19,6 +19,7 @@ O projeto é dividido em:
 - Sessão com cookies httpOnly e refresh token.
 - Dashboard tenant.
 - Gestão de agendamentos, clientes, serviços e barbeiros.
+- Configuração operacional com dias de funcionamento, horários e intervalos de agenda.
 - Financeiro com receitas, despesas e relatórios.
 - Automação WhatsApp via Evolution API v1.
 - Billing híbrido: Stripe para cartão/assinatura e Asaas para Pix.
@@ -77,7 +78,7 @@ O frontend nunca chama Evolution API, Stripe secret ou Asaas diretamente.
 ```text
 backend/
   src/
-    config/        # database.sql e migrations até v18
+    config/        # database.sql e migrations até v19
     controllers/
     integrations/  # Asaas
     middleware/
@@ -157,7 +158,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
 Banco novo exige:
 
 - `backend/src/config/database.sql`
-- Migrations v3 até `migration_v18_asaas_customer_id.sql`
+- migrations v3 até `migration_v19_business_days_and_intervals.sql`
 
 Consulte POSTGRESQL_SETUP.md para a ordem completa e comandos por sistema operacional.
 
@@ -226,7 +227,7 @@ Veja WHATSAPP_BOT.md.
 docker compose up --build
 ```
 
-Atenção: o compose atual aplica automaticamente até `migration_v15.sql`; aplique v16-v18 manualmente para schema completo.
+Atenção: o compose atual aplica automaticamente até `migration_v15.sql`; aplique v16-v19 manualmente para schema completo.
 
 ## Documentação
 

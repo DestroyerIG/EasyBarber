@@ -26,7 +26,7 @@ Guia de entrada para devs que acabaram de clonar o EasyBarber SaaS 2.0.
 - Criar `backend/.env` e `frontend/.env.local` a partir dos exemplos.
 - Configurar Supabase Auth: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` e redirects.
 - Criar banco PostgreSQL em UTF-8 e habilitar `pgcrypto`.
-- Aplicar `database.sql` e as migrations atuais até `migration_v18_asaas_customer_id.sql`.
+- Aplicar `database.sql` e as migrations atuais até `migration_v19_business_days_and_intervals.sql`.
 - Subir backend e frontend.
 - Validar `GET /health`, cadastro, confirmação de e-mail e login.
 
@@ -53,7 +53,7 @@ cd frontend && npm run dev
 - `AUTH_PROVIDER_MODE` é obsoleto e deve ser removido de ambientes novos.
 - SMTP é opcional e não é usado para verificação de autenticação.
 - `database.sql` sozinho não cobre o schema atual; aplique todas as migrations listadas em POSTGRESQL_SETUP.md.
-- O `docker-compose.yml` e `setup.ps1` atuais aplicam automaticamente até `migration_v15.sql`; em bancos criados por eles, aplique v16, v17 e v18 manualmente até esses scripts serem atualizados.
+- O `docker-compose.yml` e `setup.ps1` atuais aplicam automaticamente até `migration_v15.sql`; em bancos criados por eles, aplique v16, v17, v18 e v19 manualmente até esses scripts serem atualizados.
 
 ## Mapa de Docs
 

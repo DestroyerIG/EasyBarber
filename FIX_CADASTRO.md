@@ -61,7 +61,7 @@ psql -h localhost -p 5432 -U postgres -d barberpro -c "SELECT to_regclass('publi
 - Frontend sem `/api/v1` em `NEXT_PUBLIC_API_URL`.
 - `SUPABASE_SERVICE_ROLE_KEY` ausente em scripts administrativos.
 - Redirect do Supabase divergente de `AUTH_SUPABASE_REDIRECT_TO`.
-- Banco criado só com `database.sql`, sem migrations até v18.
+- Banco criado só com `database.sql`, sem migrations até v19.
 - Cookies bloqueados por domínio/CORS em produção.
 
 ## Se Persistir
@@ -71,4 +71,4 @@ Siga TROUBLESHOOTING.md e anexe:
 - Log do backend no momento do erro.
 - Payload ou rota chamada.
 - Status HTTP e resposta recebida.
-- Confirmação de que as migrations chegaram até `migration_v18_asaas_customer_id.sql`.
+- Confirmação de que as migrations chegaram até `migration_v19_business_days_and_intervals.sql`.
