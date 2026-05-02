@@ -63,17 +63,19 @@ export default function DashboardPage() {
         return;
       }
 
-      if (session.provider === 'stripe') {
+      if ('provider' in session && session.provider === 'stripe') {
         window.location.assign(session.checkoutUrl);
         return;
       }
 
-      if (typeof window !== 'undefined') {
-        window.sessionStorage.setItem(PIX_STORAGE_KEY, JSON.stringify(session));
-      }
+      if ('provider' in session && session.provider === 'asaas') {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem(PIX_STORAGE_KEY, JSON.stringify(session));
+        }
 
-      showToast('Cobrança Pix criada. Finalize o pagamento na aba de planos.', 'info');
-      router.push('/planos');
+        showToast('Cobrança Pix criada. Finalize o pagamento na aba de planos.', 'info');
+        router.push('/planos');
+      }
     } catch {
       showToast('Não foi possível iniciar o checkout agora.', 'error');
     }
