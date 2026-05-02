@@ -2,7 +2,11 @@ import pool from '../config/database.js';
 import { AppError } from '../utils/errors.js';
 
 export const couponService = {
-  async validateAndApply(code, originalAmount) {
+  /**
+   * Valida o cupom e calcula desconto SEM consumir uso.
+   * Usar para visualização (rota /validate-coupon).
+   */
+  async validate(code, originalAmount) {
     if (!code) return { discount: 0, finalAmount: originalAmount, coupon: null };
 
     const result = await pool.query(
@@ -24,11 +28,23 @@ export const couponService = {
 
     const finalAmount = Math.max(0, Number((originalAmount - discount).toFixed(2)));
 
-    await pool.query(
-      `UPDATE coupons SET current_uses = current_uses + 1, updated_at = NOW() WHERE id = $1`,
-      [coupon.id]
-    );
-
     return { discount, finalAmount, coupon };
+  },
+
+  /**
+   * Valida o cupom, calcula desconto E incrementa current_uses.
+   * Usar SOMENTE no checkout efetivo (billingService.createCheckoutSession).
+   */
+  async validateAndApply(code, originalAmount) {
+    const result = await this.validate(code, originalAmount);
+
+    if (result.coupon) {
+      await pool.query(
+        `UPDATE coupons SET current_uses = current_uses + 1, updated_at = NOW() WHERE id = $1`,
+        [result.coupon.id]
+      );
+    }
+
+    return result;
   },
 };
