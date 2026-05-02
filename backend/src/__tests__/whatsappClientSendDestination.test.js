@@ -185,7 +185,7 @@ describe('whatsappClient destination resolution', () => {
     expect(sent).toBe(true);
     expect(mockSendTextMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        phone: '558396311811',
+        phone: '236197968359561@lid',
         text: 'Oi',
       })
     );

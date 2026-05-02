@@ -2,7 +2,7 @@ const MIN_WHATSAPP_DIGITS = 10;
 const MAX_WHATSAPP_DIGITS = 15;
 const DIRECT_WHATSAPP_JID_SUFFIXES = ['@s.whatsapp.net', '@c.us'];
 const BLOCKED_WHATSAPP_JID_SUFFIXES = ['@g.us', '@lid', '@broadcast', '@newsletter'];
-const BLOCKED_SEND_JID_SUFFIXES = ['@lid', '@g.us', '@broadcast', '@newsletter'];
+const BLOCKED_SEND_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
 const HARD_BLOCKED_CONVERSATION_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
 const MAX_EXTRACTION_REJECTIONS = 20;
 const INCOMING_AUTHOR_MIN_SCORE = 60;
@@ -1010,6 +1010,16 @@ export const normalizePhoneForSend = (value) => {
   }
 
   const lowered = raw.toLowerCase();
+
+  if (lowered.endsWith('@lid')) {
+    const candidate = raw.slice(0, -'@lid'.length);
+    const digits = candidate.replace(/\D/g, '');
+    if (!isValidPhone(digits)) {
+      return null;
+    }
+    return `${digits}@lid`;
+  }
+
   let candidate = raw;
 
   if (lowered.endsWith('@s.whatsapp.net')) {
@@ -1030,7 +1040,15 @@ export const normalizePhoneForSend = (value) => {
 
 export const resolveReplyDestination = ({ phone } = {}) => {
   const normalizedPhone = normalizePhoneForSend(phone);
-  if (!normalizedPhone || !isValidPhone(normalizedPhone)) {
+  if (!normalizedPhone) {
+    return null;
+  }
+
+  if (normalizedPhone.endsWith('@lid')) {
+    return normalizedPhone;
+  }
+
+  if (!isValidPhone(normalizedPhone)) {
     return null;
   }
 
