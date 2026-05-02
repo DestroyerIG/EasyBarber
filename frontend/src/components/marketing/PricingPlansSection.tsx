@@ -373,6 +373,10 @@ export function PricingPlansSection({
         return;
       }
 
+      if (!('provider' in session)) {
+        return;
+      }
+
       if (paymentMethod === 'card') {
         if (session.provider !== 'stripe') {
           showToast('Checkout com cartão indisponível no momento. Tente novamente.', 'error');
