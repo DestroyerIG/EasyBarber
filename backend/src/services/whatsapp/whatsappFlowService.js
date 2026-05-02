@@ -1495,12 +1495,16 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
   );
 
   try {
-    if (payloadFromMe) {
-      logger.info({ ...flowDebugBase }, 'Mensagem ignorada: fromMe');
-      return { ok: false, ignored: true, reason: 'from_me' };
-    }
+    const fromMe = payloadFromMe || phoneExtraction?.fromMe;
+    const authorPhone = normalizedPhone;
+    const isValidUserMessage = !fromMe && authorPhone;
 
-    if (!normalizedPhone) {
+    if (!isValidUserMessage) {
+      if (fromMe) {
+        logger.info({ ...flowDebugBase }, 'Mensagem ignorada: fromMe');
+        return { ok: false, ignored: true, reason: 'from_me' };
+      }
+
       logger.warn({ ...flowDebugBase, payload: payloadSummary, knownInstanceNumbers, phoneExtraction },
         'Mensagem ignorada: telefone nao identificado');
       return { ok: false, ignored: true, reason: 'ambiguous_phone' };
@@ -1508,7 +1512,7 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
 
     const destinationDecision = resolveSafeReplyDestination({
       phone: normalizedPhone,
-      fromMe: payloadFromMe || phoneExtraction?.fromMe,
+      fromMe,
       remoteJidOriginal,
       connectedNumber,
       knownInstanceNumbers,

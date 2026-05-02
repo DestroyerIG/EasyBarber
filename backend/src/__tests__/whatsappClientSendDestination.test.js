@@ -152,7 +152,7 @@ describe('whatsappClient destination resolution', () => {
     expect(sent).toBe(true);
     expect(mockSendTextMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        phone: '558396311811',
+        phone: '558396311811@s.whatsapp.net',
         text: 'Oi',
         instanceName: 'tenant-alpha',
       })
@@ -169,14 +169,14 @@ describe('whatsappClient destination resolution', () => {
     expect(mockEnsureBarbershopWhatsAppInstanceName).toHaveBeenCalledWith('tenant-alpha');
     expect(mockSendTextMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        phone: '558396311811',
+        phone: '558396311811@s.whatsapp.net',
         text: 'Oi',
         instanceName: 'tenant-alpha',
       })
     );
   });
 
-  it('allows @lid send when context is explicitly trusted', async () => {
+  it('sends using authorPhone when remoteJidOriginal is @lid and context is trusted', async () => {
     const sent = await sendWhatsAppText('558396311811', 'Oi', {
       remoteJidOriginal: '236197968359561@lid',
       allowLidDestination: true,
@@ -185,7 +185,7 @@ describe('whatsappClient destination resolution', () => {
     expect(sent).toBe(true);
     expect(mockSendTextMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        phone: '236197968359561@lid',
+        phone: '558396311811@s.whatsapp.net',
         text: 'Oi',
       })
     );

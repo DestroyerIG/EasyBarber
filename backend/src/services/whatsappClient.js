@@ -17,7 +17,6 @@ import {
   normalizeWhatsAppNumber,
   isInvalidJidContext,
   isValidPhone,
-  normalizePhoneForSend,
   resolveSafeReplyDestination,
 } from '../utils/whatsapp.js';
 import {
@@ -723,11 +722,52 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
       : null;
 
   const allowLidDestination = context?.allowLidDestination === true;
-  const preferredDestination = (allowLidDestination && remoteJidOriginal && remoteJidOriginal.endsWith('@lid'))
-    ? remoteJidOriginal
-    : rawPhone;
+  const extraction = context?.extraction || null;
+  const sourcePath =
+    typeof extraction?.sourcePath === 'string' && extraction.sourcePath.trim()
+      ? extraction.sourcePath.trim()
+      : typeof context?.sourcePath === 'string' && context.sourcePath.trim()
+        ? context.sourcePath.trim()
+        : 'direct_input';
+  const rawFromMe = context?.fromMe ?? extraction?.fromMe ?? false;
+  const fromMe =
+    rawFromMe === true ||
+    rawFromMe === 1 ||
+    (typeof rawFromMe === 'string' && ['true', '1'].includes(rawFromMe.trim().toLowerCase()));
+  const authorPhone = (extraction?.phone || context?.authorPhone || rawPhone || '').trim();
+  const isValidUserMessage = !fromMe && authorPhone;
 
-  const normalizedPhone = normalizePhoneForSend(preferredDestination);
+  if (!isValidUserMessage) {
+    logger.warn(
+      {
+        authorPhone: authorPhone || null,
+        fromMe,
+        sourcePath,
+        remoteJidOriginal,
+        reason: fromMe ? 'from_me' : 'missing_author_phone',
+      },
+      'Envio WhatsApp ignorado: mensagem invalida para resposta'
+    );
+    return false;
+  }
+
+  const normalizedAuthorPhone = normalizeWhatsAppNumber(authorPhone);
+  const destination = normalizedAuthorPhone ? `${normalizedAuthorPhone}@s.whatsapp.net` : null;
+  const destinationLowered = destination ? destination.toLowerCase() : '';
+
+  if (destinationLowered.includes('@lid')) {
+    logger.warn(
+      {
+        authorPhone: normalizedAuthorPhone || authorPhone || null,
+        destination,
+        sourcePath,
+        remoteJidOriginal,
+        reason: 'lid_destination',
+      },
+      'Envio WhatsApp ignorado: destino @lid bloqueado'
+    );
+    return false;
+  }
 
   const instanceContext = await resolveClientInstanceContext({
     instanceName: context?.instanceName,
@@ -736,19 +776,18 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   });
   const resolvedInstanceName = instanceContext.instanceName;
   const endpoint = `/message/sendText/${resolvedInstanceName}`;
-  const destination = normalizedPhone;
   const discardedRemoteJid = isInvalidJidContext(remoteJidOriginal);
   const connectedNumber = normalizeWhatsAppNumber(getWhatsAppStatusByInstance(resolvedInstanceName)?.connectedNumber);
   const knownInstanceNumbers = Array.isArray(context?.knownInstanceNumbers)
     ? context.knownInstanceNumbers
     : [];
 
-  const isValidDestination = destination && (isValidPhone(destination) || destination.endsWith('@lid'));
+  const isValidDestination = Boolean(normalizedAuthorPhone && isValidPhone(normalizedAuthorPhone));
 
   if (!isValidDestination) {
     logger.warn(
       {
-        phone: normalizedPhone || rawPhone || null,
+        authorPhone: normalizedAuthorPhone || authorPhone || null,
         remoteJidOriginal,
         reason: 'invalid_phone',
       },
@@ -760,7 +799,9 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   if (!destination) {
     logger.warn(
       {
-        phone: normalizedPhone || rawPhone || null,
+        authorPhone: normalizedAuthorPhone || authorPhone || null,
+        destination,
+        sourcePath,
         remoteJidOriginal,
         reason: 'invalid_destination',
       },
@@ -772,7 +813,9 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   if (!normalizedMessage) {
     logger.warn(
       {
-        phone: normalizedPhone || rawPhone || null,
+        authorPhone: normalizedAuthorPhone || authorPhone || null,
+        destination,
+        sourcePath,
         remoteJidOriginal,
         reason: 'empty_message',
       },
@@ -782,19 +825,22 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   }
 
   const destinationDecision = resolveSafeReplyDestination({
-    phone: destination,
+    phone: normalizedAuthorPhone,
+    fromMe,
     remoteJidOriginal,
     connectedNumber,
     knownInstanceNumbers,
-    extraction: context?.extraction || null,
+    extraction,
     allowLidDestination,
   });
 
   if (!destinationDecision.ok) {
     logger.warn(
       {
-        phone: normalizedPhone || rawPhone || null,
+        authorPhone: normalizedAuthorPhone || authorPhone || null,
         destination: destinationDecision.destination,
+        destinationFinal: destination,
+        sourcePath,
         connectedNumber,
         knownInstanceNumbers,
         remoteJidOriginal,
@@ -808,39 +854,22 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   if (discardedRemoteJid) {
     logger.info(
       {
-        phone: normalizedPhone || rawPhone || null,
+        authorPhone: normalizedAuthorPhone || authorPhone || null,
         remoteJidOriginal,
         usedDestination: destination,
         discardedRemoteJid: true,
       },
-      'Enviando mensagem usando telefone normalizado (ignorando @lid)'
-    );
-  }
-
-  if (
-    allowLidDestination &&
-    remoteJidOriginal &&
-    remoteJidOriginal.toLowerCase().endsWith('@lid')
-  ) {
-    logger.warn(
-      {
-        phone: normalizedPhone || rawPhone || null,
-        remoteJidOriginal,
-        destination,
-        allowLidDestination: true,
-        extractionConfidence: context?.extraction?.confidence || null,
-        extractionResolutionRule: context?.extraction?.resolutionRule || null,
-      },
-      'LID destino fallback aplicado: enviando para telefone resolvido do sender'
+      'Enviando mensagem usando telefone normalizado (ignorando remoteJid)'
     );
   }
 
   try {
     logger.info(
       {
-        phone: normalizedPhone || rawPhone || null,
-        remoteJidOriginal,
+        authorPhone: normalizedAuthorPhone || authorPhone || null,
         destination,
+        sourcePath,
+        remoteJidOriginal,
         endpoint,
       },
       'DESTINO FINAL'
@@ -879,10 +908,10 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
 
     logger.info(
       {
-        phone: normalizedPhone || rawPhone || null,
+        authorPhone: normalizedAuthorPhone || authorPhone || null,
         remoteJidOriginal,
         resolvedDestination: destination,
-        destinationSource: 'normalized_phone',
+        destinationSource: 'author_phone',
         discardedRemoteJid,
         endpoint: endpointUsed,
         payloadShapeUsed,
@@ -899,10 +928,10 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
     logger.error(
       {
         err: error,
-        phone: normalizedPhone || rawPhone || null,
+        authorPhone: normalizedAuthorPhone || authorPhone || null,
         remoteJidOriginal,
         resolvedDestination: destination,
-        destinationSource: 'normalized_phone',
+        destinationSource: 'author_phone',
         discardedRemoteJid,
         endpoint,
         instanceName: resolvedInstanceName,
@@ -919,7 +948,7 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
       logger.error(
         {
           endpoint,
-          phone: normalizedPhone || rawPhone || null,
+          authorPhone: normalizedAuthorPhone || authorPhone || null,
           instanceName: resolvedInstanceName,
           providerError,
           sessionStateError: true,
@@ -934,7 +963,7 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
 
       await recoverWhatsAppSession({
         endpoint,
-        phone: normalizedPhone || rawPhone || null,
+        authorPhone: normalizedAuthorPhone || authorPhone || null,
         instanceName: resolvedInstanceName,
         providerError,
       });
