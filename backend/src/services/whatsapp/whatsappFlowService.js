@@ -1413,7 +1413,8 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     (
       phoneExtraction.sourcePath.includes('participant') ||
       phoneExtraction.resolutionRule === 'lid_from_fallback_promoted' ||
-      phoneExtraction.resolutionRule === 'lid_cache'
+      phoneExtraction.resolutionRule === 'lid_cache' ||
+      phoneExtraction.resolutionRule === 'lid_sender_fallback'
     )
   );
   const destinationSource = phoneExtraction?.sourcePath
@@ -1453,6 +1454,7 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     ...(responseCollector ? { captureCollector: responseCollector } : {}),
     ...(options?.simulationMode ? { simulate: true } : {}),
     ...(allowLidDestination ? { allowLidDestination: true } : {}),
+    ...(phoneExtraction ? { extraction: phoneExtraction } : {}),
     knownInstanceNumbers,
   };
 

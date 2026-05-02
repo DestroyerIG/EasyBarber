@@ -779,6 +779,7 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
     remoteJidOriginal,
     connectedNumber,
     knownInstanceNumbers,
+    extraction: context?.extraction || null,
     allowLidDestination,
   });
 
@@ -806,6 +807,24 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
         discardedRemoteJid: true,
       },
       'Enviando mensagem usando telefone normalizado (ignorando @lid)'
+    );
+  }
+
+  if (
+    allowLidDestination &&
+    remoteJidOriginal &&
+    remoteJidOriginal.toLowerCase().endsWith('@lid')
+  ) {
+    logger.warn(
+      {
+        phone: normalizedPhone || rawPhone || null,
+        remoteJidOriginal,
+        destination,
+        allowLidDestination: true,
+        extractionConfidence: context?.extraction?.confidence || null,
+        extractionResolutionRule: context?.extraction?.resolutionRule || null,
+      },
+      'LID destino fallback aplicado: enviando para telefone resolvido do sender'
     );
   }
 
