@@ -169,18 +169,23 @@ function PagamentoContent() {
         return;
       }
 
+      if (!('provider' in session)) {
+        return;
+      }
+
       if (session.provider === 'stripe') {
         window.location.assign(session.checkoutUrl);
         return;
       }
 
-      setPixCheckout(session);
-      if (session.coupon?.code) {
-        setCouponCode(session.coupon.code);
+      const pixSession = session;
+      setPixCheckout(pixSession);
+      if (pixSession.coupon?.code) {
+        setCouponCode(pixSession.coupon.code);
         setCouponState('valid');
 
-        if (typeof session.discount === 'number') {
-          const resolvedDiscount = session.discount;
+        if (typeof pixSession.discount === 'number') {
+          const resolvedDiscount = pixSession.discount;
           const resolvedFinalAmount = Math.max(
             0,
             Number((plan.price - resolvedDiscount).toFixed(2))
@@ -194,12 +199,12 @@ function PagamentoContent() {
       }
       setBillingStatus((current) => current ? {
         ...current,
-        subscriptionStatus: session.status,
+        subscriptionStatus: pixSession.status,
         provider: 'asaas',
         paymentMethod: 'pix',
-        providerPaymentId: session.paymentId,
-        providerSubscriptionId: session.subscriptionId,
-        paymentRequired: session.status !== 'active',
+        providerPaymentId: pixSession.paymentId,
+        providerSubscriptionId: pixSession.subscriptionId,
+        paymentRequired: pixSession.status !== 'active',
       } : current);
       showToast('Cobrança Pix criada. Finalize o pagamento para ativar sua conta.', 'success');
     } catch (error: unknown) {
@@ -431,6 +436,7 @@ function PagamentoContent() {
               )}
 
               {pixQrCodeSource && (
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={pixQrCodeSource}
                   alt="QR Code Pix"
