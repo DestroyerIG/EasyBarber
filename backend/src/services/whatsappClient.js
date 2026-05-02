@@ -715,13 +715,19 @@ export const recoverWhatsAppSession = async (context = {}) => runSessionRecovery
 
 export const sendWhatsAppText = async (phone, message, context = {}) => {
   const rawPhone = String(phone ?? '').trim();
-  const normalizedPhone = normalizePhoneForSend(rawPhone);
   const normalizedMessage = String(message || '').trim();
 
   const remoteJidOriginal =
     typeof context?.remoteJidOriginal === 'string' && context.remoteJidOriginal.trim()
       ? context.remoteJidOriginal.trim()
       : null;
+
+  const allowLidDestination = context?.allowLidDestination === true;
+  const preferredDestination = (allowLidDestination && remoteJidOriginal && remoteJidOriginal.endsWith('@lid'))
+    ? remoteJidOriginal
+    : rawPhone;
+
+  const normalizedPhone = normalizePhoneForSend(preferredDestination);
 
   const instanceContext = await resolveClientInstanceContext({
     instanceName: context?.instanceName,
@@ -736,9 +742,10 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   const knownInstanceNumbers = Array.isArray(context?.knownInstanceNumbers)
     ? context.knownInstanceNumbers
     : [];
-  const allowLidDestination = context?.allowLidDestination === true;
 
-  if (!isValidPhone(normalizedPhone || '')) {
+  const isValidDestination = destination && (isValidPhone(destination) || destination.endsWith('@lid'));
+
+  if (!isValidDestination) {
     logger.warn(
       {
         phone: normalizedPhone || rawPhone || null,

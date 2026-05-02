@@ -482,7 +482,7 @@ describe('whatsapp webhook phone extraction', () => {
   it('normalizes destination for send payloads', () => {
     expect(normalizePhoneForSend(' +55 (83) 96311-811@s.whatsapp.net ')).toBe('558396311811');
     expect(normalizePhoneForSend('558396311811@c.us')).toBe('558396311811');
-    expect(normalizePhoneForSend('236197968359561@lid')).toBeNull();
+    expect(normalizePhoneForSend('236197968359561@lid')).toBe('236197968359561@lid');
     expect(normalizePhoneForSend('120363012345678901@g.us')).toBeNull();
   });
 
@@ -559,7 +559,7 @@ describe('whatsapp webhook phone extraction', () => {
   });
 
   it('validates blocked jid contexts for send', () => {
-    expect(isInvalidJidContext('236197968359561@lid')).toBe(true);
+    expect(isInvalidJidContext('236197968359561@lid')).toBe(false);
     expect(isInvalidJidContext('120363012345678901@g.us')).toBe(true);
     expect(isInvalidJidContext('status@broadcast')).toBe(true);
     expect(isInvalidJidContext('5511999999999@s.whatsapp.net')).toBe(false);
