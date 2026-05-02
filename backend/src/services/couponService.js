@@ -22,7 +22,7 @@ export const couponService = {
         ? Number(((originalAmount * Number(coupon.discount_value)) / 100).toFixed(2))
         : Math.min(Number(coupon.discount_value), originalAmount);
 
-    const finalAmount = Math.max(0.01, Number((originalAmount - discount).toFixed(2)));
+    const finalAmount = Math.max(0, Number((originalAmount - discount).toFixed(2)));
 
     await pool.query(
       `UPDATE coupons SET current_uses = current_uses + 1, updated_at = NOW() WHERE id = $1`,

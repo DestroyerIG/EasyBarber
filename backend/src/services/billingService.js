@@ -119,6 +119,10 @@ const hasActivePaymentEvidence = (data, provider) => {
     return false;
   }
 
+  if (provider === 'coupon' || paymentMethod === 'coupon') {
+    return true;
+  }
+
   if (status === 'trialing') {
     return Boolean(data?.provider_subscription_id || data?.stripe_subscription_id);
   }
@@ -352,7 +356,62 @@ export const billingService = {
 
       const PLAN_VALUES = { basico: 49.9, profissional: 99.9, premium: 199.9 };
       const baseAmount = PLAN_VALUES[checkoutPlan] ?? PLAN_VALUES['basico'];
-      const { finalAmount, discount, coupon: appliedCoupon } = await couponService.validateAndApply(couponCode, baseAmount);
+      const {
+        finalAmount: rawFinalAmount,
+        discount: rawDiscount,
+        coupon: appliedCoupon,
+      } = await couponService.validateAndApply(couponCode, baseAmount);
+
+      let finalAmount = rawFinalAmount;
+      let discount = rawDiscount;
+
+      if (finalAmount > 0 && finalAmount < 5) {
+        finalAmount = 5;
+        discount = Number((baseAmount - finalAmount).toFixed(2));
+      }
+
+      if (finalAmount === 0) {
+        const activationCouponCode = appliedCoupon?.code || couponCode || null;
+
+        await subscriptionRepository.updateSubscriptionState(barbershopId, {
+          plan: checkoutPlan,
+          paymentMethod: 'coupon',
+          subscriptionStatus: 'active',
+          provider: 'coupon',
+          cancelAtPeriodEnd: false,
+        });
+
+        await subscriptionRepository.storeSubscriptionEvent({
+          eventId: `coupon_free_activation:${barbershopId}:${crypto.randomUUID()}`,
+          eventType: 'coupon_free_activation',
+          barbershopId,
+          payload: {
+            coupon_code: activationCouponCode,
+            amount: 0,
+            plan: checkoutPlan,
+          },
+        });
+
+        logger.info(
+          {
+            email: barbershop.email,
+            barbershopId,
+            desiredPlan: checkoutPlan,
+            subscriptionStatus: 'active',
+            paymentRequired: false,
+            checkoutCreated: false,
+            paymentProvider: 'coupon',
+            reason: 'coupon_free_activation',
+          },
+          'Ativacao gratuita aplicada via cupom'
+        );
+
+        return {
+          type: 'FREE_ACTIVATION',
+          activated: true,
+          plan: checkoutPlan,
+        };
+      }
 
       const idempotencyKey = `pix-checkout:${barbershopId}:${plan}:${crypto.randomUUID()}`;
       const pixCheckout = await provider.createSubscription({

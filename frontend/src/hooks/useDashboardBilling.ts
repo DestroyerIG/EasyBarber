@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
-import { billingApi } from '@/lib/billing';
+import { billingApi, type BillingProvider } from '@/lib/billing';
 import { useSubscriptionAccess } from '@/hooks/useSubscriptionAccess';
 import { getApiErrorMessage } from '@/utils/handleApiError';
 
@@ -14,7 +14,7 @@ import { getApiErrorMessage } from '@/utils/handleApiError';
  */
 export function useDashboardBilling() {
   const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
-  const [billingProvider, setBillingProvider] = useState<'stripe' | 'asaas' | null>(null);
+  const [billingProvider, setBillingProvider] = useState<BillingProvider | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
   const router = useRouter();
   const { user } = useAuth();
@@ -38,7 +38,7 @@ export function useDashboardBilling() {
   const goToPlans = () => router.push('/planos');
 
   const openBillingPortal = async () => {
-    if (billingProvider === 'asaas') {
+    if (billingProvider === 'asaas' || billingProvider === 'coupon') {
       showToast('Para pagamentos Pix, gere uma nova cobrança na tela de planos.', 'info');
       router.push('/planos');
       return;

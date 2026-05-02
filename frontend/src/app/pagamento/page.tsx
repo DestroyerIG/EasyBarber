@@ -53,9 +53,8 @@ function PagamentoContent() {
   const [processingMethod, setProcessingMethod] = useState<CheckoutPaymentMethod | null>(null);
   const [checkingPayment, setCheckingPayment] = useState(false);
   const [couponCode, setCouponCode] = useState('');
-  const [couponPreview, setCouponPreview] = useState<CouponValidationResponse | null>(null);
-  const [couponError, setCouponError] = useState<string | null>(null);
-  const [applyingCoupon, setApplyingCoupon] = useState(false);
+  const [couponState, setCouponState] = useState<'idle' | 'loading' | 'valid' | 'invalid'>('idle');
+  const [couponData, setCouponData] = useState<Pick<CouponValidationResponse, 'discount' | 'finalAmount'> | null>(null);
   const searchParams = useSearchParams();
   const router = useRouter();
   const { user, loading: authLoading, logout } = useAuth();
@@ -68,15 +67,15 @@ function PagamentoContent() {
   const plan = PLAN_MAP[selectedPlan];
   const pixQrCodeSource = normalizeQrCodeSource(pixCheckout?.qrCode || null);
   const couponCodeNormalized = couponCode.trim().toUpperCase();
-  const appliedDiscount = couponPreview?.discount ?? pixCheckout?.discount ?? 0;
-  const originalAmount = couponPreview?.originalAmount ?? plan.price;
-  const finalAmount = couponPreview?.finalAmount
+  const appliedDiscount = couponData?.discount ?? pixCheckout?.discount ?? 0;
+  const originalAmount = plan.price;
+  const finalAmount = couponData?.finalAmount
     ?? (appliedDiscount > 0
-      ? Math.max(0.01, Number((plan.price - appliedDiscount).toFixed(2)))
+      ? Math.max(0, Number((plan.price - appliedDiscount).toFixed(2)))
       : plan.price);
   const hasDiscount = appliedDiscount > 0;
-  const appliedCouponCode = pixCheckout?.coupon?.code || (couponPreview ? couponCodeNormalized : null);
-  const couponLocked = Boolean(processingMethod || pixCheckout);
+  const appliedCouponCode = pixCheckout?.coupon?.code || (couponState === 'valid' ? couponCodeNormalized : null);
+  const isFreeActivation = couponState === 'valid' && couponData?.finalAmount === 0;
 
   const refreshBillingStatus = async () => {
     const status = await billingApi.getStatus();
@@ -126,45 +125,35 @@ function PagamentoContent() {
   }, [authLoading, router, showToast, user?.role]);
 
   useEffect(() => {
-    setCouponPreview(null);
-    setCouponError(null);
+    setCouponCode('');
+    setCouponState('idle');
+    setCouponData(null);
   }, [selectedPlan]);
 
-  const handleCouponChange = (value: string) => {
-    setCouponCode(value.toUpperCase());
-    if (couponError) {
-      setCouponError(null);
-    }
-    if (couponPreview) {
-      setCouponPreview(null);
-    }
-  };
-
-  const clearCoupon = () => {
-    setCouponCode('');
-    setCouponPreview(null);
-    setCouponError(null);
-  };
-
-  const applyCoupon = async () => {
+  const handleApplyCoupon = async () => {
     if (!couponCodeNormalized) {
-      setCouponError('Informe o código do cupom.');
       return;
     }
 
-    setApplyingCoupon(true);
+    setCouponState('loading');
 
     try {
       const result = await billingApi.validateCoupon(selectedPlan, couponCodeNormalized);
-      setCouponPreview(result);
-      setCouponError(null);
-      showToast('Cupom aplicado com sucesso.', 'success');
-    } catch (error: unknown) {
-      setCouponPreview(null);
-      setCouponError(getApiErrorMessage(error, 'Cupom inválido ou expirado.'));
-    } finally {
-      setApplyingCoupon(false);
+      setCouponData({
+        discount: result.discount,
+        finalAmount: result.finalAmount,
+      });
+      setCouponState('valid');
+    } catch {
+      setCouponState('invalid');
+      setCouponData(null);
     }
+  };
+
+  const handleClearCoupon = () => {
+    setCouponCode('');
+    setCouponState('idle');
+    setCouponData(null);
   };
 
   const startCheckout = async (paymentMethod: CheckoutPaymentMethod) => {
@@ -174,22 +163,34 @@ function PagamentoContent() {
       const couponToApply = paymentMethod === 'pix' ? (couponCodeNormalized || null) : null;
       const session = await billingApi.createCheckoutSession(selectedPlan, paymentMethod, couponToApply);
 
+      if ('type' in session && session.type === 'FREE_ACTIVATION') {
+        showToast('Plano ativado com sucesso! Aproveite o sistema.', 'success');
+        router.replace('/dashboard');
+        return;
+      }
+
       if (session.provider === 'stripe') {
         window.location.assign(session.checkoutUrl);
         return;
       }
 
       setPixCheckout(session);
-      if (session.coupon?.code && !couponCodeNormalized) {
+      if (session.coupon?.code) {
         setCouponCode(session.coupon.code);
-      }
-      if (typeof session.discount === 'number' && session.discount > 0 && !couponPreview) {
-        setCouponPreview({
-          valid: true,
-          discount: session.discount,
-          originalAmount: plan.price,
-          finalAmount: Math.max(0.01, Number((plan.price - session.discount).toFixed(2))),
-        });
+        setCouponState('valid');
+
+        if (typeof session.discount === 'number') {
+          const resolvedDiscount = session.discount;
+          const resolvedFinalAmount = Math.max(
+            0,
+            Number((plan.price - resolvedDiscount).toFixed(2))
+          );
+
+          setCouponData({
+            discount: resolvedDiscount,
+            finalAmount: resolvedFinalAmount,
+          });
+        }
       }
       setBillingStatus((current) => current ? {
         ...current,
@@ -300,18 +301,18 @@ function PagamentoContent() {
                 <h2 className="text-2xl font-black text-white">{plan.name}</h2>
                 <p className="text-sm text-gray-400">{plan.description}</p>
               </div>
-                <div className="text-right">
-                  {hasDiscount && (
-                    <p className="text-xs text-gray-500 line-through">{formatCurrency(originalAmount)}</p>
-                  )}
-                  <p className="text-2xl font-black text-primary">
-                    {formatCurrency(finalAmount)}
-                    <span className="text-sm text-gray-400">/mês</span>
-                  </p>
-                  {hasDiscount && (
-                    <p className="text-xs font-semibold text-emerald-300">Desconto de {formatCurrency(appliedDiscount)}</p>
-                  )}
-                </div>
+              <div className="text-right">
+                {hasDiscount && (
+                  <p className="text-xs text-gray-500 line-through">{formatCurrency(originalAmount)}</p>
+                )}
+                <p className="text-2xl font-black text-primary">
+                  {formatCurrency(finalAmount)}
+                  <span className="text-sm text-gray-400">/mês</span>
+                </p>
+                {hasDiscount && (
+                  <p className="text-xs font-semibold text-emerald-300">Desconto de {formatCurrency(appliedDiscount)}</p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -331,50 +332,70 @@ function PagamentoContent() {
             Status atual: <span className="font-semibold text-amber-200">{billingStatus?.subscriptionStatus || 'incomplete'}</span>
           </p>
 
-          <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-gray-200">Cupom de desconto (Pix)</p>
-              {couponCode && !couponLocked && (
-                <button
-                  type="button"
-                  onClick={clearCoupon}
-                  className="text-xs font-semibold text-gray-400 transition hover:text-white"
-                >
-                  Limpar
-                </button>
-              )}
-            </div>
+          <div className="mt-6">
+            <p className="text-xs font-medium text-zinc-400 uppercase tracking-widest mb-2">
+              Cupom de desconto
+            </p>
 
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <input
-                value={couponCode}
-                onChange={(event) => handleCouponChange(event.target.value)}
-                disabled={couponLocked}
-                placeholder="PROMO20"
-                className="input flex-1"
-              />
-              <button
-                type="button"
-                onClick={applyCoupon}
-                disabled={couponLocked || applyingCoupon || !couponCodeNormalized}
-                className="rounded-lg border border-white/15 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+            {couponState !== 'valid' ? (
+              <div
+                className={`flex items-center gap-2 rounded-xl border px-3 py-2 transition-all duration-200
+      ${couponState === 'invalid'
+        ? 'border-red-500/40 bg-red-500/5'
+        : 'border-zinc-700 bg-zinc-800/60 focus-within:border-zinc-500'
+      }`}
               >
-                {applyingCoupon ? 'Validando...' : 'Aplicar'}
-              </button>
-            </div>
-
-            {couponError && (
-              <p className="mt-2 text-xs text-red-300">{couponError}</p>
-            )}
-
-            {couponPreview && (
-              <div className="mt-3 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
-                <p>Desconto aplicado: {formatCurrency(couponPreview.discount)}</p>
-                <p>Total com desconto: {formatCurrency(couponPreview.finalAmount)} / mês</p>
+                <input
+                  type="text"
+                  value={couponCode}
+                  onChange={(event) => {
+                    setCouponCode(event.target.value.toUpperCase());
+                    setCouponState('idle');
+                    setCouponData(null);
+                  }}
+                  onKeyDown={(event) => event.key === 'Enter' && handleApplyCoupon()}
+                  placeholder="EX: PROMO100"
+                  className="flex-1 bg-transparent text-sm text-white placeholder:text-zinc-600 outline-none"
+                />
+                <button
+                  onClick={handleApplyCoupon}
+                  disabled={couponState === 'loading' || !couponCode.trim()}
+                  className="text-xs font-semibold text-amber-400 hover:text-amber-300 disabled:opacity-40 
+                   transition-colors px-1 py-0.5 whitespace-nowrap"
+                >
+                  {couponState === 'loading' ? 'Verificando...' : 'Aplicar'}
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between rounded-xl border border-emerald-500/30 
+                    bg-emerald-500/10 px-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" 
+                       strokeWidth="2" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
+                  </svg>
+                  <div>
+                    <p className="text-sm font-medium text-emerald-400">{couponCode}</p>
+                    <p className="text-xs text-zinc-400">
+                      {couponData?.finalAmount === 0
+                        ? 'Ativação gratuita aplicada'
+                        : `Desconto de R$ ${couponData?.discount.toFixed(2).replace('.', ',')}`
+                      }
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleClearCoupon}
+                  className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors ml-2"
+                >
+                  Remover
+                </button>
               </div>
             )}
 
-            <p className="mt-2 text-[11px] text-gray-500">Aplicado apenas ao Pix via Asaas.</p>
+            {couponState === 'invalid' && (
+              <p className="text-xs text-red-400 mt-1.5 ml-1">Cupom inválido ou expirado.</p>
+            )}
           </div>
 
           <div className="mt-6 grid gap-3">
@@ -385,7 +406,7 @@ function PagamentoContent() {
               className="btn-primary flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {processingMethod === 'pix' ? <Loader2 className="animate-spin" size={18} /> : <QrCode size={18} />}
-              Pagar com Pix
+              {isFreeActivation ? 'Ativar gratuitamente' : 'Pagar com Pix'}
             </button>
 
             <button

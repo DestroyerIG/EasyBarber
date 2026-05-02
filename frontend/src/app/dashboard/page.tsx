@@ -57,6 +57,12 @@ export default function DashboardPage() {
     try {
       const session = await billingApi.createCheckoutSession(plan, paymentMethod);
 
+      if ('type' in session && session.type === 'FREE_ACTIVATION') {
+        showToast('Plano ativado com sucesso! Aproveite o sistema.', 'success');
+        router.replace('/dashboard');
+        return;
+      }
+
       if (session.provider === 'stripe') {
         window.location.assign(session.checkoutUrl);
         return;

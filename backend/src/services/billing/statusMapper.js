@@ -84,7 +84,7 @@ export const mapAsaasStatusToInternalStatus = (externalStatus) => {
 
 export const resolveBillingProviderFromContext = (context = {}) => {
   const explicit = normalize(context.provider);
-  if (explicit === 'stripe' || explicit === 'asaas') {
+  if (explicit === 'stripe' || explicit === 'asaas' || explicit === 'coupon') {
     return explicit;
   }
 
@@ -104,6 +104,9 @@ export const resolveBillingProviderFromContext = (context = {}) => {
   }
 
   const paymentMethod = normalize(context.payment_method);
+  if (paymentMethod === 'coupon') {
+    return 'coupon';
+  }
   if (paymentMethod === 'pix') {
     return 'asaas';
   }

@@ -17,6 +17,7 @@ const SUBSCRIPTION_EXEMPT_ROUTES = [
   /^\/api\/v1\/auth\/me$/i,
   /^\/api\/v1\/auth\/logout$/i,
   /^\/api\/v1\/billing\/status$/i,
+  /^\/api\/v1\/billing\/validate-coupon$/i,
   /^\/api\/v1\/billing\/checkout\/session$/i,
   /^\/api\/v1\/billing\/pix\/[^/]+$/i,
   /^\/api\/v1\/billing\/webhooks\/asaas$/i,
@@ -52,6 +53,10 @@ const hasActivePaymentEvidence = (context, provider) => {
 
   if (status !== 'active' && status !== 'trialing') {
     return false;
+  }
+
+  if (provider === 'coupon' || paymentMethod === 'coupon') {
+    return true;
   }
 
   if (status === 'trialing') {

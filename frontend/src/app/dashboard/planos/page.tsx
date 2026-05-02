@@ -43,7 +43,7 @@ export default function PlanosPage() {
           <ShieldCheck size={16} />
           {portalLoading
             ? 'Abrindo...'
-            : billingProvider === 'asaas'
+            : billingProvider === 'asaas' || billingProvider === 'coupon'
             ? 'Gerar nova cobrança Pix'
             : 'Gerenciar assinatura'}
         </button>

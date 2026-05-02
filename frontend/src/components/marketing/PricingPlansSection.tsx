@@ -367,6 +367,12 @@ export function PricingPlansSection({
 
       const session = await billingApi.createCheckoutSession(planId, paymentMethod);
 
+      if ('type' in session && session.type === 'FREE_ACTIVATION') {
+        showToast('Plano ativado com sucesso! Aproveite o sistema.', 'success');
+        router.push('/dashboard');
+        return;
+      }
+
       if (paymentMethod === 'card') {
         if (session.provider !== 'stripe') {
           showToast('Checkout com cartão indisponível no momento. Tente novamente.', 'error');

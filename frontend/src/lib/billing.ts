@@ -10,7 +10,8 @@ export type SubscriptionStatus =
   | 'canceled'
   | 'incomplete';
 export type CheckoutPaymentMethod = 'card' | 'pix' | 'boleto';
-export type BillingProvider = 'stripe' | 'asaas';
+export type BillingProvider = 'stripe' | 'asaas' | 'coupon';
+export type BillingPaymentMethod = CheckoutPaymentMethod | 'coupon';
 
 export interface StripeCheckoutSessionResponse {
   provider: 'stripe';
@@ -39,9 +40,16 @@ export interface PixCheckoutSessionResponse {
   coupon?: AppliedCoupon | null;
 }
 
+export interface FreeActivationResponse {
+  type: 'FREE_ACTIVATION';
+  activated: true;
+  plan?: PlanId;
+}
+
 export type CheckoutSessionResponse =
   | StripeCheckoutSessionResponse
-  | PixCheckoutSessionResponse;
+  | PixCheckoutSessionResponse
+  | FreeActivationResponse;
 
 export interface SubscriptionStatusResponse {
   plan: string;
@@ -57,7 +65,7 @@ export interface SubscriptionStatusResponse {
   cancelAtPeriodEnd: boolean;
   hasCustomer: boolean;
   paymentMode?: 'subscription' | 'payment' | null;
-  paymentMethod?: CheckoutPaymentMethod | null;
+  paymentMethod?: BillingPaymentMethod | null;
   providerCustomerId?: string | null;
   providerSubscriptionId?: string | null;
   providerPaymentId?: string | null;

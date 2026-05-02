@@ -48,9 +48,14 @@ router.post('/validate-coupon', authMiddleware, async (req, res, next) => {
         ? Number(((baseAmount * Number(coupon.discount_value)) / 100).toFixed(2))
         : Math.min(Number(coupon.discount_value), baseAmount);
 
-    const finalAmount = Math.max(0.01, Number((baseAmount - discount).toFixed(2)));
+    let finalAmount = Math.max(0, Number((baseAmount - discount).toFixed(2)));
+    if (finalAmount > 0 && finalAmount < 5) {
+      finalAmount = 5;
+    }
 
-    res.json({ valid: true, discount, finalAmount, originalAmount: baseAmount });
+    const adjustedDiscount = Number((baseAmount - finalAmount).toFixed(2));
+
+    res.json({ valid: true, discount: adjustedDiscount, finalAmount, originalAmount: baseAmount });
   } catch (err) { next(err); }
 });
 

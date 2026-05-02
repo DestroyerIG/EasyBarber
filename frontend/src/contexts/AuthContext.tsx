@@ -82,6 +82,10 @@ const hasPaymentEvidence = (billingStatus: Record<string, unknown>) => {
     return Boolean(billingStatus.providerSubscriptionId);
   }
 
+  if (provider === 'coupon' || paymentMethod === 'coupon') {
+    return true;
+  }
+
   if (provider === 'asaas' || paymentMethod === 'pix') {
     return Boolean(billingStatus.providerPaymentId && billingStatus.lastPaymentDate);
   }
