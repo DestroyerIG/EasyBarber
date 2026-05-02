@@ -12,7 +12,7 @@
 import logger from '../../utils/logger.js';
 import pool from '../../config/database.js';
 import { sendWhatsAppMessage, buildWelcomeMessage } from './whatsappMessageService.js';
-import { getWhatsAppStatus } from '../whatsappClient.js';
+import { getWhatsAppStatus, getWhatsAppStatusByInstance } from '../whatsappClient.js';
 import {
   normalizeWhatsAppNumber,
   extractWhatsAppPhoneFromWebhookDetailed,
@@ -583,8 +583,8 @@ const resolveBarbershopFromSessionContext = async (phone) => {
  * FIX Bug 3 — null-safe: retorna null se status ainda não foi sincronizado.
  * Evita que a guard self_target rejeite mensagens de terceiros durante startup.
  */
-const resolveConnectedNumber = () => {
-  const status = getWhatsAppStatus();
+const resolveConnectedNumber = (instanceName = null) => {
+  const status = instanceName ? getWhatsAppStatusByInstance(instanceName) : getWhatsAppStatus();
   if (!status || !status.connectedNumber) return null;
   return normalizeWhatsAppNumber(status.connectedNumber) || null;
 };
@@ -1333,7 +1333,12 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
     typeof options.preResolvedAuthorExtraction === 'object'
       ? options.preResolvedAuthorExtraction
       : null;
-  const connectedNumber = resolveConnectedNumber();
+      
+  // BUG FIX: resolve instance name BEFORE resolving connected number
+  // Otherwise, connected number resolves to the global config, not the tenant
+  const instanceNameCandidate = preExtractedInstanceName || (isPayloadInput ? extractWebhookInstanceName(phoneOrPayload) : null);
+  const connectedNumber = resolveConnectedNumber(instanceNameCandidate);
+  
   const preExtractedInstanceNumbers = Array.isArray(options?.preExtractedInstanceNumbers)
     ? options.preExtractedInstanceNumbers : [];
 
@@ -1377,7 +1382,7 @@ const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
     payloadSummary: buildWebhookPayloadSummary(phoneOrPayload),
     phoneExtraction: extraction,
     knownInstanceNumbers,
-    instanceName: preExtractedInstanceName || extractWebhookInstanceName(phoneOrPayload),
+    instanceName: instanceNameCandidate,
   };
 };
 
@@ -1400,7 +1405,7 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     options?.eventName || payloadSummary?.event || payloadSummary?.type || ''
   ) || null;
 
-  const connectedNumber = resolveConnectedNumber();
+  const connectedNumber = resolveConnectedNumber(instanceName);
   const responseCollector = typeof options?.captureCollector === 'function'
     ? options.captureCollector
     : Array.isArray(options?.responseCollector)
@@ -1823,14 +1828,15 @@ export const handleWebhook = async (req, res) => {
     }
 
     const text = extractTextFromWebhook(payload);
-    const connectedNumber = resolveConnectedNumber();
+    const eventName = normalizeWebhookEventName(
+      payload?.event || payload?.type || payload?.data?.event || payload?.data?.type || ''
+    );
+    const instanceName = extractWebhookInstanceName(payload);
+    const connectedNumber = resolveConnectedNumber(instanceName);
     const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload, {
       connectedNumbers: mergeKnownInstanceNumbers([connectedNumber]),
       messageText: text,
     });
-    const eventName = normalizeWebhookEventName(
-      payload?.event || payload?.type || payload?.data?.event || payload?.data?.type || ''
-    );
 
     const result = await handleIncomingMessage(payload, text, {
       preExtractedPhone: extraction.phone,
