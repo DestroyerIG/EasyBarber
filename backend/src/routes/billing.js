@@ -37,7 +37,7 @@ router.post('/validate-coupon', authMiddleware, async (req, res, next) => {
       throw new AppError('Plano inválido', 400, 'INVALID_PLAN');
     }
 
-    const { discount, finalAmount } = await couponService.validateAndApply(code, baseAmount);
+    const { finalAmount } = await couponService.validate(code, baseAmount);
 
     const adjustedFinalAmount =
       finalAmount > 0 && finalAmount < 5 ? 5 : finalAmount;
