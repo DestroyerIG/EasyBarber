@@ -30,7 +30,7 @@ Guia de entrada para devs que acabaram de clonar o EasyBarber SaaS 2.0.
 - Subir backend e frontend.
 - Validar `GET /health`, cadastro, confirmação de e-mail e login.
 
-## Primeiros Comandos
+## Primeiros Comandos.
 
 ```bash
 npm run install:all
