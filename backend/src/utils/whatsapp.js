@@ -1047,7 +1047,8 @@ const hasTrustedLidAuthorSource = (sourcePath = '') => {
     normalized.includes('participant') ||
     INCOMING_AUTHOR_LID_FROM_FALLBACK_SOURCE_PATHS.has(normalized) ||
     INCOMING_AUTHOR_LID_METADATA_SOURCE_PATHS.has(normalized) ||
-    normalized === 'lid_cache'
+    normalized === 'lid_cache' ||
+    normalized === 'lid_sender_fallback'
   );
 };
 
@@ -1097,9 +1098,11 @@ export const resolveSafeReplyDestination = ({
 
   if (conversationKind === 'lid') {
     const sourcePath = extraction?.sourcePath || '';
+    const isLidFallback = extraction?.confidence === 'lid_fallback';
     const lidTrustedByExtraction =
-      extraction?.confidence !== 'none' &&
-      hasTrustedLidAuthorSource(sourcePath);
+      isLidFallback ||
+      (extraction?.confidence !== 'none' &&
+      hasTrustedLidAuthorSource(sourcePath));
     const lidTrustedByContext = allowLidDestination === true;
 
     if (!lidTrustedByExtraction && !lidTrustedByContext) {
@@ -1691,6 +1694,60 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       };
     }
 
+    // ── LID sender fallback ──────────────────────────────────────────────
+    // Quando remoteJid é @lid e todos os candidatos foram rejeitados,
+    // tenta extrair o telefone do campo sender se ele for @s.whatsapp.net.
+    // Isso cobre o caso real onde a Evolution API envia o número do cliente
+    // no campo sender, mas o remoteJid é um ID opaco @lid.
+    if (
+      conversationKind === 'lid' &&
+      !fromMe &&
+      typeof sender === 'string' &&
+      sender.trim().toLowerCase().endsWith('@s.whatsapp.net')
+    ) {
+      const senderDigits = sender.split('@')[0].replace(/\D/g, '');
+
+      if (
+        senderDigits.length >= MIN_WHATSAPP_DIGITS &&
+        senderDigits.length <= MAX_WHATSAPP_DIGITS &&
+        !instanceNumbersSet.has(senderDigits)
+      ) {
+        // Cache o mapeamento lid → telefone para futuras mensagens
+        if (remoteJidOriginal) {
+          cacheLidToPhone(remoteJidOriginal, senderDigits);
+        }
+
+        return {
+          authorPhone: senderDigits,
+          sourcePath: 'lid_sender_fallback',
+          candidateType: 'sender_jid',
+          confidence: 'lid_fallback',
+          resolutionRule: 'lid_sender_fallback',
+          remoteJidOriginal,
+          sender,
+          participant,
+          pushName,
+          fromMe,
+          instanceNumbers,
+          rejections,
+          candidates: [
+            ...serializeCandidates(),
+            {
+              sourcePath: 'lid_sender_fallback',
+              candidateType: 'sender_jid',
+              rawValue: sender,
+              phone: senderDigits,
+              score: 65,
+              confidence: 'lid_fallback',
+              authorRole: 'lid_sender_fallback',
+              rejectedReason: null,
+            },
+          ],
+        };
+      }
+    }
+    // ── fim LID sender fallback ──────────────────────────────────────────
+
     if (hasExplicitAuthorSignal) {
       appendRejection(rejections, 'author_candidates', 'low_confidence_author');
     }
@@ -1742,6 +1799,42 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
     !allowLidSenderFallback &&
     INCOMING_AUTHOR_SENDER_FALLBACK_SOURCE_PATHS.has(bestCandidate.sourcePath)
   ) {
+    // Antes de rejeitar, verificar se o sender é um JID @s.whatsapp.net válido
+    // que pode ser usado como fallback confiável para conversas @lid
+    if (
+      !fromMe &&
+      typeof sender === 'string' &&
+      sender.trim().toLowerCase().endsWith('@s.whatsapp.net')
+    ) {
+      const lidFallbackDigits = sender.split('@')[0].replace(/\D/g, '');
+
+      if (
+        lidFallbackDigits.length >= MIN_WHATSAPP_DIGITS &&
+        lidFallbackDigits.length <= MAX_WHATSAPP_DIGITS &&
+        !instanceNumbersSet.has(lidFallbackDigits)
+      ) {
+        if (remoteJidOriginal) {
+          cacheLidToPhone(remoteJidOriginal, lidFallbackDigits);
+        }
+
+        return {
+          authorPhone: lidFallbackDigits,
+          sourcePath: 'lid_sender_fallback',
+          candidateType: 'sender_jid',
+          confidence: 'lid_fallback',
+          resolutionRule: 'lid_sender_fallback',
+          remoteJidOriginal,
+          sender,
+          participant,
+          pushName,
+          fromMe,
+          instanceNumbers,
+          rejections,
+          candidates: serializeCandidates(),
+        };
+      }
+    }
+
     appendRejection(rejections, bestCandidate.sourcePath, 'lid_sender_untrusted');
 
     return {

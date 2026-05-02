@@ -835,6 +835,22 @@ const mapWebhookIncomingMessage = (payload) => {
     return null;
   }
 
+  // Log especial quando o fallback LID→sender é acionado
+  if (resolvedExtraction.resolutionRule === 'lid_sender_fallback') {
+    logger.warn(
+      {
+        event: eventName,
+        senderPhone: resolvedExtraction.authorPhone,
+        remoteJidOriginal: resolvedExtraction.remoteJidOriginal,
+        sender: resolvedExtraction.sender,
+        confidence: resolvedExtraction.confidence,
+        resolutionRule: resolvedExtraction.resolutionRule,
+        instanceName: normalizedPayload?.instanceName || null,
+      },
+      'LID remoteJid: usando sender como fallback de telefone'
+    );
+  }
+
   if (!text) {
     logger.debug(
       {

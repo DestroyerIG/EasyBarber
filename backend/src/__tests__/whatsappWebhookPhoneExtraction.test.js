@@ -116,7 +116,7 @@ describe('whatsapp webhook phone extraction', () => {
     );
   });
 
-  it('rejects sender-only messages.upsert payload under @lid when participant is absent', () => {
+  it('uses sender as lid_fallback when @lid remoteJid and sender is valid @s.whatsapp.net', () => {
     const payload = {
       event: 'messages.upsert',
       sender: '558396311811@s.whatsapp.net',
@@ -133,13 +133,11 @@ describe('whatsapp webhook phone extraction', () => {
 
     const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
 
-    expect(extraction.phone).toBeNull();
-    expect(extraction.sourcePath).toBeNull();
-    expect(extraction.rejections).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ sourcePath: 'sender', reason: 'lid_sender_untrusted' }),
-      ])
-    );
+    expect(extraction.phone).toBe('558396311811');
+    expect(extraction.sourcePath).toBe('lid_sender_fallback');
+    expect(extraction.candidateType).toBe('sender_jid');
+    expect(extraction.confidence).toBe('lid_fallback');
+    expect(extraction.resolutionRule).toBe('lid_sender_fallback');
   });
 
   it('promotes from as safe fallback in @lid upsert when sender diverges and participant is absent', () => {
@@ -572,5 +570,93 @@ describe('whatsapp webhook phone extraction', () => {
     expect(isValidPhone('5583')).toBe(false);
     expect(isValidPhone('558396311811000000')).toBe(false);
     expect(isValidPhone('55 83 96311-811')).toBe(false);
+  });
+
+  it('extracts authorPhone via lid_fallback from Evolution API @lid audio payload', () => {
+    const payload = {
+      event: 'messages-upsert',
+      instance: 'barbearia-lucas_a0da94f8',
+      data: {
+        key: {
+          remoteJid: '241918646694117@lid',
+          fromMe: false,
+          id: 'ABC123',
+        },
+        message: {},
+        messageType: 'audioMessage',
+        messageTimestamp: 1777748066,
+        pushName: 'Cliente Teste',
+        sender: '558399849151@s.whatsapp.net',
+      },
+      sender: '558399849151@s.whatsapp.net',
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
+
+    expect(extraction.phone).toBe('558399849151');
+    expect(extraction.sourcePath).toBe('lid_sender_fallback');
+    expect(extraction.confidence).toBe('lid_fallback');
+    expect(extraction.resolutionRule).toBe('lid_sender_fallback');
+    expect(extraction.remoteJidOriginal).toBe('241918646694117@lid');
+  });
+
+  it('approves lid_fallback destination in resolveSafeReplyDestination', () => {
+    const decision = resolveSafeReplyDestination({
+      phone: '558399849151',
+      remoteJidOriginal: '241918646694117@lid',
+      extraction: {
+        sourcePath: 'lid_sender_fallback',
+        confidence: 'lid_fallback',
+      },
+    });
+
+    expect(decision).toEqual(
+      expect.objectContaining({
+        ok: true,
+        destination: '558399849151',
+        conversationKind: 'lid',
+      })
+    );
+  });
+
+  it('does not use lid_fallback when sender has invalid digit count', () => {
+    const payload = {
+      event: 'messages-upsert',
+      data: {
+        key: {
+          remoteJid: '999999999999999@lid',
+          fromMe: false,
+        },
+        message: {
+          conversation: 'Oi',
+        },
+      },
+      sender: '12345@s.whatsapp.net',
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
+
+    expect(extraction.phone).toBeNull();
+  });
+
+  it('does not use lid_fallback when fromMe is true', () => {
+    const payload = {
+      event: 'messages-upsert',
+      data: {
+        key: {
+          remoteJid: '241918646694117@lid',
+          fromMe: true,
+        },
+        message: {
+          conversation: 'Oi',
+        },
+      },
+      sender: '558399849151@s.whatsapp.net',
+    };
+
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload);
+
+    expect(extraction.phone).toBeNull();
+    expect(extraction.fromMe).toBe(true);
   });
 });
