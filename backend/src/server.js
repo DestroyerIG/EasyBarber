@@ -343,7 +343,7 @@ app.get('/debug/ip', async (req, res) => {
       ip: data.ip,
     });
   } catch (err) {
-    console.error('Erro ao obter IP público:', err);
+    logger.error({ err }, 'Erro ao obter IP público');
 
     return res.status(500).json({
       success: false,
