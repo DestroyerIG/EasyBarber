@@ -360,7 +360,7 @@ export const billingService = {
         finalAmount: rawFinalAmount,
         discount: rawDiscount,
         coupon: appliedCoupon,
-      } = await couponService.validateAndApply(couponCode, baseAmount);
+      } = await couponService.validate(couponCode, baseAmount);
 
       let finalAmount = rawFinalAmount;
       let discount = rawDiscount;
@@ -380,6 +380,11 @@ export const billingService = {
           provider: 'coupon',
           cancelAtPeriodEnd: false,
         });
+
+        // Consumir cupom somente após ativação bem-sucedida
+        if (appliedCoupon) {
+          await couponService.validateAndApply(couponCode, baseAmount);
+        }
 
         await subscriptionRepository.storeSubscriptionEvent({
           eventId: `coupon_free_activation:${barbershopId}:${crypto.randomUUID()}`,
@@ -422,6 +427,11 @@ export const billingService = {
         onCustomerResolved: (customerId) =>
           subscriptionRepository.setAsaasCustomerId(barbershopId, customerId),
       });
+
+      // Consumir cupom somente após checkout Asaas bem-sucedido
+      if (appliedCoupon) {
+        await couponService.validateAndApply(couponCode, baseAmount);
+      }
 
       const payment = pixCheckout.payment || null;
       const mappedStatus = provider.mapExternalStatusToInternalStatus(payment?.status);
@@ -739,7 +749,15 @@ export const billingService = {
 
     const token = resolveAsaasWebhookToken(headers);
 
-    if (!token || token !== configuredToken) {
+    if (!token) {
+      throw new UnauthorizedError('Assinatura do webhook Asaas inválida');
+    }
+
+    const tokenBuffer = Buffer.from(token, 'utf8');
+    const configuredBuffer = Buffer.from(configuredToken, 'utf8');
+
+    if (tokenBuffer.length !== configuredBuffer.length ||
+        !crypto.timingSafeEqual(tokenBuffer, configuredBuffer)) {
       throw new UnauthorizedError('Assinatura do webhook Asaas inválida');
     }
 
