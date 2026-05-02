@@ -1019,6 +1019,12 @@ export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null, i
       path: `/message/sendText/${resolvedInstanceName}`,
       body: {
         number: normalizedPhone,
+        options: {
+          delay: 1200,
+          linkPreview: false,
+          presence: 'composing',
+          checkNumber: false,
+        },
         textMessage: {
           text: normalizedText,
         },
@@ -1030,6 +1036,12 @@ export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null, i
       body: {
         instanceName: resolvedInstanceName,
         number: normalizedPhone,
+        options: {
+          delay: 1200,
+          linkPreview: false,
+          presence: 'composing',
+          checkNumber: false,
+        },
         textMessage: {
           text: normalizedText,
         },
