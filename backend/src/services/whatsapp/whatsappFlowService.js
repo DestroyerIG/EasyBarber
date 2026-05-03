@@ -13,6 +13,7 @@ import logger from '../../utils/logger.js';
 import pool from '../../config/database.js';
 import { sendWhatsAppMessage, buildWelcomeMessage } from './whatsappMessageService.js';
 import { getWhatsAppStatus, getWhatsAppStatusByInstance, getConnectedNumberCached } from '../whatsappClient.js';
+import { getConnectedNumber as getCachedConnectedNumber } from './whatsappInstanceCache.js';
 import {
   normalizeWhatsAppNumber,
   extractWhatsAppPhoneFromWebhookDetailed,
@@ -584,18 +585,22 @@ const resolveBarbershopFromSessionContext = async (phone) => {
  * Evita que a guard self_target rejeite mensagens de terceiros durante startup.
  */
 const resolveConnectedNumber = (instanceName = null) => {
-  // CORREÇÃO: Usar getConnectedNumberCached que agora é alimentado por
-  // syncStateFromEvolution com fallback /instance/me
-  const cached = getConnectedNumberCached(instanceName);
+  // 1. Cache dedicado por instância (whatsappInstanceCache) — fonte principal
+  const cached = getCachedConnectedNumber(instanceName);
   if (cached) return cached;
 
-  // Fallback legado: ler do status direto (mantido por compatibilidade)
+  // 2. Cache unificado (getConnectedNumberCached) — também acessa o cache dedicado
+  //    mais o fallback para o estado legado waStateByInstance
+  const unified = getConnectedNumberCached(instanceName);
+  if (unified) return unified;
+
+  // 3. Fallback: estado legado direto por instância
   const status = instanceName ? getWhatsAppStatusByInstance(instanceName) : getWhatsAppStatus();
   if (status?.connectedNumber) {
     return normalizeWhatsAppNumber(status.connectedNumber) || null;
   }
 
-  // Último fallback: variável de ambiente
+  // 4. Último fallback: variável de ambiente
   const envPhone = process.env.WHATSAPP_PHONE || process.env.EVOLUTION_PHONE;
   if (envPhone) {
     return normalizeWhatsAppNumber(envPhone) || null;

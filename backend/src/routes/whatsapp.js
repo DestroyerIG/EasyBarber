@@ -735,8 +735,9 @@ const selectAuthorExtraction = (normalizedExtraction, rawExtraction = null) => {
   };
 };
 
-const buildWebhookPhoneExtractionOptions = () => {
-  const connectedNumber = normalizeWhatsAppNumber(getWhatsAppStatus()?.connectedNumber);
+const buildWebhookPhoneExtractionOptions = (instanceName = null) => {
+  // Usa o cache dedicado por instância (sem HTTP)
+  const connectedNumber = getConnectedNumberCached(instanceName);
 
   if (!connectedNumber) {
     return {};
@@ -747,124 +748,210 @@ const buildWebhookPhoneExtractionOptions = () => {
   };
 };
 
-function extractPhone(jid) {
-  if (!jid) return null;
-  return String(jid).split('@')[0].replace(/\D/g, '');
-}
+// Normaliza um JID ou número para apenas dígitos (sem prefixo de país, sem @suffix).
+// Exemplos: "5583991234567@s.whatsapp.net" -> "5583991234567"
+//           "5583991234567" -> "5583991234567"
+const normalize = (phone) => {
+  if (!phone || typeof phone !== 'string') return null;
+  const digits = phone.split('@')[0].replace(/\D/g, '');
+  return digits.length >= 8 ? digits : null;
+};
+
+// Verifica se um JID é do tipo @lid (Linked Device — sem número confiável).
+const isLidJid = (jid) =>
+  typeof jid === 'string' && jid.endsWith('@lid');
+
+/**
+ * Extrai o telefone do autor da mensagem a partir do payload do webhook.
+ *
+ * Ordem de prioridade (da mais confiável para menos confiável):
+ * 1. messageContextInfo.participantPn — campo específico do Evolution para LIDs
+ * 2. key.participant — participante em conversas de grupo/LID
+ * 3. sender — quando remoteJid não é @lid
+ * 4. remoteJid — apenas se NÃO for @lid
+ *
+ * REGRA: ignorar remoteJid e sender quando remoteJid for @lid,
+ *        a menos que sender não seja o número da instância.
+ */
+const extractAuthorPhone = (payload, connectedNumber) => {
+  const msg = payload?.data?.messages?.[0] || payload?.messages?.[0] || payload;
+  const key = msg?.key || payload?.key || {};
+  const remoteJid = key?.remoteJid || payload?.key?.remoteJid || null;
+  const participant = key?.participant || payload?.participant || null;
+  const sender = payload?.sender || null;
+
+  // 1. participantPn — mais confiável para @lid
+  const participantPn =
+    msg?.messageContextInfo?.participantPn ||
+    payload?.messageContextInfo?.participantPn ||
+    msg?.message?.messageContextInfo?.participantPn ||
+    null;
+
+  if (participantPn) {
+    const phone = normalize(participantPn);
+    if (phone) {
+      return { phone, source: 'participantPn', isLid: isLidJid(remoteJid) };
+    }
+  }
+
+  // 2. participant (grupo ou LID)
+  if (participant && !isLidJid(participant)) {
+    const phone = normalize(participant);
+    if (phone) {
+      return { phone, source: 'participant', isLid: isLidJid(remoteJid) };
+    }
+  }
+
+  // 3. Se remoteJid for @lid: usar sender APENAS se sender != connectedNumber
+  if (isLidJid(remoteJid)) {
+    if (sender) {
+      const senderPhone = normalize(sender);
+      if (senderPhone && senderPhone !== connectedNumber) {
+        return { phone: senderPhone, source: 'sender_lid_fallback', isLid: true };
+      }
+    }
+    // @lid sem fallback confiável
+    return { phone: null, source: 'lid_no_fallback', isLid: true };
+  }
+
+  // 4. sender (não-LID)
+  if (sender) {
+    const senderPhone = normalize(sender);
+    if (senderPhone) {
+      return { phone: senderPhone, source: 'sender', isLid: false };
+    }
+  }
+
+  // 5. remoteJid (não-LID, último recurso)
+  if (remoteJid && !isLidJid(remoteJid)) {
+    const phone = normalize(remoteJid);
+    if (phone) {
+      return { phone, source: 'remoteJid', isLid: false };
+    }
+  }
+
+  return { phone: null, source: 'not_found', isLid: false };
+};
 
 const mapWebhookIncomingMessage = async (payload) => {
   const normalizedPayload = normalizeWebhookEventPayload(payload);
-  const eventName = normalizeWebhookEventName(normalizedPayload?.event || normalizedPayload?.type || '');
+  const eventName = normalizeWebhookEventName(
+    normalizedPayload?.event || normalizedPayload?.type || ''
+  );
 
   if (!isIncomingWebhookEvent(eventName)) {
     return null;
   }
 
-  // CORREÇÃO: verificar fromMe sobre o payload RAW (antes do spread/normalização)
-  // para evitar falso-positivo causado por contaminação de fromMe aninhado
+  // ========== REGRA 1: BLOQUEAR fromMe ==========
+  // Verificado no payload RAW para evitar falso-positivo por spread contaminado.
   const fromMe = extractWebhookFromMe(payload);
   if (fromMe) {
     logger.info(
       {
         event: eventName,
-        fromMe,
-        keyRemoteJid: normalizedPayload?.key?.remoteJid || null,
+        fromMe: true,
+        remoteJid: normalizedPayload?.key?.remoteJid || null,
         sender: normalizedPayload?.sender || null,
       },
-      'Webhook ignorado: mensagem fromMe=true'
+      'Webhook ignorado: fromMe=true'
     );
     return null;
   }
 
+  // Verificação redundante explícita em key.fromMe (defesa em profundidade)
+  if (
+    payload?.key?.fromMe === true ||
+    normalizedPayload?.key?.fromMe === true ||
+    payload?.data?.messages?.[0]?.key?.fromMe === true
+  ) {
+    logger.info({ event: eventName }, 'Webhook ignorado: key.fromMe=true explícito');
+    return null;
+  }
+
+  // ========== IDENTIFICAR INSTÂNCIA ==========
+  // instanceName é o identificador do tenant (barbearia)
+  const instanceName =
+    normalizedPayload?.instanceName ||
+    payload?.instanceName ||
+    null;
+
+  // ========== REGRA 2: CONNECTED NUMBER DO CACHE (SEM HTTP) ==========
+  // NUNCA fazer HTTP aqui. Cache é atualizado via syncStateFromEvolution e eventos.
+  // REGRA CRÍTICA: se connectedNumber for null, processar normalmente (não bloquear).
+  const connectedNumber = getConnectedNumberCached(instanceName);
+
+  // ========== EXTRAÇÃO DE TEXTO ==========
   const text = extractWebhookText(normalizedPayload);
 
-  logger.debug(
+  // ========== EXTRAÇÃO DO AUTOR ==========
+  // Usa sistema existente de resolvência de autor (suporte a LID, participantPn, etc.)
+  const extractionOptions = buildWebhookPhoneExtractionOptions(instanceName);
+  const extraction = resolveIncomingAuthor(normalizedPayload, { ...extractionOptions, messageText: text });
+  const rawExtraction = resolveIncomingAuthor(payload, { ...extractionOptions, messageText: text });
+  const resolvedExtraction = selectAuthorExtraction(extraction, rawExtraction);
+
+  // Extração direta do autor (sistema simplificado conforme regras do refactoring)
+  const authorExtracted = extractAuthorPhone(payload, connectedNumber);
+
+  // authorPhone: preferência ao sistema existente (mais sofisticado), fallback ao simplificado
+  const authorPhone = resolvedExtraction.authorPhone || authorExtracted.phone || null;
+
+  // ========== LOG ESTRUTURADO ==========
+  logger.info(
     {
       event: eventName,
-      instanceName: normalizedPayload?.instanceName || null,
-      keyRemoteJid: normalizedPayload?.key?.remoteJid || null,
-      sender: normalizedPayload?.sender || null,
-      participant: normalizedPayload?.participant || normalizedPayload?.key?.participant || null,
-      from: normalizedPayload?.from || null,
+      instanceName,
+      connectedNumber: connectedNumber || 'NULL_SEM_SYNC',
+      authorPhone,
+      authorSource: resolvedExtraction.authorPhone
+        ? resolvedExtraction.sourcePath
+        : authorExtracted.source,
+      isLid: authorExtracted.isLid,
       fromMe,
       hasText: Boolean(text),
-      textPreview: typeof text === 'string' ? text.slice(0, 80) : null,
     },
-    'Webhook inbound resumido antes da resolucao do autor'
+    'DEBUG WHATSAPP - AUTOR E NUMERO IDENTIFICADOS'
   );
 
-  const extraction = resolveIncomingAuthor(
-    normalizedPayload,
-    {
-      ...buildWebhookPhoneExtractionOptions(),
-      messageText: text,
-    }
-  );
-  const rawExtraction = resolveIncomingAuthor(
-    payload,
-    {
-      ...buildWebhookPhoneExtractionOptions(),
-      messageText: text,
-    }
-  );
-  const resolvedExtraction = selectAuthorExtraction(extraction, rawExtraction);
-  const extractedPhone = resolvedExtraction.authorPhone;
-
-  if (!extractedPhone) {
+  // ========== REGRA 3: BLOQUEAR AUTO-RESPOSTA ==========
+  // SÓ bloqueia se connectedNumber for CONHECIDO e igual ao autor.
+  // Se connectedNumber for null (sync ainda não rodou), processar normalmente.
+  if (connectedNumber && authorPhone && normalize(authorPhone) === normalize(connectedNumber)) {
     logger.warn(
       {
         event: eventName,
-        text: text || null,
-        authorPhone: null,
-        sourcePath: resolvedExtraction.sourcePath,
-        confidence: resolvedExtraction.confidence,
-        resolutionRule: resolvedExtraction.resolutionRule,
-        remoteJidOriginal: resolvedExtraction.remoteJidOriginal,
-        keyRemoteJid: normalizedPayload?.key?.remoteJid || null,
-        messageKeyRemoteJid: normalizedPayload?.message?.key?.remoteJid || null,
-        sender: resolvedExtraction.sender || normalizedPayload?.sender || null,
-        participant: resolvedExtraction.participant || normalizedPayload?.participant || null,
-        fromMe: resolvedExtraction.fromMe,
-        from: normalizedPayload?.from || null,
-        authorCandidates: resolvedExtraction.candidates,
-        extractionRejections: resolvedExtraction.rejections,
-        instanceNumbers: resolvedExtraction.instanceNumbers,
-        instanceName: normalizedPayload?.instanceName || null,
-        authorSignalComparison: {
-          raw: buildAuthorSignalShape(payload),
-          normalized: buildAuthorSignalShape(normalizedPayload),
-        },
-        payloadSummary: buildPayloadLogSummary(normalizedPayload),
+        authorPhone,
+        connectedNumber,
+        instanceName,
       },
-      'Webhook ignorado: messages-upsert sem telefone extraivel'
+      'BLOQUEADO: mensagem do próprio número da instância'
     );
     return null;
   }
 
-  // Log especial quando o fallback LID→sender é acionado
-  if (resolvedExtraction.resolutionRule === 'lid_sender_fallback') {
+  // ========== REGRA 4: TELEFONE DO AUTOR OBRIGATÓRIO ==========
+  if (!authorPhone) {
     logger.warn(
       {
         event: eventName,
-        senderPhone: resolvedExtraction.authorPhone,
-        remoteJidOriginal: resolvedExtraction.remoteJidOriginal,
-        sender: resolvedExtraction.sender,
-        confidence: resolvedExtraction.confidence,
-        resolutionRule: resolvedExtraction.resolutionRule,
-        instanceName: normalizedPayload?.instanceName || null,
+        instanceName,
+        connectedNumber: connectedNumber || null,
+        sourceTried: authorExtracted.source,
+        isLid: authorExtracted.isLid,
+        resolvedExtractionRule: resolvedExtraction.resolutionRule || null,
+        remoteJid: normalizedPayload?.key?.remoteJid || null,
+        sender: normalizedPayload?.sender || payload?.sender || null,
       },
-      'LID remoteJid: usando sender como fallback de telefone'
+      'Webhook ignorado: não foi possível identificar o telefone do autor'
     );
+    return null;
   }
 
+  // ========== REGRA 5: TEXTO OBRIGATÓRIO ==========
   if (!text) {
     logger.debug(
-      {
-        event: eventName,
-        authorPhone: resolvedExtraction.authorPhone,
-        sourcePath: resolvedExtraction.sourcePath,
-        remoteJidOriginal: resolvedExtraction.remoteJidOriginal,
-      },
+      { event: eventName, authorPhone, instanceName },
       'Webhook ignorado: mensagem sem texto'
     );
     return null;
@@ -873,97 +960,29 @@ const mapWebhookIncomingMessage = async (payload) => {
   logger.info(
     {
       event: eventName,
-      text,
-      authorPhone: resolvedExtraction.authorPhone,
-      sourcePath: resolvedExtraction.sourcePath,
-      confidence: resolvedExtraction.confidence,
-      resolutionRule: resolvedExtraction.resolutionRule,
-      remoteJidOriginal: resolvedExtraction.remoteJidOriginal,
-      instanceName: normalizedPayload?.instanceName || null,
-      sender: resolvedExtraction.sender || normalizedPayload?.sender || null,
-      participant: resolvedExtraction.participant || normalizedPayload?.participant || null,
-      fromMe: resolvedExtraction.fromMe,
-      authorSignalComparison: {
-        raw: buildAuthorSignalShape(payload),
-        normalized: buildAuthorSignalShape(normalizedPayload),
-      },
+      authorPhone,
+      instanceName,
+      connectedNumber: connectedNumber || null,
+      textPreview: text.slice(0, 60),
+      resolutionRule: resolvedExtraction.resolutionRule || authorExtracted.source,
+      isLid: authorExtracted.isLid,
     },
-    'AUTOR RESOLVIDO'
+    'WEBHOOK PROCESSADO: autor identificado, mensagem válida'
   );
-
-  logger.info(
-    {
-      event: eventName,
-      authorPhone: resolvedExtraction.authorPhone,
-      sourcePath: resolvedExtraction.sourcePath,
-      confidence: resolvedExtraction.confidence,
-      resolutionRule: resolvedExtraction.resolutionRule,
-      remoteJidOriginal: resolvedExtraction.remoteJidOriginal,
-      instanceName: normalizedPayload?.instanceName || null,
-      sender: resolvedExtraction.sender || normalizedPayload?.sender || null,
-      participant: resolvedExtraction.participant || normalizedPayload?.participant || null,
-      fromMe: resolvedExtraction.fromMe,
-    },
-    'Autor da mensagem WhatsApp resolvido'
-  );
-
-  // ========== ANTI-SELF-REPLY: CORREÇÃO DEFINITIVA ==========
-  // 1. IDENTIFICAR NÚMERO DA INSTÂNCIA (cache, sem HTTP por webhook)
-  const instanceName = normalizedPayload?.instanceName || null;
-  const connectedNumber = getConnectedNumberCached(instanceName);
-
-  // 2. NORMALIZAÇÃO DO AUTOR DA MENSAGEM
-  // PRIORIDADE: extractedPhone (resolvido por resolveIncomingAuthor com LID/participantPn/sender ranking)
-  // é MAIS confiável que o sender bruto (que em payloads @lid pode ser o número da instância).
-  const resolvedAuthorPhone = extractPhone(extractedPhone);
-  const senderPhone = extractPhone(payload?.sender || normalizedPayload?.sender);
-  const remotePhone = extractPhone(payload?.key?.remoteJid || normalizedPayload?.key?.remoteJid);
-  const authorPhone = resolvedAuthorPhone || senderPhone || remotePhone;
-
-  // 3. LOGS PARA DEBUG
-  logger.info({
-    connectedNumber: connectedNumber || 'NULL_PENDENTE_SYNC',
-    authorPhone,
-    senderPhone,
-    remotePhone,
-    fromMe: payload?.key?.fromMe || normalizedPayload?.key?.fromMe,
-    instanceName,
-  }, 'DEBUG WHATSAPP - NORMALIZACAO DE TELEFONE');
-
-  // 4. BLOQUEIO DE AUTO-RESPOSTA (FAIL-CLOSED: só bloqueia quando SABE que é auto-resposta)
-  // CORREÇÃO: NÃO descartar mensagens quando connectedNumber é null!
-  // Quando connectedNumber é null, significa que o sync ainda não rodou — processar normalmente.
-  if (connectedNumber && authorPhone && authorPhone === connectedNumber) {
-    logger.warn(
-      { authorPhone, connectedNumber, event: eventName },
-      'BLOQUEADO: mensagem do próprio número (authorPhone === connectedNumber)'
-    );
-    return null;
-  }
-
-  // 5. BLOQUEIO por authorPhone ausente
-  if (!authorPhone) {
-    logger.warn(
-      { authorPhone, connectedNumber, event: eventName },
-      'IGNORADO: telefone do autor nao identificado'
-    );
-    return null;
-  }
-
-  // 6. FILTRO ADICIONAL DE SEGURANÇA (fromMe explícito)
-  if (payload?.key?.fromMe === true || normalizedPayload?.key?.fromMe === true) {
-    logger.info({ event: eventName }, 'Webhook ignorado: fromMe explícito');
-    return null;
-  }
 
   return {
     payload: normalizedPayload,
     eventName,
-    extractedPhone: authorPhone, // DESTINO CORRETO DA RESPOSTA
+    extractedPhone: authorPhone,
     extractedText: text,
-    extraction: { ...resolvedExtraction, authorPhone },
+    extraction: {
+      ...resolvedExtraction,
+      authorPhone,
+      instanceName,
+    },
   };
 };
+
 
 const buildWebhookDebugFields = (payload, extraction = null) => {
   const text = extractWebhookText(payload);
