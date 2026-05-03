@@ -965,6 +965,20 @@ export const getInstanceStatus = async ({ instanceName = null } = {}) => {
   }
 };
 
+export const getInstanceMe = async ({ instanceName = null } = {}) => {
+  const { instanceName: resolvedInstanceName } = getConfig({ instanceName });
+  const encodedInstanceName = encodeURIComponent(resolvedInstanceName);
+
+  return requestWithFallback(
+    [
+      { method: 'GET', path: `/instance/me/${encodedInstanceName}`, instanceName: resolvedInstanceName },
+      { method: 'GET', path: `/instance/me?instanceName=${encodedInstanceName}`, instanceName: resolvedInstanceName },
+      { method: 'GET', path: `/instance/me?instance=${encodedInstanceName}`, instanceName: resolvedInstanceName },
+    ],
+    'getInstanceMe'
+  );
+};
+
 export const getQrCode = async ({ instanceName = null } = {}) => {
   const { instanceName: resolvedInstanceName } = getConfig({ instanceName });
 

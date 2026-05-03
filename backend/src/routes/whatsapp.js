@@ -13,6 +13,7 @@ import {
   restartWhatsApp,
   initializeWhatsAppInstance,
 } from '../services/whatsappClient.js';
+import { getInstanceMe } from '../services/evolutionApiService.js';
 import { getBarbershopWhatsAppInstanceContext } from '../services/whatsapp/whatsappInstanceService.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { requireTenantRoles } from '../middleware/rbac.js';
@@ -746,7 +747,40 @@ const buildWebhookPhoneExtractionOptions = () => {
   };
 };
 
-const mapWebhookIncomingMessage = (payload) => {
+function extractPhone(jid) {
+  if (!jid) return null;
+  return String(jid).split('@')[0].replace(/\D/g, '');
+}
+
+const getConnectedNumberAPI = async (instanceName) => {
+  try {
+    if (instanceName) {
+      const mePayload = await getInstanceMe({ instanceName });
+      const rawNumber = mePayload?.id || mePayload?.wid || mePayload?.number || mePayload?.phone || mePayload?.profile?.id;
+      if (rawNumber) {
+        return extractPhone(rawNumber);
+      }
+    }
+  } catch (error) {
+    logger.warn({ error: error.message, instanceName }, 'Falha ao buscar /instance/me');
+  }
+
+  // Fallback cache status
+  const status = instanceName ? getWhatsAppStatusByInstance(instanceName) : getWhatsAppStatus();
+  if (status?.connectedNumber) {
+    return extractPhone(status.connectedNumber);
+  }
+
+  // Fallback env
+  const envPhone = process.env.WHATSAPP_PHONE || process.env.EVOLUTION_PHONE;
+  if (envPhone) {
+    return extractPhone(envPhone);
+  }
+
+  return null;
+};
+
+const mapWebhookIncomingMessage = async (payload) => {
   const normalizedPayload = normalizeWebhookEventPayload(payload);
   const eventName = normalizeWebhookEventName(normalizedPayload?.event || normalizedPayload?.type || '');
 
@@ -901,28 +935,51 @@ const mapWebhookIncomingMessage = (payload) => {
     'Autor da mensagem WhatsApp resolvido'
   );
 
-  // REGRA 1: Bloqueio de auto-resposta no nível do webhook route
-  const connectedNumber = normalizeWhatsAppNumber(getWhatsAppStatus()?.connectedNumber);
-  if (connectedNumber && extractedPhone === connectedNumber) {
+  // 1. IDENTIFICAR NÚMERO DA INSTÂNCIA (CRÍTICO)
+  const instanceName = normalizedPayload?.instanceName || null;
+  const connectedNumber = await getConnectedNumberAPI(instanceName);
+
+  // 2. NORMALIZAÇÃO DO AUTOR DA MENSAGEM
+  const senderPhone = extractPhone(payload?.sender || normalizedPayload?.sender);
+  const remotePhone = extractPhone(payload?.key?.remoteJid || normalizedPayload?.key?.remoteJid);
+  const authorPhone = senderPhone || remotePhone || extractPhone(extractedPhone);
+
+  // 7. LOGS PARA DEBUG
+  logger.info({
+    connectedNumber,
+    authorPhone,
+    senderPhone,
+    remotePhone,
+    fromMe: payload?.key?.fromMe || normalizedPayload?.key?.fromMe,
+    instanceName
+  }, "DEBUG WHATSAPP - NORMALIZACAO DE TELEFONE");
+
+  // 3. BLOQUEIO ABSOLUTO DE AUTO-RESPOSTA
+  if (!authorPhone || !connectedNumber) {
+    logger.warn({ authorPhone, connectedNumber, event: eventName }, "IGNORADO: dados inválidos (connectedNumber ou authorPhone nulo)");
+    return null;
+  }
+
+  if (authorPhone === connectedNumber) {
     logger.warn(
-      {
-        event: eventName,
-        authorPhone: extractedPhone,
-        connectedNumber,
-        remoteJidOriginal: resolvedExtraction.remoteJidOriginal,
-        reason: 'self_reply_blocked',
-      },
-      'Bloqueado no webhook: auto-resposta (authorPhone === connectedNumber)'
+      { authorPhone, connectedNumber, event: eventName },
+      "IGNORADO: mensagem do próprio número (authorPhone === connectedNumber)"
     );
+    return null;
+  }
+
+  // 4. FILTRO ADICIONAL DE SEGURANÇA
+  if (payload?.key?.fromMe === true || normalizedPayload?.key?.fromMe === true) {
+    logger.info({ event: eventName }, 'Webhook ignorado: fromMe explícito');
     return null;
   }
 
   return {
     payload: normalizedPayload,
     eventName,
-    extractedPhone,
+    extractedPhone: authorPhone, // 5. DESTINO CORRETO DA RESPOSTA
     extractedText: text,
-    extraction: resolvedExtraction,
+    extraction: { ...resolvedExtraction, authorPhone },
   };
 };
 
@@ -1125,7 +1182,7 @@ router.post('/webhook', async (req, res, next) => {
       'Webhook legado recebido. Recomenda-se migrar para /api/v1/whatsapp/webhook/messages-upsert'
     );
 
-    const incoming = mapWebhookIncomingMessage(payload);
+    const incoming = await mapWebhookIncomingMessage(payload);
 
     if (!incoming) {
       const normalizedPayload = normalizeWebhookEventPayload(payload);
@@ -1255,7 +1312,7 @@ router.post('/webhook/:event', async (req, res, next) => {
       return sendSuccess(res, { received: true, processed: false });
     }
 
-    const incoming = mapWebhookIncomingMessage({
+    const incoming = await mapWebhookIncomingMessage({
       ...payload,
       event: eventName,
     });
