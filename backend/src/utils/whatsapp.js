@@ -958,7 +958,8 @@ export const normalizePhoneForSend = (value) => {
 export const resolveReplyDestination = ({ phone } = {}) => {
   const normalizedPhone = normalizePhoneForSend(phone);
   if (!normalizedPhone) return null;
-  if (normalizedPhone.endsWith('@lid')) return normalizedPhone;
+  // REGRA ABSOLUTA: destino é SEMPRE digits-only, NUNCA JID (@lid/@s.whatsapp.net/etc)
+  if (normalizedPhone.includes('@')) return null;
   if (!isValidPhone(normalizedPhone)) return null;
   return normalizedPhone;
 };

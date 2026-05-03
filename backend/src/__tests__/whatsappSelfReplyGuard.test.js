@@ -55,6 +55,7 @@ jest.unstable_mockModule('../services/whatsapp/whatsappMessageService.js', () =>
 
 jest.unstable_mockModule('../services/whatsappClient.js', () => ({
   getWhatsAppStatus: mockGetWhatsAppStatus,
+  getWhatsAppStatusByInstance: mockGetWhatsAppStatus,
 }));
 
 jest.unstable_mockModule('../services/whatsapp/whatsappSessionService.js', () => ({
@@ -197,7 +198,7 @@ describe('whatsappSelfReplyGuard — bot nao deve responder a si proprio', () =>
       preExtractedPhone: INSTANCE_NUMBER,
     });
 
-    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'connected_number_match' });
+    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'self_reply_blocked' });
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
   });
 
@@ -211,7 +212,7 @@ describe('whatsappSelfReplyGuard — bot nao deve responder a si proprio', () =>
       }
     );
 
-    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'connected_number_match' });
+    expect(result).toMatchObject({ ok: false, ignored: true, reason: 'self_reply_blocked' });
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
   });
 

@@ -41,6 +41,7 @@ jest.unstable_mockModule('../services/whatsapp/whatsappMessageService.js', () =>
 
 jest.unstable_mockModule('../services/whatsappClient.js', () => ({
   getWhatsAppStatus: mockGetWhatsAppStatus,
+  getWhatsAppStatusByInstance: mockGetWhatsAppStatus,
 }));
 
 jest.unstable_mockModule('../services/whatsapp/whatsappSessionService.js', () => ({
@@ -707,7 +708,7 @@ describe('whatsappFlowService guards', () => {
       expect.objectContaining({
         ok: false,
         ignored: true,
-        reason: 'connected_number_match',
+        reason: 'self_reply_blocked',
       })
     );
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
@@ -737,7 +738,7 @@ describe('whatsappFlowService guards', () => {
       expect.objectContaining({
         ok: false,
         ignored: true,
-        reason: 'self_target',
+        reason: 'self_reply_blocked',
       })
     );
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
@@ -904,7 +905,7 @@ describe('whatsappFlowService guards', () => {
       expect.objectContaining({
         ok: false,
         ignored: true,
-        reason: 'non_greeting_without_session',
+        reason: 'no_greeting_no_session',
       })
     );
     expect(mockCreateSession).not.toHaveBeenCalled();
@@ -929,7 +930,7 @@ describe('whatsappFlowService guards', () => {
       expect.objectContaining({
         ok: false,
         ignored: true,
-        reason: 'session_expired_requires_greeting',
+        reason: 'no_greeting_no_session',
       })
     );
     expect(mockDeleteSession).toHaveBeenCalledWith('5511777777777', 'tenant-1');

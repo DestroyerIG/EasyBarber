@@ -152,7 +152,7 @@ describe('whatsappClient destination resolution', () => {
     expect(sent).toBe(true);
     expect(mockSendTextMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        phone: '558396311811@s.whatsapp.net',
+        phone: '558396311811',
         text: 'Oi',
         instanceName: 'tenant-alpha',
       })
@@ -169,7 +169,7 @@ describe('whatsappClient destination resolution', () => {
     expect(mockEnsureBarbershopWhatsAppInstanceName).toHaveBeenCalledWith('tenant-alpha');
     expect(mockSendTextMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        phone: '558396311811@s.whatsapp.net',
+        phone: '558396311811',
         text: 'Oi',
         instanceName: 'tenant-alpha',
       })
@@ -185,7 +185,7 @@ describe('whatsappClient destination resolution', () => {
     expect(sent).toBe(true);
     expect(mockSendTextMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        phone: '558396311811@s.whatsapp.net',
+        phone: '558396311811',
         text: 'Oi',
       })
     );

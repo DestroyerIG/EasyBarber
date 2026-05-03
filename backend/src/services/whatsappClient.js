@@ -753,7 +753,7 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
 
   const normalizedAuthorPhone = normalizeWhatsAppNumber(authorPhone);
 
-  // REGRA 1: Bloqueio de auto-resposta — authorPhone === connectedNumber
+  // ========== REGRA 1: Bloqueio de auto-resposta ==========
   const instanceContext = await resolveClientInstanceContext({
     instanceName: context?.instanceName,
     barbershopId: context?.barbershopId,
@@ -769,64 +769,44 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
         authorPhone: normalizedAuthorPhone,
         connectedNumber,
         sourcePath,
-        remoteJidOriginal,
         reason: 'self_reply_blocked',
       },
-      'Bloqueado: tentativa de auto-resposta (authorPhone === connectedNumber)'
+      'BLOQUEADO: auto-resposta (authorPhone === connectedNumber)'
     );
     return false;
   }
 
-  // REGRA 3: Sanitização do número — garantir formato limpo (digits only)
-  const sanitizedDestination = normalizedAuthorPhone ? normalizedAuthorPhone.replace(/\D/g, '') : null;
-
-  if (!sanitizedDestination || sanitizedDestination.length < 10) {
-    logger.warn(
-      {
-        authorPhone: authorPhone || null,
-        sanitizedDestination: sanitizedDestination || null,
-        sourcePath,
-        remoteJidOriginal,
-        reason: 'invalid_phone_format',
-      },
-      'Numero invalido, envio cancelado'
-    );
-    return false;
-  }
-
-  // REGRA 4: Destino SEMPRE é o número sanitizado, NUNCA um JID @lid
-  const destination = `${sanitizedDestination}@s.whatsapp.net`;
-  const destinationLowered = destination.toLowerCase();
-
-  const discardedRemoteJid = isInvalidJidContext(remoteJidOriginal);
   const knownInstanceNumbers = Array.isArray(context?.knownInstanceNumbers)
     ? context.knownInstanceNumbers
     : [];
 
-  const isValidDestination = Boolean(sanitizedDestination && isValidPhone(sanitizedDestination));
-
-  if (!isValidDestination) {
+  if (knownInstanceNumbers.includes(normalizedAuthorPhone)) {
     logger.warn(
       {
-        authorPhone: sanitizedDestination || authorPhone || null,
-        remoteJidOriginal,
-        reason: 'invalid_phone',
+        authorPhone: normalizedAuthorPhone,
+        connectedNumber,
+        knownInstanceNumbers,
+        reason: 'self_reply_blocked',
       },
-      'Envio WhatsApp ignorado: telefone invalido'
+      'BLOQUEADO: auto-resposta (authorPhone em knownInstanceNumbers)'
     );
     return false;
   }
 
-  if (!destination) {
+  // ========== REGRA 2: Sanitização e validação do destino ==========
+  // Destino é SEMPRE o número sanitizado (digits only), NUNCA um JID @lid
+  const destination = normalizedAuthorPhone ? normalizedAuthorPhone.replace(/\D/g, '') : null;
+
+  if (!destination || !isValidPhone(destination)) {
     logger.warn(
       {
-        authorPhone: sanitizedDestination || authorPhone || null,
-        destination,
+        authorPhone: authorPhone || null,
+        destination: destination || null,
         sourcePath,
         remoteJidOriginal,
         reason: 'invalid_destination',
       },
-      'Envio WhatsApp ignorado: destino invalido para resposta'
+      'BLOQUEADO: destino invalido (telefone nao resolvido ou formato incorreto)'
     );
     return false;
   }
@@ -834,19 +814,17 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   if (!normalizedMessage) {
     logger.warn(
       {
-        authorPhone: sanitizedDestination || authorPhone || null,
-        destination,
-        sourcePath,
-        remoteJidOriginal,
+        authorPhone: destination,
         reason: 'empty_message',
       },
-      'Envio WhatsApp ignorado: mensagem vazia'
+      'BLOQUEADO: mensagem vazia'
     );
     return false;
   }
 
+  // ========== REGRA 3: Política de destino seguro ==========
   const destinationDecision = resolveSafeReplyDestination({
-    phone: sanitizedDestination,
+    phone: destination,
     fromMe,
     remoteJidOriginal,
     connectedNumber,
@@ -858,65 +836,38 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   if (!destinationDecision.ok) {
     logger.warn(
       {
-        authorPhone: sanitizedDestination || authorPhone || null,
-        destination: destinationDecision.destination,
-        destinationFinal: destination,
-        sourcePath,
+        authorPhone: destination,
+        destinationDecision: destinationDecision.reason,
         connectedNumber,
-        knownInstanceNumbers,
         remoteJidOriginal,
-        reason: destinationDecision.reason,
       },
-      'Envio WhatsApp bloqueado pela politica de destino'
+      'BLOQUEADO: politica de destino rejeitou envio'
     );
     return false;
   }
 
-  if (discardedRemoteJid) {
-    logger.info(
-      {
-        authorPhone: sanitizedDestination || authorPhone || null,
-        remoteJidOriginal,
-        usedDestination: destination,
-        discardedRemoteJid: true,
-      },
-      'Enviando mensagem usando telefone normalizado (ignorando remoteJid)'
-    );
-  }
-
-  // REGRA 6: Log obrigatório antes do envio
+  // ========== REGRA 4: Log obrigatório ENVIO VALIDADO ==========
   logger.info(
     {
-      fromMe,
-      authorPhone: sanitizedDestination,
+      fromMe: false,
+      authorPhone: destination,
       connectedNumber,
-      destination: sanitizedDestination,
+      destination,
       remoteJidOriginal: remoteJidOriginal || null,
       endpoint,
     },
     'ENVIO VALIDADO'
   );
 
+  // ========== REGRA 5: Envio para Evolution API ==========
   try {
-    logger.info(
-      {
-        authorPhone: normalizedAuthorPhone || authorPhone || null,
-        destination,
-        sourcePath,
-        remoteJidOriginal,
-        endpoint,
-      },
-      'DESTINO FINAL'
-    );
-
-    logger.info(
+    logger.debug(
       {
         number: destination,
-        textMessagePreview: normalizedMessage,
-        payloadShape: 'number+textMessage',
         endpoint,
+        messageLength: normalizedMessage.length,
       },
-      'ENVIO PAYLOAD EVOLUTION'
+      'Enviando para Evolution API'
     );
 
     const sendResult = await sendTextMessage({
@@ -926,7 +877,6 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
       instanceName: resolvedInstanceName,
     });
 
-    const payloadShapeUsed = sendResult?.meta?.payloadShape || null;
     const endpointUsed = sendResult?.meta?.endpoint || endpoint;
 
     const currentState = getWhatsAppStatusByInstance(resolvedInstanceName);
@@ -942,16 +892,12 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
 
     logger.info(
       {
-        authorPhone: normalizedAuthorPhone || authorPhone || null,
-        remoteJidOriginal,
-        resolvedDestination: destination,
-        destinationSource: 'author_phone',
-        discardedRemoteJid,
+        authorPhone: destination,
+        destination,
         endpoint: endpointUsed,
-        payloadShapeUsed,
         messageLength: normalizedMessage.length,
       },
-      'Mensagem enviada via Evolution API'
+      'Mensagem enviada com sucesso via Evolution API'
     );
 
     return true;
@@ -966,7 +912,7 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
         remoteJidOriginal,
         resolvedDestination: destination,
         destinationSource: 'author_phone',
-        discardedRemoteJid,
+        discardedRemoteJid: remoteJidOriginal,
         endpoint,
         instanceName: resolvedInstanceName,
         providerError,

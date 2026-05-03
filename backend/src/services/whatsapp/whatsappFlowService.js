@@ -1323,6 +1323,30 @@ const handleChooseTimeStep = async (phone, text, barbershopId, sessionData, conf
 
 // ==================== HANDLER PRINCIPAL ====================
 
+// PROBLEMA 3 — Deduplicação interna do fluxo: impede processar o mesmo messageId
+// mais de uma vez, mesmo que o handler seja chamado por diferentes entry points.
+const FLOW_PROCESSED_MESSAGES = new Map();
+const FLOW_DEDUPE_TTL_MS = 10 * 60 * 1000;
+const FLOW_DEDUPE_MAX_KEYS = 5000;
+
+const pruneFlowDedupeCache = () => {
+  const now = Date.now();
+  for (const [key, expiresAt] of FLOW_PROCESSED_MESSAGES.entries()) {
+    if (expiresAt <= now) {
+      FLOW_PROCESSED_MESSAGES.delete(key);
+    }
+  }
+  if (FLOW_PROCESSED_MESSAGES.size > FLOW_DEDUPE_MAX_KEYS) {
+    const overflow = FLOW_PROCESSED_MESSAGES.size - FLOW_DEDUPE_MAX_KEYS;
+    let removed = 0;
+    for (const key of FLOW_PROCESSED_MESSAGES.keys()) {
+      FLOW_PROCESSED_MESSAGES.delete(key);
+      removed += 1;
+      if (removed >= overflow) break;
+    }
+  }
+};
+
 const resolveIncomingMessageInput = (phoneOrPayload, text, options = {}) => {
   const isPayloadInput = phoneOrPayload && typeof phoneOrPayload === 'object' && !Array.isArray(phoneOrPayload);
   const preExtractedPhone = normalizeWhatsAppNumber(options?.preExtractedPhone);
@@ -1503,6 +1527,20 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     if (fromMe) {
       logger.info({ ...flowDebugBase, fromMe: true }, 'Mensagem ignorada: fromMe=true');
       return { ok: false, ignored: true, reason: 'from_me' };
+    }
+
+    // PROBLEMA 3 — Deduplicação interna do fluxo por messageId
+    const flowMessageId = options?.messageId || options?.dedupeKey || null;
+    if (flowMessageId) {
+      pruneFlowDedupeCache();
+      if (FLOW_PROCESSED_MESSAGES.has(flowMessageId)) {
+        logger.info(
+          { ...flowDebugBase, messageId: flowMessageId, reason: 'flow_dedupe' },
+          'Mensagem ignorada por deduplicacao interna do fluxo'
+        );
+        return { ok: false, ignored: true, reason: 'flow_dedupe' };
+      }
+      FLOW_PROCESSED_MESSAGES.set(flowMessageId, Date.now() + FLOW_DEDUPE_TTL_MS);
     }
 
     // REGRA 1: Bloqueio por authorPhone ausente
@@ -1898,12 +1936,21 @@ export const handleWebhook = async (req, res) => {
       messageText: text,
     });
 
+    // Extrair messageId para deduplicação interna do fluxo
+    const messageId =
+      payload?.key?.id ||
+      payload?.data?.key?.id ||
+      payload?.data?.messages?.[0]?.key?.id ||
+      payload?.messages?.[0]?.key?.id ||
+      null;
+
     const result = await handleIncomingMessage(payload, text, {
       preExtractedPhone: extraction.phone,
       preExtractedText: text,
       preExtractedInstanceNumbers: extraction.instanceNumbers,
       preResolvedAuthorExtraction: extraction,
       eventName,
+      messageId,
     });
 
     return res.status(200).json({ success: true, data: { phone: extraction.phone, text, result } });
