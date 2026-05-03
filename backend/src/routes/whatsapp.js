@@ -4,6 +4,7 @@ import { handleIncomingMessage, sendWhatsAppMessage } from '../services/whatsapp
 import {
   getWhatsAppStatus,
   getWhatsAppStatusByInstance,
+  getConnectedNumberCached,
   connectWhatsApp,
   disconnectWhatsApp,
   getWhatsAppQrCode,
@@ -13,7 +14,6 @@ import {
   restartWhatsApp,
   initializeWhatsAppInstance,
 } from '../services/whatsappClient.js';
-import { getInstanceMe } from '../services/evolutionApiService.js';
 import { getBarbershopWhatsAppInstanceContext } from '../services/whatsapp/whatsappInstanceService.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { requireTenantRoles } from '../middleware/rbac.js';
@@ -752,34 +752,6 @@ function extractPhone(jid) {
   return String(jid).split('@')[0].replace(/\D/g, '');
 }
 
-const getConnectedNumberAPI = async (instanceName) => {
-  try {
-    if (instanceName) {
-      const mePayload = await getInstanceMe({ instanceName });
-      const rawNumber = mePayload?.id || mePayload?.wid || mePayload?.number || mePayload?.phone || mePayload?.profile?.id;
-      if (rawNumber) {
-        return extractPhone(rawNumber);
-      }
-    }
-  } catch (error) {
-    logger.warn({ error: error.message, instanceName }, 'Falha ao buscar /instance/me');
-  }
-
-  // Fallback cache status
-  const status = instanceName ? getWhatsAppStatusByInstance(instanceName) : getWhatsAppStatus();
-  if (status?.connectedNumber) {
-    return extractPhone(status.connectedNumber);
-  }
-
-  // Fallback env
-  const envPhone = process.env.WHATSAPP_PHONE || process.env.EVOLUTION_PHONE;
-  if (envPhone) {
-    return extractPhone(envPhone);
-  }
-
-  return null;
-};
-
 const mapWebhookIncomingMessage = async (payload) => {
   const normalizedPayload = normalizeWebhookEventPayload(payload);
   const eventName = normalizeWebhookEventName(normalizedPayload?.event || normalizedPayload?.type || '');
@@ -935,40 +907,50 @@ const mapWebhookIncomingMessage = async (payload) => {
     'Autor da mensagem WhatsApp resolvido'
   );
 
-  // 1. IDENTIFICAR NÚMERO DA INSTÂNCIA (CRÍTICO)
+  // ========== ANTI-SELF-REPLY: CORREÇÃO DEFINITIVA ==========
+  // 1. IDENTIFICAR NÚMERO DA INSTÂNCIA (cache, sem HTTP por webhook)
   const instanceName = normalizedPayload?.instanceName || null;
-  const connectedNumber = await getConnectedNumberAPI(instanceName);
+  const connectedNumber = getConnectedNumberCached(instanceName);
 
   // 2. NORMALIZAÇÃO DO AUTOR DA MENSAGEM
+  // PRIORIDADE: extractedPhone (resolvido por resolveIncomingAuthor com LID/participantPn/sender ranking)
+  // é MAIS confiável que o sender bruto (que em payloads @lid pode ser o número da instância).
+  const resolvedAuthorPhone = extractPhone(extractedPhone);
   const senderPhone = extractPhone(payload?.sender || normalizedPayload?.sender);
   const remotePhone = extractPhone(payload?.key?.remoteJid || normalizedPayload?.key?.remoteJid);
-  const authorPhone = senderPhone || remotePhone || extractPhone(extractedPhone);
+  const authorPhone = resolvedAuthorPhone || senderPhone || remotePhone;
 
-  // 7. LOGS PARA DEBUG
+  // 3. LOGS PARA DEBUG
   logger.info({
-    connectedNumber,
+    connectedNumber: connectedNumber || 'NULL_PENDENTE_SYNC',
     authorPhone,
     senderPhone,
     remotePhone,
     fromMe: payload?.key?.fromMe || normalizedPayload?.key?.fromMe,
-    instanceName
-  }, "DEBUG WHATSAPP - NORMALIZACAO DE TELEFONE");
+    instanceName,
+  }, 'DEBUG WHATSAPP - NORMALIZACAO DE TELEFONE');
 
-  // 3. BLOQUEIO ABSOLUTO DE AUTO-RESPOSTA
-  if (!authorPhone || !connectedNumber) {
-    logger.warn({ authorPhone, connectedNumber, event: eventName }, "IGNORADO: dados inválidos (connectedNumber ou authorPhone nulo)");
-    return null;
-  }
-
-  if (authorPhone === connectedNumber) {
+  // 4. BLOQUEIO DE AUTO-RESPOSTA (FAIL-CLOSED: só bloqueia quando SABE que é auto-resposta)
+  // CORREÇÃO: NÃO descartar mensagens quando connectedNumber é null!
+  // Quando connectedNumber é null, significa que o sync ainda não rodou — processar normalmente.
+  if (connectedNumber && authorPhone && authorPhone === connectedNumber) {
     logger.warn(
       { authorPhone, connectedNumber, event: eventName },
-      "IGNORADO: mensagem do próprio número (authorPhone === connectedNumber)"
+      'BLOQUEADO: mensagem do próprio número (authorPhone === connectedNumber)'
     );
     return null;
   }
 
-  // 4. FILTRO ADICIONAL DE SEGURANÇA
+  // 5. BLOQUEIO por authorPhone ausente
+  if (!authorPhone) {
+    logger.warn(
+      { authorPhone, connectedNumber, event: eventName },
+      'IGNORADO: telefone do autor nao identificado'
+    );
+    return null;
+  }
+
+  // 6. FILTRO ADICIONAL DE SEGURANÇA (fromMe explícito)
   if (payload?.key?.fromMe === true || normalizedPayload?.key?.fromMe === true) {
     logger.info({ event: eventName }, 'Webhook ignorado: fromMe explícito');
     return null;
@@ -977,7 +959,7 @@ const mapWebhookIncomingMessage = async (payload) => {
   return {
     payload: normalizedPayload,
     eventName,
-    extractedPhone: authorPhone, // 5. DESTINO CORRETO DA RESPOSTA
+    extractedPhone: authorPhone, // DESTINO CORRETO DA RESPOSTA
     extractedText: text,
     extraction: { ...resolvedExtraction, authorPhone },
   };

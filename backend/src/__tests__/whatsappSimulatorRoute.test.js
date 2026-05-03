@@ -20,6 +20,7 @@ jest.unstable_mockModule('../services/whatsapp/index.js', () => ({
 jest.unstable_mockModule('../services/whatsappClient.js', () => ({
   getWhatsAppStatus: jest.fn(() => ({ connectedNumber: null })),
   getWhatsAppStatusByInstance: jest.fn(() => ({ connectedNumber: null })),
+  getConnectedNumberCached: jest.fn(() => null),
   connectWhatsApp: jest.fn(),
   disconnectWhatsApp: jest.fn(),
   getWhatsAppQrCode: jest.fn(),

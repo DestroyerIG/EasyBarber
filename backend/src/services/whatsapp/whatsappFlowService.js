@@ -12,7 +12,7 @@
 import logger from '../../utils/logger.js';
 import pool from '../../config/database.js';
 import { sendWhatsAppMessage, buildWelcomeMessage } from './whatsappMessageService.js';
-import { getWhatsAppStatus, getWhatsAppStatusByInstance } from '../whatsappClient.js';
+import { getWhatsAppStatus, getWhatsAppStatusByInstance, getConnectedNumberCached } from '../whatsappClient.js';
 import {
   normalizeWhatsAppNumber,
   extractWhatsAppPhoneFromWebhookDetailed,
@@ -584,9 +584,24 @@ const resolveBarbershopFromSessionContext = async (phone) => {
  * Evita que a guard self_target rejeite mensagens de terceiros durante startup.
  */
 const resolveConnectedNumber = (instanceName = null) => {
+  // CORREÇÃO: Usar getConnectedNumberCached que agora é alimentado por
+  // syncStateFromEvolution com fallback /instance/me
+  const cached = getConnectedNumberCached(instanceName);
+  if (cached) return cached;
+
+  // Fallback legado: ler do status direto (mantido por compatibilidade)
   const status = instanceName ? getWhatsAppStatusByInstance(instanceName) : getWhatsAppStatus();
-  if (!status || !status.connectedNumber) return null;
-  return normalizeWhatsAppNumber(status.connectedNumber) || null;
+  if (status?.connectedNumber) {
+    return normalizeWhatsAppNumber(status.connectedNumber) || null;
+  }
+
+  // Último fallback: variável de ambiente
+  const envPhone = process.env.WHATSAPP_PHONE || process.env.EVOLUTION_PHONE;
+  if (envPhone) {
+    return normalizeWhatsAppNumber(envPhone) || null;
+  }
+
+  return null;
 };
 
 // ==================== UTILITÁRIOS DE DATA (FIX Bug 5) ====================

@@ -38,6 +38,7 @@ jest.unstable_mockModule('../services/evolutionApiService.js', () => ({
   isSessionStateError: mockIsSessionStateError,
   getProviderErrorMessage: mockGetProviderErrorMessage,
   isInstanceNotFoundError: mockIsInstanceNotFoundError,
+  getInstanceMe: jest.fn().mockResolvedValue({ id: '5511999999999@s.whatsapp.net' }),
 }));
 
 jest.unstable_mockModule('../utils/logger.js', () => ({

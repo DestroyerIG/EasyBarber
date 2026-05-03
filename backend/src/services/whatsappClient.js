@@ -11,6 +11,7 @@ import {
   isSessionStateError,
   getProviderErrorMessage,
   isInstanceNotFoundError,
+  getInstanceMe,
 } from './evolutionApiService.js';
 import logger from '../utils/logger.js';
 import {
@@ -247,6 +248,12 @@ const extractIdentity = (payload) => {
     getNested(payload, ['instance', 'ownerJid']),
     getNested(payload, ['data', 'number']),
     getNested(payload, ['data', 'phone']),
+    // Campos adicionais do /instance/me
+    payload?.id,
+    payload?.profile?.id,
+    payload?.me?.id,
+    payload?.me?.number,
+    payload?.me?.wid,
   ].find((value) => typeof value === 'string' && value.trim());
 
   const name = [
@@ -264,6 +271,37 @@ const extractIdentity = (payload) => {
     number,
     name: name || null,
   };
+};
+
+/**
+ * Busca o número conectado via /instance/me quando extractIdentity falha.
+ * Retorna o número normalizado ou null.
+ */
+const fetchConnectedNumberViaInstanceMe = async (instanceName) => {
+  try {
+    const mePayload = await getInstanceMe({ instanceName });
+    const identity = extractIdentity(mePayload || {});
+    if (identity.number) {
+      logger.info(
+        {
+          instanceName,
+          connectedNumber: identity.number,
+          source: '/instance/me',
+        },
+        'Número da instância resolvido via /instance/me'
+      );
+      return identity;
+    }
+  } catch (error) {
+    logger.warn(
+      {
+        err: error,
+        instanceName,
+      },
+      'Falha ao buscar número da instância via /instance/me'
+    );
+  }
+  return { number: null, name: null };
 };
 
 const normalizeStatus = (rawState, qrCode) => {
@@ -362,8 +400,40 @@ const syncStateFromEvolution = async ({ includeQr = false, instanceName = null }
 
   const qrCode = includeQr ? extractQrCode(statusPayload) : state.qrCode;
   const rawEvolutionState = extractConnectionState(statusPayload);
-  const identity = extractIdentity(statusPayload);
+  let identity = extractIdentity(statusPayload);
   const status = normalizeStatus(rawEvolutionState, qrCode);
+
+  // CORREÇÃO CRÍTICA: Se extractIdentity não encontrou o número no status payload,
+  // buscar via /instance/me. Isso resolve o connectedNumber = null permanente.
+  if (status === STATUS.CONNECTED && !identity.number) {
+    logger.warn(
+      {
+        instanceName: resolvedInstanceName,
+        evolutionStatus: rawEvolutionState,
+      },
+      'extractIdentity não encontrou número no status payload, tentando /instance/me'
+    );
+    const meIdentity = await fetchConnectedNumberViaInstanceMe(resolvedInstanceName);
+    if (meIdentity.number) {
+      identity = {
+        number: meIdentity.number,
+        name: meIdentity.name || identity.name,
+      };
+    } else {
+      // Último fallback: variável de ambiente
+      const envPhone = process.env.WHATSAPP_PHONE || process.env.EVOLUTION_PHONE;
+      if (envPhone) {
+        const envNumber = normalizeWhatsAppNumber(envPhone);
+        if (envNumber) {
+          identity = { number: envNumber, name: identity.name };
+          logger.info(
+            { instanceName: resolvedInstanceName, connectedNumber: envNumber, source: 'env' },
+            'Número da instância resolvido via variável de ambiente'
+          );
+        }
+      }
+    }
+  }
 
   logger.info(
     {
@@ -371,6 +441,7 @@ const syncStateFromEvolution = async ({ includeQr = false, instanceName = null }
       instanceName: resolvedInstanceName,
       evolutionStatus: rawEvolutionState,
       normalizedStatus: status,
+      connectedNumber: status === STATUS.CONNECTED ? identity.number : null,
     },
     'Status da instancia sincronizado com a Evolution API'
   );
@@ -416,6 +487,16 @@ export const getWhatsAppStatus = () => ({
 export const getWhatsAppStatusByInstance = (instanceName = null) => ({
   ...snapshotState(instanceName),
 });
+
+/**
+ * Retorna o número conectado cacheado para uma instância.
+ * NÃO faz chamada HTTP — apenas lê do estado em memória.
+ * Usar no webhook handler para evitar latência.
+ */
+export const getConnectedNumberCached = (instanceName = null) => {
+  const state = snapshotState(instanceName);
+  return normalizeWhatsAppNumber(state?.connectedNumber) || null;
+};
 
 export const getWhatsAppClient = () => null;
 
