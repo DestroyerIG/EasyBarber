@@ -1673,31 +1673,33 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     }
 
     if (!session || sessionExpired) {
-      if (sessionExpired) {
-        await deleteSession(normalizedPhone, barbershopId);
-      }
+  if (sessionExpired) {
+    await deleteSession(normalizedPhone, barbershopId);
+  }
 
-      logger.info(
-        {
-          ...flowDebugBase,
-          barbershopId,
-          originalText: greetingEvaluation.originalText,
-          normalizedText: greetingEvaluation.normalizedText,
-          greetingMatched: false,
-          sessionState: sessionExpired ? 'expired' : 'missing',
-          decision: sessionExpired
-            ? 'session_expired_waiting_for_greeting'
-            : 'missing_session_waiting_for_greeting',
-          menuOpened: false,
-        },
-        'Decisao de fluxo WhatsApp aplicada'
-      );
+  // Bug 2: qualquer mensagem sem sessão ativa abre o menu de boas-vindas
+  await createSession(normalizedPhone, barbershopId);
+  const sent = await sendWhatsAppMessage(
+    normalizedPhone,
+    await buildContextualMenuMessage(barbershopId, businessSettings),
+    sendContext
+  );
 
-      return {
-        ok: false,
-        ignored: true,
-        reason: sessionExpired ? 'session_expired_requires_greeting' : 'non_greeting_without_session',
-      };
+  logger.info(
+    {
+      ...flowDebugBase,
+      barbershopId,
+      originalText: greetingEvaluation.originalText,
+      normalizedText: greetingEvaluation.normalizedText,
+      greetingMatched: false,
+      sessionState: sessionExpired ? 'expired' : 'missing',
+      decision: sessionExpired ? 'session_expired_welcome' : 'no_session_welcome',
+      sent,
+    },
+    'Decisao de fluxo WhatsApp aplicada'
+  );
+
+  return { ok: sent, ignored: false, reason: sent ? null : 'send_failed' };
     }
 
     const currentStep = session.step;

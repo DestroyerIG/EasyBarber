@@ -1,4 +1,14 @@
+/**
+ * whatsappGreeting.js — CORRIGIDO
+ *
+ * Bug 2: Adicionados termos de intenção (agendar, marcar, horário, atendimento)
+ * e saudações informais adicionais (alo, salve, tudo bom, bora, hi).
+ * Isso garante que clientes que abrem direto com "quero agendar" ou "horário"
+ * recebam a mensagem de boas-vindas em vez de silêncio.
+ */
+
 const GREETING_EXACT_RULES = new Map([
+  // Saudações básicas
   ['oi', { canonicalGreeting: 'oi', rule: 'exact:oi' }],
   ['ola', { canonicalGreeting: 'ola', rule: 'exact:ola' }],
   ['oii', { canonicalGreeting: 'oi', rule: 'exact:oii' }],
@@ -7,13 +17,28 @@ const GREETING_EXACT_RULES = new Map([
   ['boa tarde', { canonicalGreeting: 'boa tarde', rule: 'exact:boa_tarde' }],
   ['boa noite', { canonicalGreeting: 'boa noite', rule: 'exact:boa_noite' }],
   ['eai', { canonicalGreeting: 'eai', rule: 'exact:eai' }],
+  ['e ai', { canonicalGreeting: 'eai', rule: 'exact:e_ai' }],
   ['iai', { canonicalGreeting: 'iai', rule: 'exact:iai' }],
   ['iae', { canonicalGreeting: 'iae', rule: 'exact:iae' }],
+  ['eae', { canonicalGreeting: 'eae', rule: 'exact:eae' }],
   ['opa', { canonicalGreeting: 'opa', rule: 'exact:opa' }],
   ['fala', { canonicalGreeting: 'fala', rule: 'exact:fala' }],
   ['tudo bem', { canonicalGreeting: 'tudo bem', rule: 'exact:tudo_bem' }],
+  ['tudo bom', { canonicalGreeting: 'tudo bom', rule: 'exact:tudo_bom' }],
   ['hey', { canonicalGreeting: 'hey', rule: 'exact:hey' }],
   ['hello', { canonicalGreeting: 'hello', rule: 'exact:hello' }],
+  ['hi', { canonicalGreeting: 'hi', rule: 'exact:hi' }],
+  ['alo', { canonicalGreeting: 'alo', rule: 'exact:alo' }],
+  ['salve', { canonicalGreeting: 'salve', rule: 'exact:salve' }],
+  ['bora', { canonicalGreeting: 'bora', rule: 'exact:bora' }],
+
+  // Termos de intenção — clientes que abrem direto com a ação desejada
+  ['agendar', { canonicalGreeting: 'agendar', rule: 'exact:agendar' }],
+  ['marcar', { canonicalGreeting: 'marcar', rule: 'exact:marcar' }],
+  ['quero agendar', { canonicalGreeting: 'agendar', rule: 'exact:quero_agendar' }],
+  ['quero marcar', { canonicalGreeting: 'marcar', rule: 'exact:quero_marcar' }],
+  ['horario', { canonicalGreeting: 'horario', rule: 'exact:horario' }],
+  ['atendimento', { canonicalGreeting: 'atendimento', rule: 'exact:atendimento' }],
 ]);
 
 const GREETING_REGEX_RULES = [
@@ -73,6 +98,11 @@ const GREETING_REGEX_RULES = [
     pattern: /^t+u+d+o+\s+b+e+m+$/,
   },
   {
+    canonicalGreeting: 'tudo bom',
+    rule: 'regex:tudo_bom_repetition',
+    pattern: /^t+u+d+o+\s+b+o+m+$/,
+  },
+  {
     canonicalGreeting: 'hey',
     rule: 'regex:hey_repetition',
     pattern: /^h+e+y+$/,
@@ -81,6 +111,11 @@ const GREETING_REGEX_RULES = [
     canonicalGreeting: 'hello',
     rule: 'regex:hello_repetition',
     pattern: /^h+e+l{2,}o+$/,
+  },
+  {
+    canonicalGreeting: 'alo',
+    rule: 'regex:alo_repetition',
+    pattern: /^a+l+o+$/,
   },
 ];
 
@@ -100,7 +135,7 @@ export const normalizeGreetingText = (text) => {
   return baseText
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')  // remove acentos: "horário" → "horario", "olá" → "ola"
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();

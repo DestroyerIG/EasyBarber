@@ -1012,12 +1012,7 @@ export const normalizePhoneForSend = (value) => {
   const lowered = raw.toLowerCase();
 
   if (lowered.endsWith('@lid')) {
-    const candidate = raw.slice(0, -'@lid'.length);
-    const digits = candidate.replace(/\D/g, '');
-    if (!isValidPhone(digits)) {
-      return null;
-    }
-    return `${digits}@lid`;
+  return null;
   }
 
   let candidate = raw;
