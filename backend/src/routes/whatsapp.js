@@ -901,6 +901,22 @@ const mapWebhookIncomingMessage = (payload) => {
     'Autor da mensagem WhatsApp resolvido'
   );
 
+  // REGRA 1: Bloqueio de auto-resposta no nível do webhook route
+  const connectedNumber = normalizeWhatsAppNumber(getWhatsAppStatus()?.connectedNumber);
+  if (connectedNumber && extractedPhone === connectedNumber) {
+    logger.warn(
+      {
+        event: eventName,
+        authorPhone: extractedPhone,
+        connectedNumber,
+        remoteJidOriginal: resolvedExtraction.remoteJidOriginal,
+        reason: 'self_reply_blocked',
+      },
+      'Bloqueado no webhook: auto-resposta (authorPhone === connectedNumber)'
+    );
+    return null;
+  }
+
   return {
     payload: normalizedPayload,
     eventName,

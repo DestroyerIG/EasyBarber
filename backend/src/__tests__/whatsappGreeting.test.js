@@ -31,6 +31,10 @@ describe('whatsappGreeting', () => {
     ['oiii'],
     ['heyyy'],
     ['hellooo'],
+    ['agendar'],
+    ['marcar'],
+    ['quero agendar'],
+    ['horário'],
   ])('detecta saudacao valida: %s', (input) => {
     const result = evaluateGreetingMessage(input);
 
@@ -41,7 +45,6 @@ describe('whatsappGreeting', () => {
   });
 
   it.each([
-    ['agendar'],
     ['quero marcar horario'],
     ['tudo bem? preciso de ajuda'],
     ['xpto'],

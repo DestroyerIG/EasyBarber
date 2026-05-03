@@ -1499,15 +1499,63 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     const authorPhone = normalizedPhone;
     const isValidUserMessage = !fromMe && authorPhone;
 
-    if (!isValidUserMessage) {
-      if (fromMe) {
-        logger.info({ ...flowDebugBase }, 'Mensagem ignorada: fromMe');
-        return { ok: false, ignored: true, reason: 'from_me' };
-      }
+    // REGRA 1: Bloqueio por fromMe
+    if (fromMe) {
+      logger.info({ ...flowDebugBase, fromMe: true }, 'Mensagem ignorada: fromMe=true');
+      return { ok: false, ignored: true, reason: 'from_me' };
+    }
 
+    // REGRA 1: Bloqueio por authorPhone ausente
+    if (!authorPhone) {
       logger.warn({ ...flowDebugBase, payload: payloadSummary, knownInstanceNumbers, phoneExtraction },
         'Mensagem ignorada: telefone nao identificado');
       return { ok: false, ignored: true, reason: 'ambiguous_phone' };
+    }
+
+    // REGRA 1: Bloqueio de auto-resposta — authorPhone === connectedNumber
+    if (connectedNumber && authorPhone === connectedNumber) {
+      logger.warn(
+        {
+          ...flowDebugBase,
+          fromMe,
+          authorPhone,
+          connectedNumber,
+          reason: 'self_reply_blocked',
+        },
+        'Bloqueado: tentativa de auto-resposta (authorPhone === connectedNumber)'
+      );
+      return { ok: false, ignored: true, reason: 'self_reply_blocked' };
+    }
+
+    // REGRA 1: Bloqueio de auto-resposta — authorPhone in knownInstanceNumbers
+    if (Array.isArray(knownInstanceNumbers) && knownInstanceNumbers.includes(authorPhone)) {
+      logger.warn(
+        {
+          ...flowDebugBase,
+          fromMe,
+          authorPhone,
+          connectedNumber,
+          knownInstanceNumbers,
+          reason: 'self_reply_instance_number',
+        },
+        'Bloqueado: tentativa de auto-resposta (authorPhone em knownInstanceNumbers)'
+      );
+      return { ok: false, ignored: true, reason: 'self_reply_blocked' };
+    }
+
+    // REGRA 3: Sanitização do número — validar formato E.164
+    const sanitizedPhone = authorPhone.replace(/\D/g, '');
+    if (!sanitizedPhone || sanitizedPhone.length < 10) {
+      logger.warn(
+        {
+          ...flowDebugBase,
+          authorPhone,
+          sanitizedPhone: sanitizedPhone || null,
+          reason: 'invalid_phone_format',
+        },
+        'Numero invalido, envio cancelado'
+      );
+      return { ok: false, ignored: true, reason: 'invalid_phone_format' };
     }
 
     const destinationDecision = resolveSafeReplyDestination({
@@ -1536,6 +1584,19 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
 
       return { ok: false, ignored: true, reason: destinationDecision.reason };
     }
+
+    // REGRA 6: Log obrigatório antes de prosseguir com envio
+    logger.info(
+      {
+        fromMe,
+        authorPhone,
+        connectedNumber,
+        destination: sanitizedPhone,
+        remoteJidOriginal: remoteJidOriginal || null,
+        instanceName: instanceName || null,
+      },
+      'ENVIO VALIDADO'
+    );
 
     if (!normalizedText) {
       logger.info({ ...flowDebugBase }, 'Mensagem ignorada: texto vazio');
@@ -1673,33 +1734,26 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     }
 
     if (!session || sessionExpired) {
-  if (sessionExpired) {
-    await deleteSession(normalizedPhone, barbershopId);
-  }
+      if (sessionExpired) {
+        await deleteSession(normalizedPhone, barbershopId);
+      }
 
-  // Bug 2: qualquer mensagem sem sessão ativa abre o menu de boas-vindas
-  await createSession(normalizedPhone, barbershopId);
-  const sent = await sendWhatsAppMessage(
-    normalizedPhone,
-    await buildContextualMenuMessage(barbershopId, businessSettings),
-    sendContext
-  );
+      // REGRA 5: Sem sessão ativa, menu SÓ dispara com saudação.
+      // Mensagens não-saudação sem sessão são ignoradas silenciosamente.
+      logger.info(
+        {
+          ...flowDebugBase,
+          barbershopId,
+          originalText: greetingEvaluation.originalText,
+          normalizedText: greetingEvaluation.normalizedText,
+          greetingMatched: false,
+          sessionState: sessionExpired ? 'expired' : 'missing',
+          decision: 'ignored_no_greeting_no_session',
+        },
+        'Mensagem ignorada: sem sessao ativa e sem saudacao'
+      );
 
-  logger.info(
-    {
-      ...flowDebugBase,
-      barbershopId,
-      originalText: greetingEvaluation.originalText,
-      normalizedText: greetingEvaluation.normalizedText,
-      greetingMatched: false,
-      sessionState: sessionExpired ? 'expired' : 'missing',
-      decision: sessionExpired ? 'session_expired_welcome' : 'no_session_welcome',
-      sent,
-    },
-    'Decisao de fluxo WhatsApp aplicada'
-  );
-
-  return { ok: sent, ignored: false, reason: sent ? null : 'send_failed' };
+      return { ok: false, ignored: true, reason: 'no_greeting_no_session' };
     }
 
     const currentStep = session.step;

@@ -482,7 +482,7 @@ describe('whatsapp webhook phone extraction', () => {
   it('normalizes destination for send payloads', () => {
     expect(normalizePhoneForSend(' +55 (83) 96311-811@s.whatsapp.net ')).toBe('558396311811');
     expect(normalizePhoneForSend('558396311811@c.us')).toBe('558396311811');
-    expect(normalizePhoneForSend('236197968359561@lid')).toBe('236197968359561@lid');
+    expect(normalizePhoneForSend('236197968359561@lid')).toBeNull();
     expect(normalizePhoneForSend('120363012345678901@g.us')).toBeNull();
   });
 
