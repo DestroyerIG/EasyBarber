@@ -1354,18 +1354,67 @@ const mapStrictPriorityCandidateType = (sourcePath = '') => {
 };
 
 /**
- * FIX BUG SELF-REPLY LID:
- * Extrai o campo "destination" do payload da Evolution API.
- * Esse campo contém o número da instância conectada (o dono da barbearia)
- * e é preenchido mesmo quando connectedNumber ainda não foi sincronizado.
- * Usado para bloquear o lid_sender_fallback quando sender === instância.
+ * Identidades numéricas da instância no payload Evolution (sem HTTP).
+ * Inclui destination (raiz/data), wid/owner/phone em instance — usado para bloquear lid_sender_fallback
+ * quando sender é o próprio número conectado mesmo com cache connectedNumber=null.
  */
-const extractPayloadDestination = (payload = {}) => {
-  const raw =
-    payload?.destination ||
-    payload?.data?.destination ||
-    null;
-  return normalizeWhatsAppNumber(raw);
+const PAYLOAD_INSTANCE_IDENTITY_SOURCES = [
+  (p) => p?.destination,
+  (p) => p?.data?.destination,
+  (p) => p?.instance?.wid,
+  (p) => p?.instance?.ownerJid,
+  (p) => p?.instance?.owner,
+  (p) => p?.instance?.phone,
+  (p) => p?.instance?.number,
+  (p) => p?.instance?.id,
+  (p) => p?.data?.instance?.wid,
+  (p) => p?.data?.instance?.ownerJid,
+  (p) => p?.data?.instance?.owner,
+  (p) => p?.data?.instance?.phone,
+  (p) => p?.data?.instance?.number,
+  (p) => p?.data?.instance?.id,
+];
+
+const mergePayloadInstanceIdentityPhonesIntoSet = (payload, targetSet) => {
+  if (!(targetSet instanceof Set)) return;
+  for (const get of PAYLOAD_INSTANCE_IDENTITY_SOURCES) {
+    const n = normalizePhone(get(payload));
+    if (n) targetSet.add(n);
+  }
+};
+
+/** Primeiro telefone de instância encontrado no payload (webhook Evolution). */
+export const extractPayloadDestination = (payload = {}) => {
+  for (const get of PAYLOAD_INSTANCE_IDENTITY_SOURCES) {
+    const n = normalizePhone(get(payload));
+    if (n) return n;
+  }
+  return null;
+};
+
+const rawSenderEqualsRawDestination = (payload, senderRaw) => {
+  const s = typeof senderRaw === 'string' ? senderRaw.trim().toLowerCase() : '';
+  if (!s) return false;
+  const d1 = typeof payload?.destination === 'string' ? payload.destination.trim().toLowerCase() : '';
+  const d2 =
+    typeof payload?.data?.destination === 'string' ? payload.data.destination.trim().toLowerCase() : '';
+  return (Boolean(d1) && d1 === s) || (Boolean(d2) && d2 === s);
+};
+
+const phoneMatchesPayloadInstanceIdentity = (payload, phoneCanon) => {
+  if (!phoneCanon) return false;
+  const tmp = new Set();
+  mergePayloadInstanceIdentityPhonesIntoSet(payload, tmp);
+  for (const inst of tmp) {
+    if (isSelfMessage({ authorPhone: phoneCanon, connectedNumber: inst })) return true;
+  }
+  return false;
+};
+
+const senderMatchesPayloadInstanceIdentity = (payload, senderCanon, senderRaw) => {
+  if (!senderCanon) return false;
+  if (typeof senderRaw === 'string' && rawSenderEqualsRawDestination(payload, senderRaw)) return true;
+  return phoneMatchesPayloadInstanceIdentity(payload, senderCanon);
 };
 
 export const resolveIncomingAuthor = (payload = {}, options = {}) => {
@@ -1375,10 +1424,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
   // FIX: incluir payload.destination no conjunto de números da instância.
   // A Evolution API sempre envia o número conectado nesse campo,
   // independente do status de sincronização do connectedNumber em memória.
-  const payloadDestinationPhone = extractPayloadDestination(payload);
-  if (payloadDestinationPhone) {
-    instanceNumbersSet.add(payloadDestinationPhone);
-  }
+  mergePayloadInstanceIdentityPhonesIntoSet(payload, instanceNumbersSet);
 
   const rejections = [];
   const blockedConversation = findBlockedConversationCandidate(payload);
@@ -1616,7 +1662,8 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
 
       if (
         senderCanon &&
-        !instanceNumberMatches(senderCanon)
+        !instanceNumberMatches(senderCanon) &&
+        !senderMatchesPayloadInstanceIdentity(payload, senderCanon, sender)
       ) {
         if (remoteJidOriginal) cacheLidToPhone(remoteJidOriginal, senderCanon);
         return {
@@ -1675,7 +1722,8 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       const lidFallbackCanon = normalizePhone(sender.trim()) || normalizePhone(lidFallbackDigits);
       if (
         lidFallbackCanon &&
-        !instanceNumberMatches(lidFallbackCanon)
+        !instanceNumberMatches(lidFallbackCanon) &&
+        !senderMatchesPayloadInstanceIdentity(payload, lidFallbackCanon, sender)
       ) {
         if (remoteJidOriginal) cacheLidToPhone(remoteJidOriginal, lidFallbackCanon);
         return {
@@ -1706,10 +1754,13 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
     const shouldPromoteLidFromFallback =
       conversationKind === 'lid' && LID_SENDER_FALLBACK_EVENTS.has(eventName) && !fromMe &&
       Boolean(incomingText) && lidFromFallbackCandidate && !hasBetterCandidateThanLidFrom &&
-      !instanceNumberMatches(lidFromFallbackCandidate.phone);
+      !instanceNumberMatches(lidFromFallbackCandidate.phone) &&
+      !phoneMatchesPayloadInstanceIdentity(payload, lidFromFallbackCandidate.phone);
     const shouldPromoteSenderFallback =
       !fromMe && Boolean(incomingText) && senderFallbackCandidate && !hasBetterCandidateThanSender &&
-      canPromoteSenderFallback && !instanceNumberMatches(senderFallbackCandidate.phone);
+      canPromoteSenderFallback &&
+      !instanceNumberMatches(senderFallbackCandidate.phone) &&
+      !phoneMatchesPayloadInstanceIdentity(payload, senderFallbackCandidate.phone);
 
     if (shouldPromoteLidFromFallback) {
       maybeCacheLidFromSafeCandidate({ remoteJidOriginal, conversationKind, candidate: lidFromFallbackCandidate });

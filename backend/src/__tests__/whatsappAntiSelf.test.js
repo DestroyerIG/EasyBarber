@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import { isSelfMessage, normalizePhone } from '../utils/whatsapp.js';
+import { isSelfMessage, normalizePhone, extractWhatsAppPhoneFromWebhookDetailed } from '../utils/whatsapp.js';
 import {
   getConnectedNumber,
   updateInstanceDirect,
@@ -37,6 +37,22 @@ describe('isSelfMessage', () => {
         connectedNumber: '5583987654321',
       })
     ).toBe(false);
+  });
+});
+
+describe('@lid + destination Evolution (Render)', () => {
+  it('não usa lid_sender_fallback quando sender = destination (cache connected vazio)', () => {
+    const payload = {
+      event: 'messages-upsert',
+      instanceName: 'itallobarber_12f46de4',
+      destination: '558396311811@s.whatsapp.net',
+      key: { remoteJid: '268796367515747@lid', fromMe: false },
+      sender: '558396311811@s.whatsapp.net',
+      message: { conversation: 'Oi' },
+    };
+    const extraction = extractWhatsAppPhoneFromWebhookDetailed(payload, { messageText: 'Oi' });
+    expect(extraction.phone).not.toBe('558396311811');
+    expect(extraction.phone).toBeNull();
   });
 });
 

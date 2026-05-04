@@ -25,6 +25,7 @@ import {
   normalizeWhatsAppNumber,
   normalizePhone,
   isSelfMessage,
+  extractPayloadDestination,
   extractWhatsAppRemoteJidFromWebhook,
   resolveIncomingAuthor,
 } from '../utils/whatsapp.js';
@@ -628,12 +629,20 @@ const normalizeWebhookEventPayload = (payload = {}, forcedEvent = null) => {
     messageNode?.owner ||
     null;
 
+  const preservedDestination =
+    payload?.destination ??
+    dataNode?.destination ??
+    messageNode?.destination ??
+    undefined;
+
   return {
     ...payload,
     ...(dataNode || {}),
     ...(messageNode || {}),
     key: key || undefined,
     message: message || undefined,
+    // Evolution envia destination no raiz; spreads aninhados não podem apagar (anti–auto-resposta @lid).
+    ...(preservedDestination !== undefined ? { destination: preservedDestination } : {}),
     contextInfo:
       mergePlainObjects(
         payload?.contextInfo,
@@ -890,10 +899,13 @@ const mapWebhookIncomingMessage = async (payload) => {
   // authorPhone: preferência ao sistema existente (mais sofisticado), fallback ao simplificado
   const authorPhone = resolvedExtraction.authorPhone || authorExtracted.phone || null;
 
+  const payloadIdentityPhone = extractPayloadDestination(payload);
+  const identityForSelfCheck = connectedNumber || payloadIdentityPhone || null;
+
   const normalizedAuthor = authorPhone ? normalizePhone(authorPhone) : null;
-  const normalizedConnected = connectedNumber ? normalizePhone(connectedNumber) : null;
+  const normalizedConnected = identityForSelfCheck ? normalizePhone(identityForSelfCheck) : null;
   const isSelf = Boolean(
-    connectedNumber && authorPhone && isSelfMessage({ authorPhone, connectedNumber })
+    identityForSelfCheck && authorPhone && isSelfMessage({ authorPhone, connectedNumber: identityForSelfCheck })
   );
 
   // ========== LOG ESTRUTURADO (campos obrigatórios anti–auto-resposta) ==========
