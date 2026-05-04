@@ -544,8 +544,6 @@ const logWebhookReceipt = ({ req, route, eventName = null, payload = {}, parseEr
   );
 };
 
-// CORREÇÃO: extractWebhookFromMe definido ANTES de normalizeWebhookEventPayload
-// para que possa ser chamado dentro da normalização sem ReferenceError.
 const extractWebhookFromMe = (payload) => {
   const candidates = [
     payload?.fromMe,
@@ -603,9 +601,6 @@ const normalizeWebhookEventPayload = (payload = {}, forcedEvent = null) => {
     dataNode?.message ||
     null;
 
-  // CORREÇÃO: extrair sender e from com prioridade explícita ANTES do spread
-  // O spread encadeado (payload → dataNode → messageNode) sobrescrevia sender/from
-  // do nível raiz com valores de níveis aninhados, causando identificação errada do autor.
   const resolvedSender =
     payload?.sender ||
     dataNode?.sender ||
@@ -642,7 +637,6 @@ const normalizeWebhookEventPayload = (payload = {}, forcedEvent = null) => {
     ...(messageNode || {}),
     key: key || undefined,
     message: message || undefined,
-    // Evolution envia destination no raiz; spreads aninhados não podem apagar (anti–auto-resposta @lid).
     ...(preservedDestination !== undefined ? { destination: preservedDestination } : {}),
     contextInfo:
       mergePlainObjects(
@@ -658,7 +652,6 @@ const normalizeWebhookEventPayload = (payload = {}, forcedEvent = null) => {
         messageNode?.messageContextInfo,
         message?.messageContextInfo
       ) || undefined,
-    // Restaurar sender e from após o spread para evitar contaminação
     sender: resolvedSender,
     from: resolvedFrom,
     instanceName: resolvedInstanceName,
@@ -800,7 +793,6 @@ const resolveConnectedNumberForWebhook = async (instanceName = null, payload = {
 };
 
 const buildWebhookPhoneExtractionOptions = (instanceName = null, connectedNumberOverride = null) => {
-  // Usa o cache dedicado por instância (sem HTTP)
   const connectedNumber =
     normalizeWhatsAppNumber(connectedNumberOverride) || getConnectedNumberCached(instanceName);
 
@@ -813,51 +805,58 @@ const buildWebhookPhoneExtractionOptions = (instanceName = null, connectedNumber
   };
 };
 
-// Verifica se um JID é do tipo @lid (Linked Device — sem número confiável).
 const isLidJid = (jid) =>
   typeof jid === 'string' && jid.endsWith('@lid');
 
-/**
- * Extrai o telefone do autor da mensagem a partir do payload do webhook.
- *
- * Ordem de prioridade (da mais confiável para menos confiável):
- * 1. messageContextInfo.participantPn — campo específico do Evolution para LIDs
- * 2. key.participant — participante em conversas de grupo/LID
- * 3. sender — quando remoteJid não é @lid
- * 4. remoteJid — apenas se NÃO for @lid
- *
- * REGRA: ignorar remoteJid e sender quando remoteJid for @lid,
- *        a menos que sender não seja o número da instância.
- */
+// ══════════════════════════════════════════════════════════════════
+// FIX Evolution API v1 @lid — extractAuthorPhone CORRIGIDA
+//
+// PROBLEMA: Evolution API v1 envia `sender` = número da instância em payloads @lid.
+// O código anterior detectava isSelf=true e retornava phone=null, bloqueando a mensagem.
+//
+// SOLUÇÃO: quando @lid + sender = instância, usar os dígitos do @lid como chave
+// de sessão estável (15 dígitos nunca coincidem com número BR de 12-13 dígitos),
+// e responder via JID @lid completo (Evolution/Baileys roteia corretamente).
+// ══════════════════════════════════════════════════════════════════
 const extractAuthorPhone = (payload, connectedNumber) => {
   const msg = payload?.data?.messages?.[0] || payload?.messages?.[0] || payload;
   const key = msg?.key || payload?.key || {};
   const remoteJid = key?.remoteJid || payload?.key?.remoteJid || null;
   const participant = key?.participant || payload?.participant || null;
   const sender = payload?.sender || null;
- 
-  // 1. participantPn — mais confiável para @lid
+
+  // 1. participantPn — mais confiável para @lid (Evolution v2+)
   const participantPn =
     msg?.messageContextInfo?.participantPn ||
     payload?.messageContextInfo?.participantPn ||
     msg?.message?.messageContextInfo?.participantPn ||
     null;
- 
+
   if (participantPn) {
     const phone = normalizePhone(participantPn);
     if (phone) {
-      return { phone, source: 'participantPn', isLid: isLidJid(remoteJid), lidJid: isLidJid(remoteJid) ? remoteJid : null };
+      return {
+        phone,
+        source: 'participantPn',
+        isLid: isLidJid(remoteJid),
+        lidJid: isLidJid(remoteJid) ? remoteJid : null,
+      };
     }
   }
- 
+
   // 2. participant (grupo ou LID)
   if (participant && !isLidJid(participant)) {
     const phone = normalizePhone(participant);
     if (phone) {
-      return { phone, source: 'participant', isLid: isLidJid(remoteJid), lidJid: isLidJid(remoteJid) ? remoteJid : null };
+      return {
+        phone,
+        source: 'participant',
+        isLid: isLidJid(remoteJid),
+        lidJid: isLidJid(remoteJid) ? remoteJid : null,
+      };
     }
   }
- 
+
   // 3. Se remoteJid for @lid
   if (isLidJid(remoteJid)) {
     if (sender) {
@@ -867,16 +866,16 @@ const extractAuthorPhone = (payload, connectedNumber) => {
         return { phone: senderPhone, source: 'sender_lid_fallback', isLid: true, lidJid: remoteJid };
       }
     }
-    // FIX Evolution API v1: sender contém o número da INSTÂNCIA em payloads @lid (comportamento normal).
-    // Usa os dígitos do @lid como chave de sessão estável.
-    // O reply é feito via JID @lid completo — a Evolution API/Baileys roteia corretamente.
+    // FIX: Evolution API v1 — sender = número da instância em payloads @lid (comportamento normal).
+    // Usa dígitos do @lid como chave de sessão estável (15 dígitos vs 12-13 dígitos BR — sem colisão).
+    // O reply é enviado via JID @lid completo — a Evolution API/Baileys roteia corretamente.
     const lidDigits = remoteJid.split('@')[0];
     if (lidDigits && lidDigits.length >= 10) {
       return { phone: lidDigits, source: 'lid_jid_direct', isLid: true, lidJid: remoteJid };
     }
     return { phone: null, source: 'lid_no_fallback', isLid: true, lidJid: null };
   }
- 
+
   // 4. sender (não-LID)
   if (sender) {
     const senderPhone = normalizePhone(sender);
@@ -884,7 +883,7 @@ const extractAuthorPhone = (payload, connectedNumber) => {
       return { phone: senderPhone, source: 'sender', isLid: false, lidJid: null };
     }
   }
- 
+
   // 5. remoteJid (não-LID, último recurso)
   if (remoteJid && !isLidJid(remoteJid)) {
     const phone = normalizePhone(remoteJid);
@@ -892,9 +891,10 @@ const extractAuthorPhone = (payload, connectedNumber) => {
       return { phone, source: 'remoteJid', isLid: false, lidJid: null };
     }
   }
- 
+
   return { phone: null, source: 'not_found', isLid: false, lidJid: null };
-  };
+};
+
 const mapWebhookIncomingMessage = async (payload) => {
   const normalizedPayload = normalizeWebhookEventPayload(payload);
   const eventName = normalizeWebhookEventName(
@@ -905,8 +905,6 @@ const mapWebhookIncomingMessage = async (payload) => {
     return null;
   }
 
-  // ========== REGRA 1: BLOQUEAR fromMe ==========
-  // Verificado no payload RAW para evitar falso-positivo por spread contaminado.
   const fromMe = extractWebhookFromMe(payload);
   if (fromMe) {
     logger.info(
@@ -921,7 +919,6 @@ const mapWebhookIncomingMessage = async (payload) => {
     return null;
   }
 
-  // Verificação redundante explícita em key.fromMe (defesa em profundidade)
   if (
     payload?.key?.fromMe === true ||
     normalizedPayload?.key?.fromMe === true ||
@@ -931,41 +928,31 @@ const mapWebhookIncomingMessage = async (payload) => {
     return null;
   }
 
-  // ========== IDENTIFICAR INSTÂNCIA ==========
-  // instanceName é o identificador do tenant (barbearia)
   const instanceName =
     normalizedPayload?.instanceName ||
     payload?.instanceName ||
     null;
 
-  // ========== REGRA 2: CONNECTED NUMBER DO CACHE (SEM HTTP) ==========
-  // NUNCA fazer HTTP aqui. Cache é atualizado via syncStateFromEvolution e eventos.
-  // REGRA CRÍTICA: se connectedNumber for null, processar normalmente (não bloquear).
   const connectedNumber = await resolveConnectedNumberForWebhook(instanceName, payload);
 
-  // ========== EXTRAÇÃO DE TEXTO ==========
   const text = extractWebhookText(normalizedPayload);
 
-  // ========== EXTRAÇÃO DO AUTOR ==========
-  // Usa sistema existente de resolvência de autor (suporte a LID, participantPn, etc.)
   const extractionOptions = buildWebhookPhoneExtractionOptions(instanceName, connectedNumber);
   const extraction = resolveIncomingAuthor(normalizedPayload, { ...extractionOptions, messageText: text });
   const rawExtraction = resolveIncomingAuthor(payload, { ...extractionOptions, messageText: text });
   const resolvedExtraction = selectAuthorExtraction(extraction, rawExtraction);
 
-  // Extração direta do autor (sistema simplificado conforme regras do refactoring)
   const authorExtracted = extractAuthorPhone(payload, connectedNumber);
 
-  // authorPhone: preferência ao sistema existente (mais sofisticado), fallback ao simplificado
-  // FIX: sistema existente retorna null para @lid sem participantPn;
-  // extractAuthorPhone usa lid_jid_direct como fallback seguro — priorizar resultado não-nulo.
+  // FIX: sistema sofisticado retorna null para @lid sem participantPn;
+  // extractAuthorPhone usa lid_jid_direct como fallback — priorizar resultado não-nulo.
   const authorPhone = resolvedExtraction.authorPhone || authorExtracted.phone || null;
- 
+
   // FIX Evolution API v1 @lid: preservar JID @lid completo para envio correto
   const effectiveLidJid = authorExtracted.lidJid ||
     (resolvedExtraction.remoteJidOriginal?.endsWith('@lid') ? resolvedExtraction.remoteJidOriginal : null);
   const authorIsLidDirect = authorExtracted.source === 'lid_jid_direct';
- 
+
   const payloadIdentityPhone = extractPayloadDestination(payload);
   const identityForSelfCheck = payloadIdentityPhone || connectedNumber || null;
 
@@ -975,7 +962,6 @@ const mapWebhookIncomingMessage = async (payload) => {
     identityForSelfCheck && authorPhone && isSelfMessage({ authorPhone, connectedNumber: identityForSelfCheck })
   );
 
-  // ========== LOG ESTRUTURADO (campos obrigatórios anti–auto-resposta) ==========
   logger.info(
     {
       instanceName,
@@ -995,9 +981,6 @@ const mapWebhookIncomingMessage = async (payload) => {
     'DEBUG WHATSAPP - AUTOR E NUMERO IDENTIFICADOS'
   );
 
-  // ========== REGRA 3: BLOQUEAR AUTO-RESPOSTA ==========
-  // SÓ bloqueia se connectedNumber for CONHECIDO e igual ao autor (normalizado + variantes BR).
-  // Se connectedNumber for null (sync ainda não rodou), processar normalmente (fail-open).
   if (isSelf) {
     logger.warn(
       {
@@ -1014,7 +997,6 @@ const mapWebhookIncomingMessage = async (payload) => {
     return null;
   }
 
-  // ========== REGRA 4: TELEFONE DO AUTOR OBRIGATÓRIO ==========
   if (!authorPhone) {
     logger.warn(
       {
@@ -1032,7 +1014,6 @@ const mapWebhookIncomingMessage = async (payload) => {
     return null;
   }
 
-  // ========== REGRA 5: TEXTO OBRIGATÓRIO ==========
   if (!text) {
     logger.debug(
       { event: eventName, authorPhone, instanceName },
@@ -1050,15 +1031,18 @@ const mapWebhookIncomingMessage = async (payload) => {
       textPreview: text.slice(0, 60),
       resolutionRule: resolvedExtraction.resolutionRule || authorExtracted.source,
       isLid: authorExtracted.isLid,
+      authorIsLidDirect,
+      effectiveLidJid,
     },
     'WEBHOOK PROCESSADO: autor identificado, mensagem válida'
   );
 
-   return {
+  return {
     payload: normalizedPayload,
     eventName,
     extractedPhone: authorPhone,
     extractedText: text,
+    // FIX: propagar lidJid e allowLidDirect para o handler de rota
     lidJid: effectiveLidJid || null,
     allowLidDirect: authorIsLidDirect || false,
     extraction: {
@@ -1069,8 +1053,10 @@ const mapWebhookIncomingMessage = async (payload) => {
       allowLidDirect: authorIsLidDirect || false,
     },
   };
+};
 
-  const buildWebhookDebugFields = (payload, extraction = null) => {
+
+const buildWebhookDebugFields = (payload, extraction = null) => {
   const text = extractWebhookText(payload);
   const resolvedExtraction =
     extraction ||
@@ -1331,6 +1317,8 @@ router.post('/webhook', async (req, res, next) => {
       eventName: incoming.eventName,
       dedupeKey: dedupe.dedupeKey,
       messageId: dedupe.messageId,
+      lidJid: incoming.lidJid || null,
+      allowLidDirect: incoming.allowLidDirect || false,
     });
 
     logger.debug(
@@ -1408,7 +1396,6 @@ router.post('/webhook/:event', async (req, res, next) => {
       logger.debug(
         {
           event: eventName,
-          // CORREÇÃO: fromMe verificado no payload raw, não no normalizado (evita spread contaminado)
           fromMe: extractWebhookFromMe(payload),
           parseError,
           durationMs: Date.now() - startedAt,
@@ -1461,6 +1448,8 @@ router.post('/webhook/:event', async (req, res, next) => {
       'FLUXO EXECUTADO'
     );
 
+    // FIX Evolution API v1 @lid: passar lidJid e allowLidDirect para handleIncomingMessage
+    // para que o sendContext use o @lid JID completo como destino de envio
     const result = await handleIncomingMessage(incoming.payload, incoming.extractedText, {
       preExtractedPhone: incoming.extractedPhone,
       preExtractedText: incoming.extractedText,
@@ -1468,8 +1457,6 @@ router.post('/webhook/:event', async (req, res, next) => {
       eventName: incoming.eventName,
       dedupeKey: dedupe.dedupeKey,
       messageId: dedupe.messageId,
-      // FIX Evolution API v1 @lid: passar lidJid/allowLidDirect para que
-      // sendContext use o @lid JID completo como destino de envio
       lidJid: incoming.lidJid || null,
       allowLidDirect: incoming.allowLidDirect || false,
     });
@@ -2437,4 +2424,4 @@ router.post('/config/menu/reset', ...waProtected, async (req, res, next) => {
   }
 });
 
-export default router;}
+export default router;
