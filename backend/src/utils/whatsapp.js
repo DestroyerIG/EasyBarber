@@ -1355,12 +1355,12 @@ const mapStrictPriorityCandidateType = (sourcePath = '') => {
 
 /**
  * Identidades numéricas da instância no payload Evolution (sem HTTP).
- * Inclui destination (raiz/data), wid/owner/phone em instance — usado para bloquear lid_sender_fallback
- * quando sender é o próprio número conectado mesmo com cache connectedNumber=null.
+ * NOTA: destination foi removido — Evolution API v1 messages-upsert coloca o JID do
+ * cliente remoto nesse campo (não o número da instância). Usar destination causava
+ * false-positive em isSelfMessage quando authorPhone e identityForSelfCheck eram ambos
+ * derivados do mesmo JID do cliente. Fontes corretas: instance.wid/owner/phone/number.
  */
 const PAYLOAD_INSTANCE_IDENTITY_SOURCES = [
-  (p) => p?.destination,
-  (p) => p?.data?.destination,
   (p) => p?.instance?.wid,
   (p) => p?.instance?.ownerJid,
   (p) => p?.instance?.owner,

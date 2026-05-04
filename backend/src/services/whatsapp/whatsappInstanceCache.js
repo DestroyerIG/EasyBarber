@@ -66,8 +66,9 @@ export const extractConnectedNumberFromPayload = (payload) => {
     payload?.instance?.number,
     payload?.instance?.phone,
     // Campos raiz comuns
+    // destination excluído: Evolution API v1 messages-upsert coloca JID do cliente
+    // remoto nesse campo, não o número da instância. Usar causava connectedNumber = cliente.
     payload?.id,
-    payload?.destination,
     payload?.owner,
     payload?.ownerJid,
     payload?.wid,
@@ -76,7 +77,7 @@ export const extractConnectedNumberFromPayload = (payload) => {
     // Nested data
     payload?.data?.id,
     payload?.data?.wid,
-    payload?.data?.destination,
+    // data.destination excluído pelo mesmo motivo
     payload?.data?.number,
     payload?.data?.phone,
     payload?.data?.me?.id,

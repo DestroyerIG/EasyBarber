@@ -953,14 +953,12 @@ const mapWebhookIncomingMessage = async (payload) => {
     (resolvedExtraction.remoteJidOriginal?.endsWith('@lid') ? resolvedExtraction.remoteJidOriginal : null);
   const authorIsLidDirect = authorExtracted.source === 'lid_jid_direct';
 
-  const payloadIdentityPhone = extractPayloadDestination(payload);
-  const identityForSelfCheck = payloadIdentityPhone || connectedNumber || null;
-
+  // Self-message detection usa EXCLUSIVAMENTE fromMe=true (verificado acima).
+  // Comparação de número removida: causava false-positive quando Evolution API v1
+  // colocava JID do cliente em `destination`, fazendo extractPayloadDestination
+  // retornar telefone do cliente como identidade da instância → authorPhone === identityForSelfCheck.
   const normalizedAuthor = authorPhone ? normalizePhone(authorPhone) : null;
-  const normalizedConnected = identityForSelfCheck ? normalizePhone(identityForSelfCheck) : null;
-  const isSelf = Boolean(
-    identityForSelfCheck && authorPhone && isSelfMessage({ authorPhone, connectedNumber: identityForSelfCheck })
-  );
+  const normalizedConnected = connectedNumber ? normalizePhone(connectedNumber) : null;
 
   logger.info(
     {
@@ -969,33 +967,17 @@ const mapWebhookIncomingMessage = async (payload) => {
       connectedNumber,
       normalizedAuthor,
       normalizedConnected,
-      isSelf,
+      fromMe,
+      isSelf: false, // garantido: fromMe=true gate acima já retornou null
       event: eventName,
       authorSource: resolvedExtraction.authorPhone
         ? resolvedExtraction.sourcePath
         : authorExtracted.source,
       isLid: authorExtracted.isLid,
-      fromMe,
       hasText: Boolean(text),
     },
     'DEBUG WHATSAPP - AUTOR E NUMERO IDENTIFICADOS'
   );
-
-  if (isSelf) {
-    logger.warn(
-      {
-        instanceName,
-        authorPhone,
-        connectedNumber,
-        normalizedAuthor,
-        normalizedConnected,
-        isSelf: true,
-        event: eventName,
-      },
-      'BLOQUEADO: mensagem do próprio número da instância'
-    );
-    return null;
-  }
 
   if (!authorPhone) {
     logger.warn(
