@@ -1495,15 +1495,22 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
     'TRACE destino WhatsApp antes da decisao'
   );
 
+  // FIX Evolution API v1 @lid: quando allowLidDirect=true, usar o @lid JID completo
+  // como remoteJidOriginal no sendContext → sendWhatsAppText usará como destino direto
+  const effectiveLidJid = options?.lidJid || phoneExtraction?.lidJid || null;
+  const isLidDirectMode = Boolean(options?.allowLidDirect) || Boolean(phoneExtraction?.allowLidDirect);
+ 
   const sendContext = {
     ...(remoteJidOriginal ? { remoteJidOriginal } : {}),
+    // FIX: sobrescrever remoteJidOriginal com o @lid JID completo quando disponível
+    ...(effectiveLidJid ? { remoteJidOriginal: effectiveLidJid } : {}),
     ...(normalizedEventName ? { eventName: normalizedEventName } : {}),
     ...(instanceName ? { instanceName } : {}),
     ...(options?.dedupeKey ? { dedupeKey: options.dedupeKey } : {}),
     ...(options?.messageId ? { messageId: options.messageId } : {}),
     ...(responseCollector ? { captureCollector: responseCollector } : {}),
     ...(options?.simulationMode ? { simulate: true } : {}),
-    ...(allowLidDestination ? { allowLidDestination: true } : {}),
+    ...(allowLidDestination || isLidDirectMode ? { allowLidDestination: true } : {}),
     ...(phoneExtraction ? { extraction: phoneExtraction } : {}),
     knownInstanceNumbers,
   };

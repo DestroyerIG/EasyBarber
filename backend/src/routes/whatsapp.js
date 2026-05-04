@@ -835,60 +835,66 @@ const extractAuthorPhone = (payload, connectedNumber) => {
   const remoteJid = key?.remoteJid || payload?.key?.remoteJid || null;
   const participant = key?.participant || payload?.participant || null;
   const sender = payload?.sender || null;
-
+ 
   // 1. participantPn — mais confiável para @lid
   const participantPn =
     msg?.messageContextInfo?.participantPn ||
     payload?.messageContextInfo?.participantPn ||
     msg?.message?.messageContextInfo?.participantPn ||
     null;
-
+ 
   if (participantPn) {
     const phone = normalizePhone(participantPn);
     if (phone) {
-      return { phone, source: 'participantPn', isLid: isLidJid(remoteJid) };
+      return { phone, source: 'participantPn', isLid: isLidJid(remoteJid), lidJid: isLidJid(remoteJid) ? remoteJid : null };
     }
   }
-
+ 
   // 2. participant (grupo ou LID)
   if (participant && !isLidJid(participant)) {
     const phone = normalizePhone(participant);
     if (phone) {
-      return { phone, source: 'participant', isLid: isLidJid(remoteJid) };
+      return { phone, source: 'participant', isLid: isLidJid(remoteJid), lidJid: isLidJid(remoteJid) ? remoteJid : null };
     }
   }
-
-  // 3. Se remoteJid for @lid: usar sender APENAS se sender != connectedNumber
+ 
+  // 3. Se remoteJid for @lid
   if (isLidJid(remoteJid)) {
     if (sender) {
       const senderPhone = normalizePhone(sender);
+      // sender diferente da instância → cliente real identificado via sender
       if (senderPhone && !isSelfMessage({ authorPhone: senderPhone, connectedNumber })) {
-        return { phone: senderPhone, source: 'sender_lid_fallback', isLid: true };
+        return { phone: senderPhone, source: 'sender_lid_fallback', isLid: true, lidJid: remoteJid };
       }
     }
-    // @lid sem fallback confiável
-    return { phone: null, source: 'lid_no_fallback', isLid: true };
+    // FIX Evolution API v1: sender contém o número da INSTÂNCIA em payloads @lid (comportamento normal).
+    // Usa os dígitos do @lid como chave de sessão estável.
+    // O reply é feito via JID @lid completo — a Evolution API/Baileys roteia corretamente.
+    const lidDigits = remoteJid.split('@')[0];
+    if (lidDigits && lidDigits.length >= 10) {
+      return { phone: lidDigits, source: 'lid_jid_direct', isLid: true, lidJid: remoteJid };
+    }
+    return { phone: null, source: 'lid_no_fallback', isLid: true, lidJid: null };
   }
-
+ 
   // 4. sender (não-LID)
   if (sender) {
     const senderPhone = normalizePhone(sender);
     if (senderPhone) {
-      return { phone: senderPhone, source: 'sender', isLid: false };
+      return { phone: senderPhone, source: 'sender', isLid: false, lidJid: null };
     }
   }
-
+ 
   // 5. remoteJid (não-LID, último recurso)
   if (remoteJid && !isLidJid(remoteJid)) {
     const phone = normalizePhone(remoteJid);
     if (phone) {
-      return { phone, source: 'remoteJid', isLid: false };
+      return { phone, source: 'remoteJid', isLid: false, lidJid: null };
     }
   }
-
-  return { phone: null, source: 'not_found', isLid: false };
-};
-
+ 
+  return { phone: null, source: 'not_found', isLid: false, lidJid: null };
+  };
 const mapWebhookIncomingMessage = async (payload) => {
   const normalizedPayload = normalizeWebhookEventPayload(payload);
   const eventName = normalizeWebhookEventName(
@@ -951,8 +957,15 @@ const mapWebhookIncomingMessage = async (payload) => {
   const authorExtracted = extractAuthorPhone(payload, connectedNumber);
 
   // authorPhone: preferência ao sistema existente (mais sofisticado), fallback ao simplificado
+  // FIX: sistema existente retorna null para @lid sem participantPn;
+  // extractAuthorPhone usa lid_jid_direct como fallback seguro — priorizar resultado não-nulo.
   const authorPhone = resolvedExtraction.authorPhone || authorExtracted.phone || null;
-
+ 
+  // FIX Evolution API v1 @lid: preservar JID @lid completo para envio correto
+  const effectiveLidJid = authorExtracted.lidJid ||
+    (resolvedExtraction.remoteJidOriginal?.endsWith('@lid') ? resolvedExtraction.remoteJidOriginal : null);
+  const authorIsLidDirect = authorExtracted.source === 'lid_jid_direct';
+ 
   const payloadIdentityPhone = extractPayloadDestination(payload);
   const identityForSelfCheck = payloadIdentityPhone || connectedNumber || null;
 
@@ -1041,21 +1054,23 @@ const mapWebhookIncomingMessage = async (payload) => {
     'WEBHOOK PROCESSADO: autor identificado, mensagem válida'
   );
 
-  return {
+   return {
     payload: normalizedPayload,
     eventName,
     extractedPhone: authorPhone,
     extractedText: text,
+    lidJid: effectiveLidJid || null,
+    allowLidDirect: authorIsLidDirect || false,
     extraction: {
       ...resolvedExtraction,
       authorPhone,
       instanceName,
+      lidJid: effectiveLidJid || null,
+      allowLidDirect: authorIsLidDirect || false,
     },
   };
-};
 
-
-const buildWebhookDebugFields = (payload, extraction = null) => {
+  const buildWebhookDebugFields = (payload, extraction = null) => {
   const text = extractWebhookText(payload);
   const resolvedExtraction =
     extraction ||
@@ -1453,6 +1468,10 @@ router.post('/webhook/:event', async (req, res, next) => {
       eventName: incoming.eventName,
       dedupeKey: dedupe.dedupeKey,
       messageId: dedupe.messageId,
+      // FIX Evolution API v1 @lid: passar lidJid/allowLidDirect para que
+      // sendContext use o @lid JID completo como destino de envio
+      lidJid: incoming.lidJid || null,
+      allowLidDirect: incoming.allowLidDirect || false,
     });
 
     logger.debug(
@@ -2418,4 +2437,4 @@ router.post('/config/menu/reset', ...waProtected, async (req, res, next) => {
   }
 });
 
-export default router;
+export default router;}

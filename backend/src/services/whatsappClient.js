@@ -249,13 +249,7 @@ const extractConnectionState = (payload) => {
   return null;
 };
 
-/**
- * Extrai o connectedNumber do payload de status/evento.
- * Usa os mesmos campos do whatsappInstanceCache para consistência.
- * NÃO faz HTTP — apenas processa o payload recebido.
- */
 const extractIdentity = (payload) => {
-  // connectedNumber via cache module (cobre todos os formatos da Evolution API)
   const number = extractConnectedNumberFromPayload(payload);
 
   const name = [
@@ -480,12 +474,6 @@ const syncStateFromEvolution = async ({ includeQr = false, instanceName = null }
   const previousSnapshot = snapshotState(resolvedInstanceName);
   const previousConnected = normalizeWhatsAppNumber(previousSnapshot?.connectedNumber);
 
-  // Resolver connectedNumber com fallback chain (somente quando CONNECTED):
-  // 1. Extraído do payload de status (instance.wid, owner, me.id, etc)
-  // 2. /instance/me na Evolution API
-  // 3. Preservado do cache se já havia um valor
-  // 4. Banco (barbershops.whatsapp via instanceName)
-  // 5. Variavel de ambiente — apenas instância default
   let resolvedConnectedNumber = null;
   let connectedNumberSource = 'none';
 
@@ -598,18 +586,10 @@ export const getWhatsAppStatusByInstance = (instanceName = null) => ({
   ...snapshotState(instanceName),
 });
 
-/**
- * Retorna o número conectado cacheado para uma instância.
- * NÃO faz chamada HTTP — lê do cache em memória.
- * Fonte principal: whatsappInstanceCache (atualizado via sync e eventos).
- * Fallback: waStateByInstance (estado legado).
- */
 export const getConnectedNumberCached = (instanceName = null) => {
-  // 1. Cache dedicado por instância (novo, multi-tenant)
   const cached = getCachedConnectedNumber(instanceName);
   if (cached) return cached;
 
-  // 2. Fallback: estado legado em waStateByInstance
   const legacyState = snapshotState(instanceName);
   return normalizeWhatsAppNumber(legacyState?.connectedNumber) || null;
 };
@@ -993,16 +973,30 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   }
 
   // ========== REGRA 2: Sanitização e validação do destino ==========
-  // Destino é SEMPRE o número sanitizado (digits only), NUNCA um JID @lid
-  const destination = normalizedAuthorPhone ? normalizedAuthorPhone.replace(/\D/g, '') : null;
+  // FIX Evolution API v1 @lid: quando allowLidDestination=true E remoteJidOriginal é @lid,
+  // usar o @lid JID completo como destino de envio.
+  // A Evolution API/Baileys roteia mensagens para @lid corretamente sem precisar do número E.164.
+  const isLidDirectSend = allowLidDestination === true &&
+    typeof remoteJidOriginal === 'string' &&
+    remoteJidOriginal.trim().toLowerCase().endsWith('@lid');
 
-  if (!destination || !isValidPhone(destination)) {
+  // Para @lid direto: destino = JID completo; para telefone normal: digits only
+  let destination;
+  if (isLidDirectSend) {
+    destination = remoteJidOriginal.trim();
+  } else {
+    destination = normalizedAuthorPhone ? normalizedAuthorPhone.replace(/\D/g, '') : null;
+  }
+
+  // Para @lid direto, pular isValidPhone (JID não é E.164 puro)
+  if (!destination || (!isLidDirectSend && !isValidPhone(destination))) {
     logger.warn(
       {
         authorPhone: authorPhone || null,
         destination: destination || null,
         sourcePath,
         remoteJidOriginal,
+        isLidDirectSend,
         reason: 'invalid_destination',
       },
       'BLOQUEADO: destino invalido (telefone nao resolvido ou formato incorreto)'
@@ -1022,37 +1016,42 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   }
 
   // ========== REGRA 3: Política de destino seguro ==========
-  const destinationDecision = resolveSafeReplyDestination({
-    phone: destination,
-    fromMe,
-    remoteJidOriginal,
-    connectedNumber,
-    knownInstanceNumbers,
-    extraction,
-    allowLidDestination,
-  });
+  // Para @lid direto, a validação de destino já foi feita acima; skip resolveSafeReplyDestination
+  // pois ela bloquearia o @lid sem trusted source quando allowLidDestination está ativo.
+  if (!isLidDirectSend) {
+    const destinationDecision = resolveSafeReplyDestination({
+      phone: destination,
+      fromMe,
+      remoteJidOriginal,
+      connectedNumber,
+      knownInstanceNumbers,
+      extraction,
+      allowLidDestination,
+    });
 
-  if (!destinationDecision.ok) {
-    logger.warn(
-      {
-        authorPhone: destination,
-        destinationDecision: destinationDecision.reason,
-        connectedNumber,
-        remoteJidOriginal,
-      },
-      'BLOQUEADO: politica de destino rejeitou envio'
-    );
-    return false;
+    if (!destinationDecision.ok) {
+      logger.warn(
+        {
+          authorPhone: destination,
+          destinationDecision: destinationDecision.reason,
+          connectedNumber,
+          remoteJidOriginal,
+        },
+        'BLOQUEADO: politica de destino rejeitou envio'
+      );
+      return false;
+    }
   }
 
   // ========== REGRA 4: Log obrigatório ENVIO VALIDADO ==========
   logger.info(
     {
       fromMe: false,
-      authorPhone: destination,
+      authorPhone: isLidDirectSend ? destination : (destination || normalizedAuthorPhone),
       connectedNumber,
       destination,
       remoteJidOriginal: remoteJidOriginal || null,
+      isLidDirectSend,
       endpoint,
     },
     'ENVIO VALIDADO'
@@ -1064,6 +1063,7 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
       {
         number: destination,
         endpoint,
+        isLidDirectSend,
         messageLength: normalizedMessage.length,
       },
       'Enviando para Evolution API'
@@ -1074,6 +1074,8 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
       text: normalizedMessage,
       remoteJidOriginal,
       instanceName: resolvedInstanceName,
+      // FIX: sinalizar que o destino é um @lid JID (não normalizar como E.164)
+      allowLidPhone: isLidDirectSend,
     });
 
     const endpointUsed = sendResult?.meta?.endpoint || endpoint;
@@ -1093,6 +1095,7 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
       {
         authorPhone: destination,
         destination,
+        isLidDirectSend,
         endpoint: endpointUsed,
         messageLength: normalizedMessage.length,
       },
@@ -1110,8 +1113,8 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
         authorPhone: normalizedAuthorPhone || authorPhone || null,
         remoteJidOriginal,
         resolvedDestination: destination,
-        destinationSource: 'author_phone',
-        discardedRemoteJid: remoteJidOriginal,
+        isLidDirectSend,
+        destinationSource: isLidDirectSend ? 'lid_jid_direct' : 'author_phone',
         endpoint,
         instanceName: resolvedInstanceName,
         providerError,

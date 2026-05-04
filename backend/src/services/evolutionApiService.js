@@ -622,11 +622,38 @@ const describePayloadShape = (body) => {
   return keys.join('+') || 'empty';
 };
 
+// FIX Evolution API v1 @lid: verifica se um valor é um JID @lid válido para envio
+const isLidJidDestination = (value) => {
+  if (typeof value !== 'string') return false;
+  return value.trim().toLowerCase().endsWith('@lid');
+};
+
 const filterIncompatibleSendTextCandidates = (candidates = [], context = {}) => {
   const filtered = [];
 
   for (const candidate of candidates) {
     const rawDestination = candidate?.body?.number;
+
+    // FIX Evolution API v1: @lid JIDs são destinos válidos quando explicitamente autorizados
+    // A Evolution API/Baileys roteia mensagens para @lid corretamente
+    if (isLidJidDestination(rawDestination)) {
+      if (context?.allowLidPhone === true) {
+        filtered.push(candidate);
+        continue;
+      }
+      logger.warn(
+        {
+          endpoint: candidate?.path || null,
+          payloadShape: describePayloadShape(candidate?.body),
+          phone: context?.phone || null,
+          destination: rawDestination,
+          reason: '@lid_destination_not_authorized',
+        },
+        'Payload de envio Evolution descartado: @lid sem allowLidPhone'
+      );
+      continue;
+    }
+
     const normalizedDestination = normalizePhoneForSend(rawDestination);
 
     if (!normalizedDestination) {
@@ -1022,12 +1049,28 @@ export const logoutInstance = async ({ instanceName = null } = {}) => {
   );
 };
 
-export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null, instanceName = null }) => {
+export const sendTextMessage = async ({
+  phone,
+  text,
+  remoteJidOriginal = null,
+  instanceName = null,
+  // FIX Evolution API v1 @lid: quando true, o `phone` é um @lid JID completo
+  // e deve ser passado diretamente para a Evolution API sem normalização E.164
+  allowLidPhone = false,
+}) => {
   const config = getConfig({ instanceName });
   const resolvedInstanceName = typeof instanceName === 'string' && instanceName.trim()
     ? instanceName.trim().toLowerCase()
     : config.instanceName;
-  const normalizedPhone = normalizePhoneForSend(phone);
+
+  // FIX: detectar se o phone é um @lid JID (ex: '247269873942566@lid')
+  // A Evolution API v1 aceita @lid como destino e roteia via Baileys corretamente
+  const isLidDestination = allowLidPhone === true &&
+    typeof phone === 'string' &&
+    phone.trim().toLowerCase().endsWith('@lid');
+
+  // Normalizar conforme o tipo de destino
+  const normalizedPhone = isLidDestination ? phone.trim() : normalizePhoneForSend(phone);
   const normalizedText = String(text || '').trim();
 
   if (!normalizedPhone) {
@@ -1041,6 +1084,17 @@ export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null, i
       code: 'EVOLUTION_INVALID_MESSAGE',
     });
   }
+
+  logger.debug(
+    {
+      phone,
+      isLidDestination,
+      normalizedPhone,
+      remoteJidOriginal,
+      endpoint: `/message/sendText/${resolvedInstanceName}`,
+    },
+    'Preparando envio de mensagem para Evolution API'
+  );
 
   const candidates = [
     {
@@ -1078,9 +1132,11 @@ export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null, i
     },
   ];
 
+  // FIX: passar allowLidPhone no contexto para filterIncompatibleSendTextCandidates
   const compatibleCandidates = filterIncompatibleSendTextCandidates(candidates, {
     phone,
     remoteJidOriginal,
+    allowLidPhone: isLidDestination,
   });
 
   if (!compatibleCandidates.length) {
@@ -1094,6 +1150,7 @@ export const sendTextMessage = async ({ phone, text, remoteJidOriginal = null, i
       phone,
       remoteJidOriginal,
       resolvedDestination: normalizedPhone,
+      isLidDestination,
       endpoint: `/message/sendText/${resolvedInstanceName}`,
       payloadShapes: compatibleCandidates.map((candidate) => describePayloadShape(candidate?.body)),
     },
