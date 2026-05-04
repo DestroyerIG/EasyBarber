@@ -14,6 +14,7 @@ import {
   restartWhatsApp,
   initializeWhatsAppInstance,
 } from '../services/whatsappClient.js';
+import { updateInstanceFromPayload } from '../services/whatsapp/whatsappInstanceCache.js';
 import { getBarbershopWhatsAppInstanceContext } from '../services/whatsapp/whatsappInstanceService.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { requireTenantRoles } from '../middleware/rbac.js';
@@ -779,14 +780,15 @@ const resolveConnectedNumberFromDatabase = async (instanceName = null) => {
 };
 
 const resolveConnectedNumberForWebhook = async (instanceName = null, payload = {}) => {
+  const payloadDestination = extractPayloadDestination(payload);
+  if (payloadDestination) {
+    updateInstanceFromPayload(instanceName, payload, 'webhook');
+    return payloadDestination;
+  }
+
   const cached = getConnectedNumberCached(instanceName);
   if (cached) {
     return cached;
-  }
-
-  const payloadDestination = extractPayloadDestination(payload);
-  if (payloadDestination) {
-    return payloadDestination;
   }
 
   const dbNumber = await resolveConnectedNumberFromDatabase(instanceName);
@@ -952,7 +954,7 @@ const mapWebhookIncomingMessage = async (payload) => {
   const authorPhone = resolvedExtraction.authorPhone || authorExtracted.phone || null;
 
   const payloadIdentityPhone = extractPayloadDestination(payload);
-  const identityForSelfCheck = connectedNumber || payloadIdentityPhone || null;
+  const identityForSelfCheck = payloadIdentityPhone || connectedNumber || null;
 
   const normalizedAuthor = authorPhone ? normalizePhone(authorPhone) : null;
   const normalizedConnected = identityForSelfCheck ? normalizePhone(identityForSelfCheck) : null;
