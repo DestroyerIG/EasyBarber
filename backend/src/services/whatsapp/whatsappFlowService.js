@@ -1549,7 +1549,6 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
   try {
     const fromMe = payloadFromMe || phoneExtraction?.fromMe;
     const authorPhone = normalizedPhone;
-    const isValidUserMessage = !fromMe && authorPhone;
 
     // REGRA 1: Bloqueio por fromMe
     if (fromMe) {
@@ -1580,12 +1579,16 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
 
     // REGRA 1: Bloqueio de auto-resposta — comparação normalizada + variantes BR
     if (connectedNumber && isSelfMessage({ authorPhone, connectedNumber })) {
+      const normalizedAuth = normalizeWhatsAppNumber(authorPhone);
+      const normalizedConn = normalizeWhatsAppNumber(connectedNumber);
       logger.warn(
         {
           ...flowDebugBase,
           fromMe,
           authorPhone,
+          normalizedAuthor: normalizedAuth,
           connectedNumber,
+          normalizedConnected: normalizedConn,
           reason: 'self_reply_blocked',
         },
         'Bloqueado: tentativa de auto-resposta (authorPhone === connectedNumber)'
@@ -1598,11 +1601,13 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       Array.isArray(knownInstanceNumbers) &&
       knownInstanceNumbers.some((n) => isSelfMessage({ authorPhone, connectedNumber: n }))
     ) {
+      const normalizedAuth = normalizeWhatsAppNumber(authorPhone);
       logger.warn(
         {
           ...flowDebugBase,
           fromMe,
           authorPhone,
+          normalizedAuthor: normalizedAuth,
           connectedNumber,
           knownInstanceNumbers,
           reason: 'self_reply_instance_number',
