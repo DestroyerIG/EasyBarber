@@ -3,6 +3,7 @@ import { jest, describe, it, beforeEach, expect } from '@jest/globals';
 const mockSendTextMessage = jest.fn();
 const mockHealthCheck = jest.fn();
 const mockGetInstanceStatus = jest.fn();
+const mockGetInstanceMe = jest.fn();
 const mockCreateInstance = jest.fn();
 const mockConnectInstance = jest.fn();
 const mockGetQrCode = jest.fn();
@@ -28,6 +29,7 @@ class MockEvolutionApiError extends Error {
 jest.unstable_mockModule('../services/evolutionApiService.js', () => ({
   healthCheck: mockHealthCheck,
   getInstanceStatus: mockGetInstanceStatus,
+  getInstanceMe: mockGetInstanceMe,
   createInstance: mockCreateInstance,
   connectInstance: mockConnectInstance,
   getQrCode: mockGetQrCode,
@@ -74,6 +76,7 @@ describe('whatsappClient destination resolution', () => {
         number: '5511999999999@s.whatsapp.net',
       },
     });
+    mockGetInstanceMe.mockResolvedValue({});
     mockGetEvolutionConfig.mockReturnValue({
       instanceName: 'easybarber',
     });

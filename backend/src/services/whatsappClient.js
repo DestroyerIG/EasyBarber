@@ -1,6 +1,7 @@
 import {
   healthCheck,
   getInstanceStatus,
+  getInstanceMe,
   createInstance,
   connectInstance,
   getQrCode,
@@ -32,6 +33,7 @@ import {
   getBarbershopWhatsAppInstanceContext,
   normalizeWhatsAppInstanceName,
 } from './whatsapp/whatsappInstanceService.js';
+import { barbershopSettingsRepository } from '../repositories/barbershopSettingsRepository.js';
 
 const STATUS = {
   PROVIDER_UNAVAILABLE: 'provider_unavailable',
@@ -273,6 +275,99 @@ const extractIdentity = (payload) => {
   };
 };
 
+const resolveConnectedNumberFromEnv = (instanceName = null) => {
+  const instanceKey = normalizeWhatsAppInstanceName(instanceName) || '__default__';
+  if (instanceKey !== '__default__') {
+    return null;
+  }
+
+  const envPhone =
+    process.env.WHATSAPP_CONNECTED_NUMBER
+    || process.env.EVOLUTION_CONNECTED_NUMBER
+    || process.env.WHATSAPP_PHONE
+    || process.env.EVOLUTION_PHONE;
+
+  const envNumber = normalizeWhatsAppNumber(envPhone);
+  if (!envNumber) {
+    return null;
+  }
+
+  logger.info(
+    { instanceName: instanceKey, connectedNumber: envNumber, source: 'env' },
+    'connectedNumber resolvido via variavel de ambiente'
+  );
+  return envNumber;
+};
+
+const resolveConnectedNumberFromDatabase = async (instanceName = null) => {
+  const normalizedInstanceName = normalizeWhatsAppInstanceName(instanceName);
+  if (!normalizedInstanceName) {
+    return null;
+  }
+
+  try {
+    const matches = await barbershopSettingsRepository.findWhatsAppInstanceNameDiagnostics(
+      normalizedInstanceName
+    );
+
+    if (!matches.length) {
+      return null;
+    }
+
+    const activeMatch = matches.find((item) => item.active === true) || matches[0];
+    const normalized = normalizeWhatsAppNumber(activeMatch?.whatsapp);
+
+    if (!normalized) {
+      return null;
+    }
+
+    logger.info(
+      {
+        instanceName: normalizedInstanceName,
+        connectedNumber: normalized,
+        source: 'database',
+        barbershopId: activeMatch?.id || null,
+      },
+      'connectedNumber resolvido via banco'
+    );
+
+    return normalized;
+  } catch (error) {
+    logger.warn(
+      { err: error, instanceName: normalizedInstanceName },
+      'Falha ao resolver connectedNumber via banco'
+    );
+    return null;
+  }
+};
+
+const resolveConnectedNumberFromInstanceMe = async (instanceName = null) => {
+  try {
+    const payload = await getInstanceMe({ instanceName });
+    const extracted = extractConnectedNumberFromPayload(payload);
+    const normalized = normalizeWhatsAppNumber(extracted);
+
+    if (!normalized) {
+      return null;
+    }
+
+    updateInstanceFromPayload(instanceName, payload, 'instance_me');
+
+    logger.info(
+      { instanceName: instanceName || null, connectedNumber: normalized, source: 'instance_me' },
+      'connectedNumber resolvido via /instance/me'
+    );
+
+    return normalized;
+  } catch (error) {
+    logger.warn(
+      { err: error, instanceName: instanceName || null },
+      'Falha ao consultar /instance/me na Evolution API'
+    );
+    return null;
+  }
+};
+
 const normalizeStatus = (rawState, qrCode) => {
   const state = (rawState || '').toLowerCase();
 
@@ -376,42 +471,57 @@ const syncStateFromEvolution = async ({ includeQr = false, instanceName = null }
 
   // Resolver connectedNumber com fallback chain (somente quando CONNECTED):
   // 1. Extraído do payload de status (instance.wid, owner, me.id, etc)
-  // 2. Preservado do cache se já havia um valor
-  // 3. Variavel de ambiente WHATSAPP_PHONE / EVOLUTION_PHONE — apenas instância default (alinhado ao whatsappInstanceCache)
-  // PROIBIDO: chamar /instance/me aqui
+  // 2. /instance/me na Evolution API
+  // 3. Preservado do cache se já havia um valor
+  // 4. Banco (barbershops.whatsapp via instanceName)
+  // 5. Variavel de ambiente — apenas instância default
   let resolvedConnectedNumber = null;
+  let connectedNumberSource = 'none';
+
   if (status === STATUS.CONNECTED) {
     resolvedConnectedNumber = identity.number
       ? normalizeWhatsAppNumber(identity.number)
       : null;
+    connectedNumberSource = resolvedConnectedNumber ? 'status_payload' : 'none';
+
+    if (!resolvedConnectedNumber) {
+      const instanceMeNumber = await resolveConnectedNumberFromInstanceMe(resolvedInstanceName);
+      if (instanceMeNumber) {
+        resolvedConnectedNumber = instanceMeNumber;
+        connectedNumberSource = 'instance_me';
+      }
+    }
 
     if (!resolvedConnectedNumber) {
       const cached = getCachedConnectedNumber(resolvedInstanceName);
       if (cached) {
         resolvedConnectedNumber = cached;
+        connectedNumberSource = 'cache_preserved';
         logger.debug(
-          { instanceName: resolvedInstanceName, connectedNumber: cached, source: 'cache_preserved' },
+          { instanceName: resolvedInstanceName, connectedNumber: cached, source: connectedNumberSource },
           'connectedNumber preservado do cache anterior'
         );
-      } else {
-        const instanceKey = normalizeWhatsAppInstanceName(resolvedInstanceName) || '__default__';
-        if (instanceKey === '__default__') {
-          const envPhone = process.env.WHATSAPP_PHONE || process.env.EVOLUTION_PHONE;
-          if (envPhone) {
-            const envNumber = normalizeWhatsAppNumber(envPhone);
-            if (envNumber) {
-              resolvedConnectedNumber = envNumber;
-              logger.info(
-                { instanceName: resolvedInstanceName, connectedNumber: envNumber, source: 'env' },
-                'connectedNumber resolvido via variavel de ambiente (instancia default)'
-              );
-            }
-          }
-        }
+      }
+    }
+
+    if (!resolvedConnectedNumber) {
+      const dbNumber = await resolveConnectedNumberFromDatabase(resolvedInstanceName);
+      if (dbNumber) {
+        resolvedConnectedNumber = dbNumber;
+        connectedNumberSource = 'database';
+      }
+    }
+
+    if (!resolvedConnectedNumber) {
+      const envNumber = resolveConnectedNumberFromEnv(resolvedInstanceName);
+      if (envNumber) {
+        resolvedConnectedNumber = envNumber;
+        connectedNumberSource = 'env';
       }
     }
   } else {
     resolvedConnectedNumber = previousConnected;
+    connectedNumberSource = resolvedConnectedNumber ? 'previous' : 'none';
   }
 
   logger.info(
@@ -421,7 +531,7 @@ const syncStateFromEvolution = async ({ includeQr = false, instanceName = null }
       evolutionStatus: rawEvolutionState,
       normalizedStatus: status,
       connectedNumber: resolvedConnectedNumber,
-      connectedNumberSource: identity.number ? 'payload' : (resolvedConnectedNumber ? 'cache_or_env' : 'none'),
+      connectedNumberSource,
     },
     'Status da instancia sincronizado com a Evolution API'
   );
@@ -436,7 +546,7 @@ const syncStateFromEvolution = async ({ includeQr = false, instanceName = null }
 
   const cachePatch = {
     status,
-    source: identity.number ? 'payload' : (resolvedConnectedNumber ? 'cache_or_env' : 'none'),
+    source: connectedNumberSource,
   };
   if (status === STATUS.CONNECTED && resolvedConnectedNumber) {
     cachePatch.connectedNumber = resolvedConnectedNumber;

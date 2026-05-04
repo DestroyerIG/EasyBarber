@@ -7,9 +7,10 @@
  * - Isolamento total: chave = normalizeWhatsAppInstanceName (mesmo critério do whatsappClient)
  * - Sem HTTP: apenas leitura/escrita na memória do processo
  * - Atualizado via syncStateFromEvolution e eventos da Evolution API
- * - connectedNumber extraído do payload de evento (sem depender de /instance/me)
+ * - connectedNumber extraído do payload de evento (sem HTTP)
  * - Regra: nunca descartar mensagens com base em connectedNumber null (fail-open no anti-self)
- * - ENV (WHATSAPP_PHONE / EVOLUTION_PHONE) só para instância __default__ (single-tenant)
+ * - ENV (WHATSAPP_CONNECTED_NUMBER / EVOLUTION_CONNECTED_NUMBER / WHATSAPP_PHONE / EVOLUTION_PHONE)
+ *   só para instância __default__ (single-tenant)
  * - Nunca sobrescrever número válido com null vindo de sync (apenas clearInstanceNumber)
  */
 
@@ -46,8 +47,7 @@ const normalizeInstanceKey = (instanceName) => {
  * - v2: payload.me.id, payload.me.wid
  * - QR events: payload.qrcode.instance, payload.instance.id
  *
- * REGRA: NUNCA usar /instance/me (endpoint não garantido).
- * REGRA: NUNCA fazer HTTP aqui.
+ * REGRA: NAO fazer HTTP aqui. /instance/me e resolvido no whatsappClient quando necessario.
  */
 export const extractConnectedNumberFromPayload = (payload) => {
   if (!payload || typeof payload !== 'object') return null;
@@ -66,14 +66,25 @@ export const extractConnectedNumberFromPayload = (payload) => {
     payload?.instance?.number,
     payload?.instance?.phone,
     // Campos raiz comuns
+    payload?.id,
     payload?.owner,
     payload?.ownerJid,
     payload?.wid,
+    payload?.number,
+    payload?.phone,
     // Nested data
+    payload?.data?.id,
+    payload?.data?.wid,
+    payload?.data?.number,
+    payload?.data?.phone,
     payload?.data?.me?.id,
     payload?.data?.me?.wid,
+    payload?.data?.me?.number,
+    payload?.data?.me?.phone,
     payload?.data?.instance?.wid,
     payload?.data?.instance?.ownerJid,
+    payload?.data?.instance?.number,
+    payload?.data?.instance?.phone,
     payload?.data?.owner,
     payload?.data?.wid,
     // Profile
@@ -105,7 +116,11 @@ export const getConnectedNumber = (instanceName = null) => {
   }
 
   if (key === '__default__') {
-    const envPhone = process.env.WHATSAPP_PHONE || process.env.EVOLUTION_PHONE;
+    const envPhone =
+      process.env.WHATSAPP_CONNECTED_NUMBER
+      || process.env.EVOLUTION_CONNECTED_NUMBER
+      || process.env.WHATSAPP_PHONE
+      || process.env.EVOLUTION_PHONE;
     if (envPhone) {
       const normalized = normalizePhone(envPhone);
       if (normalized) {
