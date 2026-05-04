@@ -16,6 +16,7 @@ import { getWhatsAppStatus, getWhatsAppStatusByInstance, getConnectedNumberCache
 import { getConnectedNumber as getCachedConnectedNumber } from './whatsappInstanceCache.js';
 import {
   normalizeWhatsAppNumber,
+  isSelfMessage,
   extractWhatsAppPhoneFromWebhookDetailed,
   extractWhatsAppInstanceNumbersFromWebhook,
   extractWhatsAppRemoteJidFromWebhook,
@@ -1570,8 +1571,8 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       return { ok: false, ignored: true, reason: 'ambiguous_phone' };
     }
 
-    // REGRA 1: Bloqueio de auto-resposta — authorPhone === connectedNumber
-    if (connectedNumber && authorPhone === connectedNumber) {
+    // REGRA 1: Bloqueio de auto-resposta — comparação normalizada + variantes BR
+    if (connectedNumber && isSelfMessage({ authorPhone, connectedNumber })) {
       logger.warn(
         {
           ...flowDebugBase,
@@ -1585,8 +1586,11 @@ export const handleIncomingMessage = async (phoneOrPayload, text, options = {}) 
       return { ok: false, ignored: true, reason: 'self_reply_blocked' };
     }
 
-    // REGRA 1: Bloqueio de auto-resposta — authorPhone in knownInstanceNumbers
-    if (Array.isArray(knownInstanceNumbers) && knownInstanceNumbers.includes(authorPhone)) {
+    // REGRA 1: Bloqueio de auto-resposta — authorPhone em knownInstanceNumbers (normalizado)
+    if (
+      Array.isArray(knownInstanceNumbers) &&
+      knownInstanceNumbers.some((n) => isSelfMessage({ authorPhone, connectedNumber: n }))
+    ) {
       logger.warn(
         {
           ...flowDebugBase,

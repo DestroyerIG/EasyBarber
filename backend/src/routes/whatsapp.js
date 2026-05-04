@@ -23,6 +23,8 @@ import { sendSuccess, sendCreated, sendError } from '../utils/response.js';
 import logger from '../utils/logger.js';
 import {
   normalizeWhatsAppNumber,
+  normalizePhone,
+  isSelfMessage,
   extractWhatsAppRemoteJidFromWebhook,
   resolveIncomingAuthor,
 } from '../utils/whatsapp.js';
@@ -748,15 +750,6 @@ const buildWebhookPhoneExtractionOptions = (instanceName = null) => {
   };
 };
 
-// Normaliza um JID ou número para apenas dígitos (sem prefixo de país, sem @suffix).
-// Exemplos: "5583991234567@s.whatsapp.net" -> "5583991234567"
-//           "5583991234567" -> "5583991234567"
-const normalize = (phone) => {
-  if (!phone || typeof phone !== 'string') return null;
-  const digits = phone.split('@')[0].replace(/\D/g, '');
-  return digits.length >= 8 ? digits : null;
-};
-
 // Verifica se um JID é do tipo @lid (Linked Device — sem número confiável).
 const isLidJid = (jid) =>
   typeof jid === 'string' && jid.endsWith('@lid');
@@ -788,7 +781,7 @@ const extractAuthorPhone = (payload, connectedNumber) => {
     null;
 
   if (participantPn) {
-    const phone = normalize(participantPn);
+    const phone = normalizePhone(participantPn);
     if (phone) {
       return { phone, source: 'participantPn', isLid: isLidJid(remoteJid) };
     }
@@ -796,7 +789,7 @@ const extractAuthorPhone = (payload, connectedNumber) => {
 
   // 2. participant (grupo ou LID)
   if (participant && !isLidJid(participant)) {
-    const phone = normalize(participant);
+    const phone = normalizePhone(participant);
     if (phone) {
       return { phone, source: 'participant', isLid: isLidJid(remoteJid) };
     }
@@ -805,8 +798,8 @@ const extractAuthorPhone = (payload, connectedNumber) => {
   // 3. Se remoteJid for @lid: usar sender APENAS se sender != connectedNumber
   if (isLidJid(remoteJid)) {
     if (sender) {
-      const senderPhone = normalize(sender);
-      if (senderPhone && senderPhone !== connectedNumber) {
+      const senderPhone = normalizePhone(sender);
+      if (senderPhone && !isSelfMessage({ authorPhone: senderPhone, connectedNumber })) {
         return { phone: senderPhone, source: 'sender_lid_fallback', isLid: true };
       }
     }
@@ -816,7 +809,7 @@ const extractAuthorPhone = (payload, connectedNumber) => {
 
   // 4. sender (não-LID)
   if (sender) {
-    const senderPhone = normalize(sender);
+    const senderPhone = normalizePhone(sender);
     if (senderPhone) {
       return { phone: senderPhone, source: 'sender', isLid: false };
     }
@@ -824,7 +817,7 @@ const extractAuthorPhone = (payload, connectedNumber) => {
 
   // 5. remoteJid (não-LID, último recurso)
   if (remoteJid && !isLidJid(remoteJid)) {
-    const phone = normalize(remoteJid);
+    const phone = normalizePhone(remoteJid);
     if (phone) {
       return { phone, source: 'remoteJid', isLid: false };
     }
@@ -897,13 +890,22 @@ const mapWebhookIncomingMessage = async (payload) => {
   // authorPhone: preferência ao sistema existente (mais sofisticado), fallback ao simplificado
   const authorPhone = resolvedExtraction.authorPhone || authorExtracted.phone || null;
 
-  // ========== LOG ESTRUTURADO ==========
+  const normalizedAuthor = authorPhone ? normalizePhone(authorPhone) : null;
+  const normalizedConnected = connectedNumber ? normalizePhone(connectedNumber) : null;
+  const isSelf = Boolean(
+    connectedNumber && authorPhone && isSelfMessage({ authorPhone, connectedNumber })
+  );
+
+  // ========== LOG ESTRUTURADO (campos obrigatórios anti–auto-resposta) ==========
   logger.info(
     {
-      event: eventName,
       instanceName,
-      connectedNumber: connectedNumber || 'NULL_SEM_SYNC',
       authorPhone,
+      connectedNumber,
+      normalizedAuthor,
+      normalizedConnected,
+      isSelf,
+      event: eventName,
       authorSource: resolvedExtraction.authorPhone
         ? resolvedExtraction.sourcePath
         : authorExtracted.source,
@@ -915,15 +917,18 @@ const mapWebhookIncomingMessage = async (payload) => {
   );
 
   // ========== REGRA 3: BLOQUEAR AUTO-RESPOSTA ==========
-  // SÓ bloqueia se connectedNumber for CONHECIDO e igual ao autor.
-  // Se connectedNumber for null (sync ainda não rodou), processar normalmente.
-  if (connectedNumber && authorPhone && normalize(authorPhone) === normalize(connectedNumber)) {
+  // SÓ bloqueia se connectedNumber for CONHECIDO e igual ao autor (normalizado + variantes BR).
+  // Se connectedNumber for null (sync ainda não rodou), processar normalmente (fail-open).
+  if (isSelf) {
     logger.warn(
       {
-        event: eventName,
+        instanceName,
         authorPhone,
         connectedNumber,
-        instanceName,
+        normalizedAuthor,
+        normalizedConnected,
+        isSelf: true,
+        event: eventName,
       },
       'BLOQUEADO: mensagem do próprio número da instância'
     );

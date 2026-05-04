@@ -4,15 +4,18 @@
  * Cache centralizado de estado por instância WhatsApp.
  *
  * DESIGN DECISIONS:
- * - Isolamento total: cada instanceName tem seu próprio Map entry
+ * - Isolamento total: chave = normalizeWhatsAppInstanceName (mesmo critério do whatsappClient)
  * - Sem HTTP: apenas leitura/escrita na memória do processo
  * - Atualizado via syncStateFromEvolution e eventos da Evolution API
  * - connectedNumber extraído do payload de evento (sem depender de /instance/me)
- * - Regra: nunca descartar mensagens com base em connectedNumber null
+ * - Regra: nunca descartar mensagens com base em connectedNumber null (fail-open no anti-self)
+ * - ENV (WHATSAPP_PHONE / EVOLUTION_PHONE) só para instância __default__ (single-tenant)
+ * - Nunca sobrescrever número válido com null vindo de sync (apenas clearInstanceNumber)
  */
 
 import logger from '../../utils/logger.js';
-import { normalizeWhatsAppNumber } from '../../utils/whatsapp.js';
+import { normalizePhone } from '../../utils/whatsapp.js';
+import { normalizeWhatsAppInstanceName } from './whatsappInstanceService.js';
 
 // ==================== ESTRUTURA DO CACHE ====================
 // instanceStore[instanceName] = {
@@ -24,18 +27,13 @@ import { normalizeWhatsAppNumber } from '../../utils/whatsapp.js';
 // }
 const instanceStore = new Map();
 
-// ==================== NORMALIZAÇÃO ====================
+// ==================== NORMALIZAÇÃO DE CHAVE ====================
 
 const normalizeInstanceKey = (instanceName) => {
-  if (!instanceName || typeof instanceName !== 'string') return '__default__';
-  const trimmed = instanceName.trim().toLowerCase();
-  return trimmed || '__default__';
-};
-
-const normalizePhone = (value) => {
-  if (!value || typeof value !== 'string') return null;
-  const digits = value.split('@')[0].replace(/\D/g, '');
-  return digits.length >= 8 ? digits : null;
+  const normalized = normalizeWhatsAppInstanceName(
+    typeof instanceName === 'string' ? instanceName : null,
+  );
+  return normalized || '__default__';
 };
 
 // ==================== EXTRAÇÃO DO NÚMERO DO PAYLOAD DE EVENTO ====================
@@ -95,28 +93,28 @@ export const extractConnectedNumberFromPayload = (payload) => {
 
 /**
  * Retorna o connectedNumber do cache para uma instância.
- * Fallback chain: cache → env var.
+ * Fallback chain: cache → env var (somente __default__).
  * NÃO faz HTTP.
  */
 export const getConnectedNumber = (instanceName = null) => {
   const key = normalizeInstanceKey(instanceName);
   const entry = instanceStore.get(key);
 
-  // 1. Cache em memória
   if (entry?.connectedNumber) {
-    return entry.connectedNumber;
+    return normalizePhone(entry.connectedNumber) || entry.connectedNumber;
   }
 
-  // 2. Fallback: variável de ambiente (apenas se instanceName for o default)
-  const envPhone = process.env.WHATSAPP_PHONE || process.env.EVOLUTION_PHONE;
-  if (envPhone) {
-    const normalized = normalizePhone(envPhone) || normalizeWhatsAppNumber(envPhone);
-    if (normalized) {
-      logger.debug(
-        { instanceName: key, connectedNumber: normalized, source: 'env' },
-        'connectedNumber resolvido via variavel de ambiente'
-      );
-      return normalized;
+  if (key === '__default__') {
+    const envPhone = process.env.WHATSAPP_PHONE || process.env.EVOLUTION_PHONE;
+    if (envPhone) {
+      const normalized = normalizePhone(envPhone);
+      if (normalized) {
+        logger.debug(
+          { instanceName: key, connectedNumber: normalized, source: 'env' },
+          'connectedNumber resolvido via variavel de ambiente (instancia default)'
+        );
+        return normalized;
+      }
     }
   }
 
@@ -142,15 +140,13 @@ export const updateInstanceFromPayload = (instanceName, payload, source = 'paylo
   const key = normalizeInstanceKey(instanceName);
   const existing = instanceStore.get(key) || {};
 
-  const connectedNumber = extractConnectedNumberFromPayload(payload);
-
-  // Só atualiza connectedNumber se encontrou um valor — preserva o anterior caso contrário
-  const updatedNumber = connectedNumber || existing.connectedNumber || null;
+  const extracted = extractConnectedNumberFromPayload(payload);
+  const updatedNumber = extracted || existing.connectedNumber || null;
 
   const entry = {
     ...existing,
     connectedNumber: updatedNumber,
-    connectedName: null, // Nome não é crítico para anti-self-reply
+    connectedName: null,
     lastUpdate: new Date().toISOString(),
     source,
   };
@@ -161,7 +157,7 @@ export const updateInstanceFromPayload = (instanceName, payload, source = 'paylo
     {
       instanceName: key,
       connectedNumber: updatedNumber,
-      extractedFromPayload: connectedNumber,
+      extractedFromPayload: extracted,
       source,
     },
     'Cache de instancia atualizado'
@@ -173,20 +169,31 @@ export const updateInstanceFromPayload = (instanceName, payload, source = 'paylo
 /**
  * Atualiza o cache diretamente com valores já normalizados.
  * Usado por syncStateFromEvolution após normalizar o número.
+ * connectedNumber: null no patch NÃO apaga número existente (use clearInstanceNumber).
  */
 export const updateInstanceDirect = (instanceName, patch) => {
   const key = normalizeInstanceKey(instanceName);
   const existing = instanceStore.get(key) || {};
 
+  const patchCopy = { ...patch };
+  if (Object.prototype.hasOwnProperty.call(patchCopy, 'connectedNumber')) {
+    if (patchCopy.connectedNumber === null || patchCopy.connectedNumber === undefined) {
+      if (existing.connectedNumber) {
+        delete patchCopy.connectedNumber;
+      }
+    } else {
+      const n = normalizePhone(patchCopy.connectedNumber) || patchCopy.connectedNumber;
+      patchCopy.connectedNumber = n;
+    }
+  }
+
   const entry = {
     ...existing,
-    ...patch,
+    ...patchCopy,
     lastUpdate: new Date().toISOString(),
   };
 
-  // Garante que connectedNumber só é sobrescrito se o novo valor for não-nulo
-  // OU se o patch explicitamente tiver connectedNumber: null (reset consciente)
-  if (patch.connectedNumber === undefined && existing.connectedNumber) {
+  if (patchCopy.connectedNumber === undefined && existing.connectedNumber) {
     entry.connectedNumber = existing.connectedNumber;
   }
 
@@ -195,7 +202,7 @@ export const updateInstanceDirect = (instanceName, patch) => {
 };
 
 /**
- * Reseta o connectedNumber de uma instância (ex: desconexão).
+ * Reseta o connectedNumber de uma instância (ex: desconexão explícita).
  */
 export const clearInstanceNumber = (instanceName = null) => {
   const key = normalizeInstanceKey(instanceName);
@@ -216,8 +223,8 @@ export const clearInstanceNumber = (instanceName = null) => {
  */
 export const getAllInstanceStates = () => {
   const result = {};
-  for (const [key, value] of instanceStore.entries()) {
-    result[key] = { ...value };
+  for (const [k, value] of instanceStore.entries()) {
+    result[k] = { ...value };
   }
   return result;
 };

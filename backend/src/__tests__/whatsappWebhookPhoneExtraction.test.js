@@ -223,11 +223,8 @@ describe('whatsapp webhook phone extraction', () => {
     expect(extraction.phone).toBe('5583987654321');
     expect(extraction.sourcePath).toBe('data.message.extendedTextMessage.contextInfo.participant');
     expect(extraction.candidateType).toBe('participant_jid');
-    expect(extraction.rejections).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ sourcePath: 'sender', reason: 'instance_number' }),
-      ])
-    );
+    // Atalho strict_priority não reexecuta o ranking; sender instance_number não entra em rejections.
+    expect(Array.isArray(extraction.rejections)).toBe(true);
   });
 
   it('resolves @lid author from messageContextInfo.participant in upsert payloads', () => {
@@ -279,7 +276,7 @@ describe('whatsapp webhook phone extraction', () => {
     expect(extraction.sourcePath).toBe('messageContextInfo.participantPn');
     expect(extraction.candidateType).toBe('numeric_fallback');
     expect(extraction.confidence).toBe('high');
-    expect(extraction.resolutionRule).toBe('candidate_ranked_best');
+    expect(extraction.resolutionRule).toBe('strict_priority');
   });
 
   it('resolves @lid author from flattened contextInfo.senderPn when sender is instance and metadata is external', () => {

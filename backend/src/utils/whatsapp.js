@@ -787,6 +787,37 @@ const WEBHOOK_PHONE_EXTRACTION_CANDIDATES = [
   },
 ];
 
+/** Ordem estrita: participantPn → participant JID → author → sender → remoteJid (filtros sobre WEBHOOK_PHONE_EXTRACTION_CANDIDATES). */
+const STRICT_PARTICIPANT_PN_CANDIDATES = WEBHOOK_PHONE_EXTRACTION_CANDIDATES.filter((c) =>
+  String(c.sourcePath).includes('participantPn')
+);
+
+const STRICT_PARTICIPANT_JID_CANDIDATES = WEBHOOK_PHONE_EXTRACTION_CANDIDATES.filter(
+  (c) => c.candidateType === 'participant_jid'
+);
+
+const STRICT_AUTHOR_CANDIDATES = [
+  { sourcePath: 'author', getValue: (p) => p?.author },
+  { sourcePath: 'data.author', getValue: (p) => p?.data?.author },
+  { sourcePath: 'message.author', getValue: (p) => p?.message?.author },
+  { sourcePath: 'data.messages[0].author', getValue: (p) => p?.data?.messages?.[0]?.author },
+  { sourcePath: 'messages[0].author', getValue: (p) => p?.messages?.[0]?.author },
+  { sourcePath: 'data.messages[0].message.author', getValue: (p) => p?.data?.messages?.[0]?.message?.author },
+  { sourcePath: 'messages[0].message.author', getValue: (p) => p?.messages?.[0]?.message?.author },
+  { sourcePath: 'key.author', getValue: (p) => p?.key?.author },
+  { sourcePath: 'data.key.author', getValue: (p) => p?.data?.key?.author },
+  { sourcePath: 'message.key.author', getValue: (p) => p?.message?.key?.author },
+  { sourcePath: 'data.messages[0].key.author', getValue: (p) => p?.data?.messages?.[0]?.key?.author },
+  { sourcePath: 'messages[0].key.author', getValue: (p) => p?.messages?.[0]?.key?.author },
+];
+
+const STRICT_SENDER_CANDIDATES = [
+  ...WEBHOOK_PHONE_EXTRACTION_CANDIDATES.filter((c) => c.candidateType === 'sender_jid'),
+  ...WEBHOOK_PHONE_EXTRACTION_CANDIDATES.filter(
+    (c) => c.candidateType === 'numeric_fallback' && String(c.sourcePath).includes('senderPn')
+  ),
+];
+
 const pruneLidCache = () => {
   if (LID_TO_PHONE_CACHE.size <= LID_CACHE_MAX_ENTRIES) return;
   const overflow = LID_TO_PHONE_CACHE.size - LID_CACHE_MAX_ENTRIES;
@@ -920,13 +951,52 @@ export const normalizePhone = (value) => {
     lowered.endsWith('@lid') ||
     lowered.endsWith('@newsletter')
   ) return null;
-  const withoutJid = raw.includes('@') ? raw.split('@')[0] : raw;
-  const digits = withoutJid.replace(/\D/g, '');
+  let withoutJid = raw.includes('@') ? raw.split('@')[0] : raw;
+  withoutJid = withoutJid.replace(/^\++/, '');
+  let digits = withoutJid.replace(/\D/g, '');
+  digits = digits.replace(/^0+/, '') || '';
+  if (digits.length >= 10 && digits.length <= 11 && !digits.startsWith('55')) {
+    digits = `55${digits}`;
+  }
   if (!digits || digits.length < MIN_WHATSAPP_DIGITS || digits.length > MAX_WHATSAPP_DIGITS) return null;
   return digits;
 };
 
 export const normalizeWhatsAppNumber = (value) => normalizePhone(value);
+
+/** Variantes BR móvel (com/sem 9 após DDD) só para comparação de identidade / anti–auto-resposta. */
+const expandBrazilMobileVariants = (digits) => {
+  const out = new Set();
+  if (!digits || typeof digits !== 'string') return [];
+  out.add(digits);
+  if (!digits.startsWith('55') || digits.length < 12) return [...out];
+  const national = digits.slice(2);
+  if (national.length === 11 && national.charAt(2) === '9') {
+    out.add(`55${national.slice(0, 2)}${national.slice(3)}`);
+  }
+  if (national.length === 10 && national.charAt(2) !== '9') {
+    out.add(`55${national.slice(0, 2)}9${national.slice(2)}`);
+  }
+  return [...out];
+};
+
+/**
+ * Bloqueio final de auto-resposta: só true se connectedNumber existir (fail-open se null).
+ * Comparação sempre em dígitos normalizados + variantes BR.
+ */
+export const isSelfMessage = ({ authorPhone, connectedNumber } = {}) => {
+  if (connectedNumber === null || connectedNumber === undefined) return false;
+  if (String(connectedNumber).trim() === '') return false;
+  const normalizedConnected = normalizePhone(connectedNumber);
+  if (!normalizedConnected) return false;
+  const normalizedAuthor = normalizePhone(authorPhone);
+  if (!normalizedAuthor) return false;
+  const connectedKeys = new Set(expandBrazilMobileVariants(normalizedConnected));
+  for (const a of expandBrazilMobileVariants(normalizedAuthor)) {
+    if (connectedKeys.has(a)) return true;
+  }
+  return false;
+};
 
 export const normalizePhoneForSend = (value) => {
   if (value === null || value === undefined) return null;
@@ -950,9 +1020,9 @@ export const normalizePhoneForSend = (value) => {
     candidate = raw.split('@')[0];
   }
 
-  const digits = candidate.replace(/\D/g, '');
-  if (!isValidPhone(digits)) return null;
-  return digits;
+  const normalized = normalizePhone(candidate);
+  if (!normalized || !isValidPhone(normalized)) return null;
+  return normalized;
 };
 
 export const resolveReplyDestination = ({ phone } = {}) => {
@@ -1032,12 +1102,14 @@ export const resolveSafeReplyDestination = ({
     if (normalized) instanceNumbers.add(normalized);
   }
 
-  if (normalizedConnectedNumber && destination === normalizedConnectedNumber) {
+  if (normalizedConnectedNumber && isSelfMessage({ authorPhone: destination, connectedNumber: normalizedConnectedNumber })) {
     return { ok: false, destination, reason: 'connected_number_match', conversationKind };
   }
 
-  if (instanceNumbers.has(destination)) {
-    return { ok: false, destination, reason: 'self_target', conversationKind };
+  for (const inst of instanceNumbers) {
+    if (isSelfMessage({ authorPhone: destination, connectedNumber: inst })) {
+      return { ok: false, destination, reason: 'self_target', conversationKind };
+    }
   }
 
   return { ok: true, destination, reason: null, conversationKind };
@@ -1182,6 +1254,106 @@ const maybeCacheLidFromSafeCandidate = ({ remoteJidOriginal, conversationKind, c
 };
 
 /**
+ * Prioridade fixa: participantPn → participant → author → sender → remoteJid.
+ * Ignora @lid sem número; ignora candidatos que batem com números da instância ou isSelfMessage.
+ */
+export const resolveAuthorPhoneStrictPriority = (
+  payload = {},
+  { instanceNumbersSet = new Set(), connectedNumber = null, conversationKind = 'unknown' } = {},
+) => {
+  const set = instanceNumbersSet instanceof Set ? instanceNumbersSet : new Set(instanceNumbersSet);
+  const normalizedConnectedOption = connectedNumber ? normalizePhone(connectedNumber) : null;
+
+  const acceptCanonical = (trimmed, sourcePath, { allowNumericOnly }) => {
+    if (typeof trimmed !== 'string' || !trimmed.trim()) return null;
+    const t = trimmed.trim();
+    if (t.toLowerCase().endsWith('@lid')) return null;
+    const parsed = parseWebhookPhoneCandidate(t, { allowNumericOnly });
+    if (!parsed.phone) return null;
+    const canonical = normalizePhone(t) || normalizePhone(parsed.phone);
+    if (!canonical) return null;
+    if (normalizedConnectedOption && isSelfMessage({ authorPhone: canonical, connectedNumber: normalizedConnectedOption })) {
+      return null;
+    }
+    if (set.has(canonical)) return null;
+    for (const v of expandBrazilMobileVariants(canonical)) {
+      if (set.has(v)) return null;
+    }
+    return { authorPhone: canonical, sourcePath };
+  };
+
+  const scanSenders = () => {
+    for (const c of STRICT_SENDER_CANDIDATES) {
+      const raw = c.getValue(payload);
+      if (typeof raw !== 'string') continue;
+      const got = acceptCanonical(raw, c.sourcePath, { allowNumericOnly: c.candidateType === 'numeric_fallback' });
+      if (got) return got;
+    }
+    return null;
+  };
+
+  const scanRemoteJids = () => {
+    for (const c of WEBHOOK_REMOTE_JID_CANDIDATES) {
+      const raw = c.getValue(payload);
+      if (typeof raw !== 'string') continue;
+      const got = acceptCanonical(raw, c.sourcePath, { allowNumericOnly: false });
+      if (got) return got;
+    }
+    return null;
+  };
+
+  for (const c of STRICT_PARTICIPANT_PN_CANDIDATES) {
+    const raw = c.getValue(payload);
+    if (typeof raw !== 'string') continue;
+    const got = acceptCanonical(raw, c.sourcePath, { allowNumericOnly: true });
+    if (got) return got;
+  }
+
+  for (const c of STRICT_PARTICIPANT_JID_CANDIDATES) {
+    const raw = c.getValue(payload);
+    if (typeof raw !== 'string') continue;
+    const got = acceptCanonical(raw, c.sourcePath, { allowNumericOnly: false });
+    if (got) return got;
+  }
+
+  for (const c of STRICT_AUTHOR_CANDIDATES) {
+    const raw = c.getValue(payload);
+    if (typeof raw !== 'string') continue;
+    const got = acceptCanonical(raw, c.sourcePath, { allowNumericOnly: false });
+    if (got) return got;
+  }
+
+  // @lid: nunca promover sender/remoteJid no atalho strict — ranking + lid_sender_fallback tratam metadado frágil.
+  if (conversationKind === 'lid') {
+    return { authorPhone: null, sourcePath: null };
+  }
+
+  // DM direto: remoteJid costuma ser o interlocutor; sender pode ser metadado incorreto.
+  if (conversationKind === 'direct') {
+    const fromRemote = scanRemoteJids();
+    if (fromRemote) return fromRemote;
+    const fromSender = scanSenders();
+    if (fromSender) return fromSender;
+  } else {
+    const fromSender = scanSenders();
+    if (fromSender) return fromSender;
+    const fromRemote = scanRemoteJids();
+    if (fromRemote) return fromRemote;
+  }
+
+  return { authorPhone: null, sourcePath: null };
+};
+
+const mapStrictPriorityCandidateType = (sourcePath = '') => {
+  const sp = String(sourcePath);
+  if (sp.includes('participantPn')) return 'numeric_fallback';
+  if (sp.includes('senderPn')) return 'numeric_fallback';
+  if (sp.includes('participant')) return 'participant_jid';
+  if (sp.includes('remoteJid')) return 'direct_jid';
+  return 'sender_jid';
+};
+
+/**
  * FIX BUG SELF-REPLY LID:
  * Extrai o campo "destination" do payload da Evolution API.
  * Esse campo contém o número da instância conectada (o dono da barbearia)
@@ -1259,7 +1431,64 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
     };
   }
 
+  const primaryConnected =
+    (Array.isArray(options?.connectedNumbers) && options.connectedNumbers[0]) ||
+    options?.connectedNumber ||
+    null;
+  const strictAuthor = resolveAuthorPhoneStrictPriority(payload, {
+    instanceNumbersSet,
+    connectedNumber: primaryConnected,
+    conversationKind,
+  });
+  if (strictAuthor.authorPhone) {
+    if (strictAuthor.sourcePath.includes('participant')) {
+      maybeCacheLidFromSafeCandidate({
+        remoteJidOriginal,
+        conversationKind,
+        candidate: { phone: strictAuthor.authorPhone, authorRole: 'participant_jid' },
+      });
+    }
+    const inferredType = mapStrictPriorityCandidateType(strictAuthor.sourcePath);
+    return {
+      authorPhone: strictAuthor.authorPhone,
+      sourcePath: strictAuthor.sourcePath,
+      candidateType: inferredType,
+      confidence: inferredType === 'sender_jid' ? 'medium' : 'high',
+      resolutionRule: 'strict_priority',
+      remoteJidOriginal,
+      sender,
+      participant,
+      pushName,
+      fromMe,
+      instanceNumbers: Array.from(instanceNumbersSet),
+      rejections,
+      candidates: [
+        {
+          sourcePath: strictAuthor.sourcePath,
+          candidateType: inferredType,
+          rawValue: strictAuthor.authorPhone,
+          phone: strictAuthor.authorPhone,
+          score: 100,
+          confidence: inferredType === 'sender_jid' ? 'medium' : 'high',
+          authorRole: inferredType === 'participant_jid' || inferredType === 'numeric_fallback'
+            ? 'participant_jid'
+            : 'sender_jid',
+          rejectedReason: null,
+          index: -1,
+        },
+      ],
+    };
+  }
+
   const matchedCandidates = [];
+
+  const instanceNumberMatches = (canonical) => {
+    if (!canonical) return false;
+    for (const key of expandBrazilMobileVariants(canonical)) {
+      if (instanceNumbersSet.has(key)) return true;
+    }
+    return false;
+  };
 
   for (const [index, candidate] of candidates.entries()) {
     const value = candidate.getValue(payload);
@@ -1277,18 +1506,25 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       continue;
     }
 
-    if (instanceNumbersSet.has(parsed.phone)) {
+    const trimmedValue = typeof value === 'string' ? value.trim() : '';
+    const canonicalPhone = normalizePhone(trimmedValue) || normalizePhone(parsed.phone);
+    if (!canonicalPhone) {
+      appendRejection(rejections, candidate.sourcePath, 'invalid_digits_length');
+      continue;
+    }
+
+    if (instanceNumberMatches(canonicalPhone)) {
       appendRejection(rejections, candidate.sourcePath, 'instance_number');
       matchedCandidates.push({
         sourcePath: candidate.sourcePath, candidateType: candidate.candidateType,
         rawValue: typeof value === 'string' ? value.trim() : value,
-        phone: parsed.phone, score: 0, confidence: 'none',
+        phone: canonicalPhone, score: 0, confidence: 'none',
         rejectedReason: 'instance_number', index,
       });
       continue;
     }
 
-    const scoredCandidate = scoreIncomingAuthorCandidate({ candidate, phone: parsed.phone, remoteJidOriginal, conversationKind });
+    const scoredCandidate = scoreIncomingAuthorCandidate({ candidate, phone: canonicalPhone, remoteJidOriginal, conversationKind });
     let adjustedScore = scoredCandidate.score;
     let adjustedConfidence = scoredCandidate.confidence;
     let rejectedReason = null;
@@ -1304,7 +1540,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       appendRejection(rejections, candidate.sourcePath, rejectedReason);
     }
 
-    if (!rejectedReason && isSenderFallbackPath && instanceNumbersSet.has(parsed.phone)) {
+    if (!rejectedReason && isSenderFallbackPath && instanceNumberMatches(canonicalPhone)) {
       adjustedScore = 0;
       adjustedConfidence = 'none';
       rejectedReason = 'sender_matches_connected_instance';
@@ -1314,7 +1550,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
     matchedCandidates.push({
       sourcePath: candidate.sourcePath, candidateType: candidate.candidateType,
       rawValue: typeof value === 'string' ? value.trim() : value,
-      phone: parsed.phone, score: adjustedScore, confidence: adjustedConfidence,
+      phone: canonicalPhone, score: adjustedScore, confidence: adjustedConfidence,
       authorRole: scoredCandidate.authorRole, rejectedReason, index,
     });
   }
@@ -1351,7 +1587,7 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
   );
 
   if (!bestCandidate) {
-    if (cachedPhone && !instanceNumbersSet.has(cachedPhone) && !hasAnyExplicitAuthorSignal) {
+    if (cachedPhone && !instanceNumberMatches(cachedPhone) && !hasAnyExplicitAuthorSignal) {
       return {
         authorPhone: cachedPhone, sourcePath: 'lid_cache', candidateType: 'lid_cached_phone',
         confidence: 'medium', resolutionRule: 'lid_cache', remoteJidOriginal, sender, participant,
@@ -1376,22 +1612,22 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       sender.trim().toLowerCase().endsWith('@s.whatsapp.net')
     ) {
       const senderDigits = sender.split('@')[0].replace(/\D/g, '');
+      const senderCanon = normalizePhone(sender.trim()) || normalizePhone(senderDigits);
 
       if (
-        senderDigits.length >= MIN_WHATSAPP_DIGITS &&
-        senderDigits.length <= MAX_WHATSAPP_DIGITS &&
-        !instanceNumbersSet.has(senderDigits)  // ← guard crítico
+        senderCanon &&
+        !instanceNumberMatches(senderCanon)
       ) {
-        if (remoteJidOriginal) cacheLidToPhone(remoteJidOriginal, senderDigits);
+        if (remoteJidOriginal) cacheLidToPhone(remoteJidOriginal, senderCanon);
         return {
-          authorPhone: senderDigits, sourcePath: 'lid_sender_fallback', candidateType: 'sender_jid',
+          authorPhone: senderCanon, sourcePath: 'lid_sender_fallback', candidateType: 'sender_jid',
           confidence: 'lid_fallback', resolutionRule: 'lid_sender_fallback', remoteJidOriginal,
           sender, participant, pushName, fromMe, instanceNumbers: Array.from(instanceNumbersSet),
           rejections,
           candidates: [
             ...serializeCandidates(),
             { sourcePath: 'lid_sender_fallback', candidateType: 'sender_jid', rawValue: sender,
-              phone: senderDigits, score: 65, confidence: 'lid_fallback',
+              phone: senderCanon, score: 65, confidence: 'lid_fallback',
               authorRole: 'lid_sender_fallback', rejectedReason: null },
           ],
         };
@@ -1436,14 +1672,14 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
       sender.trim().toLowerCase().endsWith('@s.whatsapp.net')
     ) {
       const lidFallbackDigits = sender.split('@')[0].replace(/\D/g, '');
+      const lidFallbackCanon = normalizePhone(sender.trim()) || normalizePhone(lidFallbackDigits);
       if (
-        lidFallbackDigits.length >= MIN_WHATSAPP_DIGITS &&
-        lidFallbackDigits.length <= MAX_WHATSAPP_DIGITS &&
-        !instanceNumbersSet.has(lidFallbackDigits)  // ← guard crítico
+        lidFallbackCanon &&
+        !instanceNumberMatches(lidFallbackCanon)
       ) {
-        if (remoteJidOriginal) cacheLidToPhone(remoteJidOriginal, lidFallbackDigits);
+        if (remoteJidOriginal) cacheLidToPhone(remoteJidOriginal, lidFallbackCanon);
         return {
-          authorPhone: lidFallbackDigits, sourcePath: 'lid_sender_fallback', candidateType: 'sender_jid',
+          authorPhone: lidFallbackCanon, sourcePath: 'lid_sender_fallback', candidateType: 'sender_jid',
           confidence: 'lid_fallback', resolutionRule: 'lid_sender_fallback', remoteJidOriginal,
           sender, participant, pushName, fromMe, instanceNumbers: Array.from(instanceNumbersSet),
           rejections, candidates: serializeCandidates(),
@@ -1470,10 +1706,10 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
     const shouldPromoteLidFromFallback =
       conversationKind === 'lid' && LID_SENDER_FALLBACK_EVENTS.has(eventName) && !fromMe &&
       Boolean(incomingText) && lidFromFallbackCandidate && !hasBetterCandidateThanLidFrom &&
-      !instanceNumbersSet.has(lidFromFallbackCandidate.phone);
+      !instanceNumberMatches(lidFromFallbackCandidate.phone);
     const shouldPromoteSenderFallback =
       !fromMe && Boolean(incomingText) && senderFallbackCandidate && !hasBetterCandidateThanSender &&
-      canPromoteSenderFallback && !instanceNumbersSet.has(senderFallbackCandidate.phone);
+      canPromoteSenderFallback && !instanceNumberMatches(senderFallbackCandidate.phone);
 
     if (shouldPromoteLidFromFallback) {
       maybeCacheLidFromSafeCandidate({ remoteJidOriginal, conversationKind, candidate: lidFromFallbackCandidate });

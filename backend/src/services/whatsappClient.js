@@ -25,6 +25,7 @@ import {
   isInvalidJidContext,
   isValidPhone,
   resolveSafeReplyDestination,
+  isSelfMessage,
 } from '../utils/whatsapp.js';
 import {
   ensureBarbershopWhatsAppInstanceName,
@@ -136,13 +137,15 @@ const buildInstanceNotFoundError = (details = null, { instanceName = null } = {}
 };
 
 const updateInstanceNotFoundState = (error = null, { instanceName = null } = {}) => {
+  const { instanceName: resolvedInstanceName } = getEvolutionConfig({ instanceName });
   updateState({
     status: STATUS.INSTANCE_NOT_FOUND,
     qrCode: null,
     connectedNumber: null,
     connectedName: null,
     error: error?.message || buildInstanceNotFoundError(null, { instanceName }).message,
-  }, { instanceName });
+  }, { instanceName: resolvedInstanceName });
+  clearInstanceNumber(resolvedInstanceName);
 };
 
 const isLikelyRenderableImageBase64 = (value) => {
@@ -368,37 +371,47 @@ const syncStateFromEvolution = async ({ includeQr = false, instanceName = null }
   const rawEvolutionState = extractConnectionState(statusPayload);
   const identity = extractIdentity(statusPayload);
   const status = normalizeStatus(rawEvolutionState, qrCode);
+  const previousSnapshot = snapshotState(resolvedInstanceName);
+  const previousConnected = normalizeWhatsAppNumber(previousSnapshot?.connectedNumber);
 
-  // Resolver connectedNumber com fallback chain:
+  // Resolver connectedNumber com fallback chain (somente quando CONNECTED):
   // 1. Extraído do payload de status (instance.wid, owner, me.id, etc)
-  // 2. Preservado do cache se já havia um valor (não apaga se status só não tem o campo)
-  // 3. Variavel de ambiente WHATSAPP_PHONE / EVOLUTION_PHONE
+  // 2. Preservado do cache se já havia um valor
+  // 3. Variavel de ambiente WHATSAPP_PHONE / EVOLUTION_PHONE — apenas instância default (alinhado ao whatsappInstanceCache)
   // PROIBIDO: chamar /instance/me aqui
-  let resolvedConnectedNumber = status === STATUS.CONNECTED ? identity.number : null;
+  let resolvedConnectedNumber = null;
+  if (status === STATUS.CONNECTED) {
+    resolvedConnectedNumber = identity.number
+      ? normalizeWhatsAppNumber(identity.number)
+      : null;
 
-  if (status === STATUS.CONNECTED && !resolvedConnectedNumber) {
-    // Tentar preservar cache anterior antes de ir para env
-    const cached = getCachedConnectedNumber(resolvedInstanceName);
-    if (cached) {
-      resolvedConnectedNumber = cached;
-      logger.debug(
-        { instanceName: resolvedInstanceName, connectedNumber: cached, source: 'cache_preserved' },
-        'connectedNumber preservado do cache anterior'
-      );
-    } else {
-      // Ultimo fallback: variavel de ambiente
-      const envPhone = process.env.WHATSAPP_PHONE || process.env.EVOLUTION_PHONE;
-      if (envPhone) {
-        const envNumber = normalizeWhatsAppNumber(envPhone);
-        if (envNumber) {
-          resolvedConnectedNumber = envNumber;
-          logger.info(
-            { instanceName: resolvedInstanceName, connectedNumber: envNumber, source: 'env' },
-            'connectedNumber resolvido via variavel de ambiente'
-          );
+    if (!resolvedConnectedNumber) {
+      const cached = getCachedConnectedNumber(resolvedInstanceName);
+      if (cached) {
+        resolvedConnectedNumber = cached;
+        logger.debug(
+          { instanceName: resolvedInstanceName, connectedNumber: cached, source: 'cache_preserved' },
+          'connectedNumber preservado do cache anterior'
+        );
+      } else {
+        const instanceKey = normalizeWhatsAppInstanceName(resolvedInstanceName) || '__default__';
+        if (instanceKey === '__default__') {
+          const envPhone = process.env.WHATSAPP_PHONE || process.env.EVOLUTION_PHONE;
+          if (envPhone) {
+            const envNumber = normalizeWhatsAppNumber(envPhone);
+            if (envNumber) {
+              resolvedConnectedNumber = envNumber;
+              logger.info(
+                { instanceName: resolvedInstanceName, connectedNumber: envNumber, source: 'env' },
+                'connectedNumber resolvido via variavel de ambiente (instancia default)'
+              );
+            }
+          }
         }
       }
     }
+  } else {
+    resolvedConnectedNumber = previousConnected;
   }
 
   logger.info(
@@ -421,12 +434,14 @@ const syncStateFromEvolution = async ({ includeQr = false, instanceName = null }
     error: null,
   }, { instanceName: resolvedInstanceName });
 
-  // Sincronizar também no cache dedicado por instância
-  updateInstanceDirect(resolvedInstanceName, {
-    connectedNumber: resolvedConnectedNumber,
+  const cachePatch = {
     status,
     source: identity.number ? 'payload' : (resolvedConnectedNumber ? 'cache_or_env' : 'none'),
-  });
+  };
+  if (status === STATUS.CONNECTED && resolvedConnectedNumber) {
+    cachePatch.connectedNumber = resolvedConnectedNumber;
+  }
+  updateInstanceDirect(resolvedInstanceName, cachePatch);
 
   return snapshotState(resolvedInstanceName);
 };
@@ -619,6 +634,8 @@ export const disconnectWhatsApp = async (context = {}) => {
       connectedNumber: null,
       error: null,
     }, { instanceName: resolvedInstanceName });
+
+    clearInstanceNumber(resolvedInstanceName);
 
     return true;
   } catch (error) {
@@ -824,7 +841,7 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
   const endpoint = `/message/sendText/${resolvedInstanceName}`;
   const connectedNumber = normalizeWhatsAppNumber(getWhatsAppStatusByInstance(resolvedInstanceName)?.connectedNumber);
 
-  if (connectedNumber && normalizedAuthorPhone === connectedNumber) {
+  if (connectedNumber && isSelfMessage({ authorPhone: normalizedAuthorPhone, connectedNumber })) {
     logger.warn(
       {
         authorPhone: normalizedAuthorPhone,
@@ -841,7 +858,7 @@ export const sendWhatsAppText = async (phone, message, context = {}) => {
     ? context.knownInstanceNumbers
     : [];
 
-  if (knownInstanceNumbers.includes(normalizedAuthorPhone)) {
+  if (knownInstanceNumbers.some((n) => isSelfMessage({ authorPhone: normalizedAuthorPhone, connectedNumber: n }))) {
     logger.warn(
       {
         authorPhone: normalizedAuthorPhone,
