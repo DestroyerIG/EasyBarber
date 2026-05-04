@@ -971,9 +971,24 @@ export const getInstanceMe = async ({ instanceName = null } = {}) => {
 
   return requestWithFallback(
     [
-      { method: 'GET', path: `/instance/me/${encodedInstanceName}`, instanceName: resolvedInstanceName },
-      { method: 'GET', path: `/instance/me?instanceName=${encodedInstanceName}`, instanceName: resolvedInstanceName },
-      { method: 'GET', path: `/instance/me?instance=${encodedInstanceName}`, instanceName: resolvedInstanceName },
+      {
+        method: 'GET',
+        path: `/instance/me/${encodedInstanceName}`,
+        expectedStatuses: [200, 204, 404],
+        instanceName: resolvedInstanceName,
+      },
+      {
+        method: 'GET',
+        path: `/instance/me?instanceName=${encodedInstanceName}`,
+        expectedStatuses: [200, 204, 404],
+        instanceName: resolvedInstanceName,
+      },
+      {
+        method: 'GET',
+        path: `/instance/me?instance=${encodedInstanceName}`,
+        expectedStatuses: [200, 204, 404],
+        instanceName: resolvedInstanceName,
+      },
     ],
     'getInstanceMe'
   );

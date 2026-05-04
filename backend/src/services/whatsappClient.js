@@ -344,6 +344,17 @@ const resolveConnectedNumberFromDatabase = async (instanceName = null) => {
 const resolveConnectedNumberFromInstanceMe = async (instanceName = null) => {
   try {
     const payload = await getInstanceMe({ instanceName });
+
+    if (
+      !payload ||
+      payload?.status === 404 ||
+      payload?.error === 'Not Found' ||
+      (Array.isArray(payload?.response?.message) &&
+        payload.response.message.some((msg) => String(msg || '').includes('/instance/me')))
+    ) {
+      return null;
+    }
+
     const extracted = extractConnectedNumberFromPayload(payload);
     const normalized = normalizeWhatsAppNumber(extracted);
 

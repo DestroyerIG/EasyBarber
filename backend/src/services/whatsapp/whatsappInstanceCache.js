@@ -67,6 +67,7 @@ export const extractConnectedNumberFromPayload = (payload) => {
     payload?.instance?.phone,
     // Campos raiz comuns
     payload?.id,
+    payload?.destination,
     payload?.owner,
     payload?.ownerJid,
     payload?.wid,
@@ -75,6 +76,7 @@ export const extractConnectedNumberFromPayload = (payload) => {
     // Nested data
     payload?.data?.id,
     payload?.data?.wid,
+    payload?.data?.destination,
     payload?.data?.number,
     payload?.data?.phone,
     payload?.data?.me?.id,

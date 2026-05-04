@@ -746,9 +746,61 @@ const selectAuthorExtraction = (normalizedExtraction, rawExtraction = null) => {
   };
 };
 
-const buildWebhookPhoneExtractionOptions = (instanceName = null) => {
+const resolveConnectedNumberFromDatabase = async (instanceName = null) => {
+  if (typeof instanceName !== 'string' || !instanceName.trim()) {
+    return null;
+  }
+
+  const normalizedInstanceName = instanceName.trim().toLowerCase();
+
+  try {
+    const result = await pool.query(
+      `SELECT whatsapp
+         FROM barbershops
+        WHERE active = true
+          AND NULLIF(btrim(whatsapp_instance_name), '') IS NOT NULL
+          AND lower(btrim(whatsapp_instance_name)) = $1
+        LIMIT 1`,
+      [normalizedInstanceName]
+    );
+
+    if (!result.rows.length) {
+      return null;
+    }
+
+    return normalizeWhatsAppNumber(result.rows[0]?.whatsapp || null);
+  } catch (error) {
+    logger.warn(
+      { err: error, instanceName: normalizedInstanceName },
+      'Falha ao resolver connectedNumber via banco no webhook'
+    );
+    return null;
+  }
+};
+
+const resolveConnectedNumberForWebhook = async (instanceName = null, payload = {}) => {
+  const cached = getConnectedNumberCached(instanceName);
+  if (cached) {
+    return cached;
+  }
+
+  const payloadDestination = extractPayloadDestination(payload);
+  if (payloadDestination) {
+    return payloadDestination;
+  }
+
+  const dbNumber = await resolveConnectedNumberFromDatabase(instanceName);
+  if (dbNumber) {
+    return dbNumber;
+  }
+
+  return null;
+};
+
+const buildWebhookPhoneExtractionOptions = (instanceName = null, connectedNumberOverride = null) => {
   // Usa o cache dedicado por instância (sem HTTP)
-  const connectedNumber = getConnectedNumberCached(instanceName);
+  const connectedNumber =
+    normalizeWhatsAppNumber(connectedNumberOverride) || getConnectedNumberCached(instanceName);
 
   if (!connectedNumber) {
     return {};
@@ -881,14 +933,14 @@ const mapWebhookIncomingMessage = async (payload) => {
   // ========== REGRA 2: CONNECTED NUMBER DO CACHE (SEM HTTP) ==========
   // NUNCA fazer HTTP aqui. Cache é atualizado via syncStateFromEvolution e eventos.
   // REGRA CRÍTICA: se connectedNumber for null, processar normalmente (não bloquear).
-  const connectedNumber = getConnectedNumberCached(instanceName);
+  const connectedNumber = await resolveConnectedNumberForWebhook(instanceName, payload);
 
   // ========== EXTRAÇÃO DE TEXTO ==========
   const text = extractWebhookText(normalizedPayload);
 
   // ========== EXTRAÇÃO DO AUTOR ==========
   // Usa sistema existente de resolvência de autor (suporte a LID, participantPn, etc.)
-  const extractionOptions = buildWebhookPhoneExtractionOptions(instanceName);
+  const extractionOptions = buildWebhookPhoneExtractionOptions(instanceName, connectedNumber);
   const extraction = resolveIncomingAuthor(normalizedPayload, { ...extractionOptions, messageText: text });
   const rawExtraction = resolveIncomingAuthor(payload, { ...extractionOptions, messageText: text });
   const resolvedExtraction = selectAuthorExtraction(extraction, rawExtraction);
