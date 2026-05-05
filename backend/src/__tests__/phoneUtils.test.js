@@ -1,194 +1,160 @@
 /**
- * phoneUtils.test.js
- *
- * Testes unitários para src/services/whatsapp/utils/phoneUtils.js
+ * phoneUtils.test.js — Unit tests for phoneUtils.js
  */
 
 import {
-  extractPhoneFromJid,
-  normalizePhone,
+  stripToDigits,
+  canonicalizePhone,
   isSelfMessage,
+  extractPhoneFromJid,
   resolveAuthorPhone,
 } from '../services/whatsapp/utils/phoneUtils.js';
 
-// ── extractPhoneFromJid ───────────────────────────────────────────────────────
+// ── stripToDigits ─────────────────────────────────────────────────────────────
 
-describe('extractPhoneFromJid', () => {
-  it('extrai número de JID @s.whatsapp.net', () => {
-    expect(extractPhoneFromJid('5583996311811@s.whatsapp.net')).toBe('5583996311811');
+describe('stripToDigits', () => {
+  it('removes non-digit chars', () => {
+    expect(stripToDigits('+55 (83) 9963-11811')).toBe('55839963118 11'.replace(/\s/g, ''));
+    expect(stripToDigits('+55 (83) 99631-1811')).toBe('558399631181 1'.replace(/\s/g, ''));
   });
 
-  it('extrai número de JID @c.us (formato legado)', () => {
-    expect(extractPhoneFromJid('5583996311811@c.us')).toBe('5583996311811');
+  it('returns empty string for null/empty input', () => {
+    expect(stripToDigits(null)).toBe('');
+    expect(stripToDigits('')).toBe('');
+    expect(stripToDigits(undefined)).toBe('');
   });
 
-  it('retorna null para JID @lid', () => {
-    expect(extractPhoneFromJid('247269873942566@lid')).toBeNull();
-  });
-
-  it('retorna null para input null/undefined', () => {
-    expect(extractPhoneFromJid(null)).toBeNull();
-    expect(extractPhoneFromJid(undefined)).toBeNull();
-    expect(extractPhoneFromJid('')).toBeNull();
-  });
-
-  it('retorna null se sem @', () => {
-    expect(extractPhoneFromJid('5583996311811')).toBeNull();
+  it('returns digits unchanged', () => {
+    expect(stripToDigits('5583996311811')).toBe('5583996311811');
   });
 });
 
-// ── normalizePhone ────────────────────────────────────────────────────────────
+// ── canonicalizePhone ─────────────────────────────────────────────────────────
 
-describe('normalizePhone', () => {
-  it('remove country code 55 de número E.164 de 13 dígitos', () => {
-    expect(normalizePhone('5583996311811')).toBe('83996311811');
+describe('canonicalizePhone', () => {
+  // Core spec: both formats → same canonical
+  it('83996311811 (11d, with 9) → 8396311811', () => {
+    expect(canonicalizePhone('83996311811')).toBe('8396311811');
   });
 
-  it('remove country code 55 de número E.164 de 12 dígitos', () => {
-    expect(normalizePhone('558396311811')).toBe('8396311811');
+  it('8396311811 (10d, without 9) stays 8396311811', () => {
+    expect(canonicalizePhone('8396311811')).toBe('8396311811');
   });
 
-  it('mantém número já sem 55 (11 dígitos)', () => {
-    expect(normalizePhone('83996311811')).toBe('83996311811');
+  it('5583996311811 (13d E.164 new) → 8396311811', () => {
+    expect(canonicalizePhone('5583996311811')).toBe('8396311811');
   });
 
-  it('remove formatação (espaços, traços, parênteses)', () => {
-    expect(normalizePhone('+55 (83) 9963-11811')).toBe('83996311811');
+  // 12-digit number: 55 NOT stripped (intentional — see module header)
+  it('558396311811 (12d E.164 old) stays 558396311811', () => {
+    expect(canonicalizePhone('558396311811')).toBe('558396311811');
   });
 
-  it('retorna null para input vazio ou inválido', () => {
-    expect(normalizePhone(null)).toBeNull();
-    expect(normalizePhone('')).toBeNull();
-    expect(normalizePhone('abc')).toBeNull();
+  it('returns empty string for invalid input', () => {
+    expect(canonicalizePhone(null)).toBe('');
+    expect(canonicalizePhone('')).toBe('');
+    expect(canonicalizePhone('abc')).toBe('');
   });
 
-  it('NÃO adiciona nem remove o 9 do número', () => {
-    // Preserva o número como chegou — sem manipular o 9
-    expect(normalizePhone('558396311811')).toBe('8396311811');    // sem 9
-    expect(normalizePhone('5583996311811')).toBe('83996311811');  // com 9
+  it('handles + prefix and formatting', () => {
+    expect(canonicalizePhone('+5583996311811')).toBe('8396311811');
   });
 });
 
 // ── isSelfMessage ─────────────────────────────────────────────────────────────
 
 describe('isSelfMessage', () => {
-  // Caso central: números que diferem apenas pelo "9" obrigatório NÃO são self
-  // 558396311811  (12d, sem 9 após DDD) vs 5583996311811 (13d, com 9 após DDD)
-  it('558396311811 (sem 9) vs 5583996311811 (com 9) → NÃO é self', () => {
+  // THE critical case: client (12d) vs bot (13d) must be FALSE
+  it('558396311811 (client, 12d) vs 5583996311811 (bot, 13d) → false', () => {
     expect(isSelfMessage('558396311811', '5583996311811')).toBe(false);
   });
 
-  it('mesmo número E.164 completo → é self', () => {
+  // Bot vs same bot (both 13d) → true
+  it('same 13d number → true', () => {
     expect(isSelfMessage('5583996311811', '5583996311811')).toBe(true);
   });
 
-  it('mesmo número sem 55 em ambos → é self', () => {
-    expect(isSelfMessage('83996311811', '83996311811')).toBe(true);
+  // 11d vs 13d same person → true
+  it('83996311811 vs 5583996311811 → true (same person, different format)', () => {
+    expect(isSelfMessage('83996311811', '5583996311811')).toBe(true);
   });
 
-  it('com 55 vs sem 55, mesmo número → é self', () => {
-    expect(isSelfMessage('5583996311811', '83996311811')).toBe(true);
+  // 10d vs 13d same person → true (after 9 removal both hit same canonical)
+  it('8396311811 vs 5583996311811 → true', () => {
+    expect(isSelfMessage('8396311811', '5583996311811')).toBe(true);
   });
 
-  it('números completamente diferentes → não é self', () => {
+  // Completely different numbers → false
+  it('different numbers → false', () => {
     expect(isSelfMessage('5583996311811', '5511999887766')).toBe(false);
   });
 
-  it('retorna false se um dos argumentos for nulo/undefined', () => {
+  it('returns false for null/empty', () => {
     expect(isSelfMessage(null, '5583996311811')).toBe(false);
     expect(isSelfMessage('5583996311811', null)).toBe(false);
-    expect(isSelfMessage(null, null)).toBe(false);
+    expect(isSelfMessage('', '')).toBe(false);
   });
 
-  it('retorna false para strings vazias', () => {
-    expect(isSelfMessage('', '5583996311811')).toBe(false);
-    expect(isSelfMessage('5583996311811', '')).toBe(false);
-  });
-
-  // Variante: mesmo número base, ambos com 10 dígitos sem 55 → canonical iguais → self
-  it('dois números 10 dígitos idênticos (sem 55) → é self', () => {
-    expect(isSelfMessage('8396311811', '8396311811')).toBe(true);
-  });
-
-  // Variante: ambos com 9, 11 dígitos sem 55 → idênticos → self
-  it('dois números 11 dígitos idênticos (sem 55) → é self', () => {
-    expect(isSelfMessage('83996311811', '83996311811')).toBe(true);
-  });
-
-  // JID completo nos inputs
-  it('aceita JID @s.whatsapp.net como input (extrai dígitos)', () => {
+  // JID input handled gracefully (non-digits stripped)
+  it('JID input: 5583996311811@s.whatsapp.net vs 5583996311811 → true', () => {
     expect(isSelfMessage('5583996311811@s.whatsapp.net', '5583996311811')).toBe(true);
+  });
+});
+
+// ── extractPhoneFromJid ───────────────────────────────────────────────────────
+
+describe('extractPhoneFromJid', () => {
+  it('extracts phone from @s.whatsapp.net', () => {
+    expect(extractPhoneFromJid('5583996311811@s.whatsapp.net')).toBe('5583996311811');
+  });
+
+  it('extracts phone from @c.us (legacy)', () => {
+    expect(extractPhoneFromJid('5583996311811@c.us')).toBe('5583996311811');
+  });
+
+  it('returns null for @lid', () => {
+    expect(extractPhoneFromJid('247269873942566@lid')).toBeNull();
+  });
+
+  it('returns null for @g.us (group)', () => {
+    expect(extractPhoneFromJid('5511999999999@g.us')).toBeNull();
+  });
+
+  it('returns null for missing/empty', () => {
+    expect(extractPhoneFromJid(null)).toBeNull();
+    expect(extractPhoneFromJid('')).toBeNull();
+    expect(extractPhoneFromJid('nojid')).toBeNull();
   });
 });
 
 // ── resolveAuthorPhone ────────────────────────────────────────────────────────
 
 describe('resolveAuthorPhone', () => {
-  it('retorna isFromMe=true para key.fromMe=true, phone=null', () => {
-    const payload = {
-      data: { key: { remoteJid: '5583996311811@s.whatsapp.net', fromMe: true } },
-    };
-    const result = resolveAuthorPhone(payload);
-    expect(result.isFromMe).toBe(true);
-    expect(result.phone).toBeNull();
-    expect(result.source).toBe('fromMe');
+  it('fromMe=true → skip=true, phone=null', () => {
+    const payload = { data: { key: { remoteJid: '5583996311811@s.whatsapp.net', fromMe: true } } };
+    const r = resolveAuthorPhone(payload);
+    expect(r.skip).toBe(true);
+    expect(r.phone).toBeNull();
+    expect(r.source).toBe('from_me');
   });
 
-  it('extrai número de remoteJid @s.whatsapp.net', () => {
-    const payload = {
-      data: {
-        key: { remoteJid: '558396311811@s.whatsapp.net', fromMe: false },
-      },
-    };
-    const result = resolveAuthorPhone(payload);
-    expect(result.phone).toBe('558396311811');
-    expect(result.source).toBe('remoteJid');
-    expect(result.isFromMe).toBe(false);
+  it('remoteJid @s.whatsapp.net → phone from remoteJid', () => {
+    const payload = { data: { key: { remoteJid: '558396311811@s.whatsapp.net', fromMe: false } } };
+    const r = resolveAuthorPhone(payload);
+    expect(r.phone).toBe('558396311811');
+    expect(r.source).toBe('remoteJid');
+    expect(r.skip).toBe(false);
   });
 
-  it('usa sender quando remoteJid é @lid', () => {
-    const payload = {
-      sender: '558396311811@s.whatsapp.net',
-      data: {
-        key: {
-          remoteJid: '247269873942566@lid',
-          fromMe: false,
-          id: 'ACCC752295081680F6CC2418A3504074',
-        },
-        pushName: 'Lucas Barros',
-        message: { conversation: 'Boa tarde' },
-      },
-    };
-    const result = resolveAuthorPhone(payload);
-    expect(result.phone).toBe('558396311811');
-    expect(result.source).toBe('sender_lid');
-    expect(result.isFromMe).toBe(false);
+  it('remoteJid @g.us → skip (group)', () => {
+    const payload = { data: { key: { remoteJid: '5511999999999@g.us', fromMe: false } } };
+    const r = resolveAuthorPhone(payload);
+    expect(r.skip).toBe(true);
+    expect(r.source).toBe('group');
   });
 
-  it('usa participant em mensagens de grupo', () => {
-    const payload = {
-      data: {
-        key: {
-          remoteJid: '5511999999999@g.us',
-          participant: '558396311811@s.whatsapp.net',
-          fromMe: false,
-        },
-      },
-    };
-    const result = resolveAuthorPhone(payload);
-    expect(result.phone).toBe('558396311811');
-    expect(result.source).toBe('participant');
-  });
-
-  it('retorna phone=null se não houver fonte identificável', () => {
-    const payload = { data: { key: { fromMe: false } } };
-    const result = resolveAuthorPhone(payload);
-    expect(result.phone).toBeNull();
-    expect(result.source).toBe('unresolved');
-  });
-
-  // Payload Evolution API real do exemplo do usuário
-  it('processa payload Evolution API v1 com @lid (exemplo real)', () => {
+  // Real Evolution API v1 @lid payload (from user's production log)
+  it('@lid payload → phone from sender, skip=false', () => {
     const payload = {
       event: 'messages-upsert',
       instance: 'itallobarber_12f46de4',
@@ -208,12 +174,34 @@ describe('resolveAuthorPhone', () => {
       destination: '5583996311811',
     };
 
-    const result = resolveAuthorPhone(payload);
-    expect(result.phone).toBe('558396311811');
-    expect(result.source).toBe('sender_lid');
-    expect(result.isFromMe).toBe(false);
+    const r = resolveAuthorPhone(payload);
+    expect(r.phone).toBe('558396311811');
+    expect(r.source).toBe('sender_lid');
+    expect(r.skip).toBe(false);
 
-    // Verificar que com connectedNumber = destination, NÃO é self-message
-    expect(isSelfMessage(result.phone, '5583996311811')).toBe(false);
+    // Confirm: this client is NOT the bot
+    expect(isSelfMessage(r.phone, '5583996311811')).toBe(false);
+  });
+
+  it('@lid with participant → phone from participant', () => {
+    const payload = {
+      data: {
+        key: {
+          remoteJid: '247269873942566@lid',
+          fromMe: false,
+          participant: '5511999887766@s.whatsapp.net',
+        },
+      },
+      sender: '558396311811@s.whatsapp.net',
+    };
+    const r = resolveAuthorPhone(payload);
+    expect(r.phone).toBe('5511999887766');
+    expect(r.source).toBe('participant_lid');
+  });
+
+  it('no resolvable source → skip=true, source=unresolved', () => {
+    const r = resolveAuthorPhone({ data: { key: { fromMe: false } } });
+    expect(r.skip).toBe(true);
+    expect(r.source).toBe('unresolved');
   });
 });

@@ -22,6 +22,8 @@ import debugRoutes from './routes/debug.js';
 import { stripeWebhook } from './controllers/subscriptionController.js';
 import { startReminderCron } from './services/cronService.js';
 import { initWhatsApp } from './services/whatsappClient.js';
+import { initBotOrchestrator } from './bot/botOrchestrator.js';
+import { createEvolutionClient } from './services/whatsapp/client/evolutionClient.js';
 import { getAsaasApiKeyDiagnostics } from './integrations/asaas/client.js';
 
 dotenv.config();
@@ -438,6 +440,13 @@ const start = async () => {
 
     startReminderCron();
     initWhatsApp();
+
+    try {
+      initBotOrchestrator(createEvolutionClient());
+      logger.info('botOrchestrator: EvolutionClient inicializado');
+    } catch (err) {
+      logger.warn({ err: err?.message }, 'botOrchestrator: EvolutionClient não inicializado (env vars ausentes?)');
+    }
 
     server = app.listen(PORT, '0.0.0.0', () => {
       logger.info(`Servidor rodando na porta ${PORT}`);

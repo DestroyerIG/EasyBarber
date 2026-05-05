@@ -1,158 +1,126 @@
 /**
- * messagesUpsertHandler.js
+ * messagesUpsertHandler.js — Handler principal para eventos messages-upsert.
  *
- * Handler para o evento messages-upsert da Evolution API.
- *
- * Fluxo:
- *   1. fromMe=true  → ignorar
- *   2. Extrair authorPhone (remoteJid / sender / participant)
- *   3. Verificar self-message via isSelfMessage
- *   4. Extrair texto
- *   5. Deduplicar por messageId
- *   6. Retornar { ok, authorPhone, text, messageId } para o caller processar
- *
- * O handler NÃO chama o bot diretamente — retorna os dados processados
- * para o controller decidir o que fazer. Isso mantém a separação de responsabilidades
- * e preserva a assinatura do webhook controller existente.
+ * A verificação isSelfMessage existe SOMENTE aqui (Passo 6).
+ * Nenhum outro módulo deve duplicar essa verificação.
  */
 
 import logger from '../../../utils/logger.js';
-import { resolveAuthorPhone, isSelfMessage } from '../utils/phoneUtils.js';
+import { parseEvolutionWebhook } from '../utils/payloadParser.js';
+import { resolveAuthorPhone, isSelfMessage, canonicalizePhone } from '../utils/phoneUtils.js';
+import { resolveTenant } from '../tenant/tenantResolver.js';
+import { deduplicator } from '../utils/deduplication.js';
+import * as botOrchestrator from '../../../bot/botOrchestrator.js';
 
-// TODO: substituir por Redis para deduplicação entre múltiplas instâncias/pods
-const _dedupeCache = new Map();
-const DEDUPE_TTL_MS = 60_000;
+const ACTIVE_STATUSES = new Set(['active', 'trialing']);
 
-const pruneDedupeCache = () => {
-  const now = Date.now();
-  for (const [key, expiresAt] of _dedupeCache.entries()) {
-    if (expiresAt <= now) _dedupeCache.delete(key);
-  }
-};
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-const extractMessageId = (payload) => {
-  const data = payload?.data || payload;
-  return (
-    data?.key?.id ||
-    data?.messages?.[0]?.key?.id ||
-    payload?.key?.id ||
-    null
-  );
-};
-
-const extractMessageText = (payload) => {
-  const data = payload?.data || payload;
-  const msg =
-    data?.message ||
-    data?.messages?.[0]?.message ||
-    payload?.message ||
-    null;
-  if (!msg) return null;
-  return (
-    msg.conversation ||
-    msg.extendedTextMessage?.text ||
-    msg.imageMessage?.caption ||
-    msg.videoMessage?.caption ||
-    msg.documentMessage?.caption ||
-    null
-  ) || null;
-};
-
-// ── Handler principal ─────────────────────────────────────────────────────────
+const last4 = (s) => (s ? String(s).slice(-4) : null);
 
 /**
- * Processa um payload messages-upsert da Evolution API.
- *
- * @param {object} payload - Payload bruto do webhook
- * @param {object} context
- * @param {string|null} context.connectedNumber - Número conectado da instância (sem formatação)
- * @param {string|null} [context.instanceName]  - Nome da instância (para logs)
- *
- * @returns {Promise<{
- *   ok: boolean,
- *   ignored: boolean,
- *   reason: string|null,
- *   authorPhone?: string,
- *   text?: string,
- *   messageId?: string|null,
- * }>}
+ * @param {object} rawPayload   Raw Evolution API webhook body
+ * @param {{ instanceName: string }} options
+ * @returns {Promise<{ ok: boolean, reason: string|null, authorPhone?: string,
+ *                     text?: string, messageId?: string|null, barbershopId?: string }>}
  */
-export const handleMessagesUpsert = async (payload, context = {}) => {
-  const { connectedNumber = null, instanceName = null } = context;
+export const handleMessagesUpsert = async (rawPayload, { instanceName } = {}) => {
+  const t0 = Date.now();
 
-  // ── 1. Resolver autor ────────────────────────────────────────────────────
-  const { phone: authorPhone, source: authorSource, isFromMe } = resolveAuthorPhone(payload);
-
-  if (isFromMe) {
-    logger.info({ instanceName, authorSource }, 'author_resolved: fromMe=true — ignorado');
-    return { ok: false, ignored: true, reason: 'from_me' };
+  // ── Passo 1: Parse ──────────────────────────────────────────────────────────
+  const parsed = parseEvolutionWebhook(rawPayload);
+  if (!parsed) {
+    logger.info({ instanceName }, 'msg_handler: parse_failed');
+    return { ok: false, reason: 'parse_failed' };
   }
 
-  logger.info(
-    { instanceName, authorPhone, authorSource, connectedNumber },
-    'author_resolved',
-  );
-
-  if (!authorPhone) {
-    logger.warn({ instanceName, authorSource }, 'message_skipped: telefone do autor nao identificado');
-    return { ok: false, ignored: true, reason: 'unresolved_author' };
+  // ── Passo 2: fromMe check ───────────────────────────────────────────────────
+  if (parsed.fromMe === true) {
+    logger.info({ instanceName, messageId: parsed.messageId }, 'msg_handler: from_me');
+    return { ok: false, reason: 'from_me' };
   }
 
-  // ── 2. Verificar auto-resposta ────────────────────────────────────────────
-  const selfCheck = connectedNumber ? isSelfMessage(authorPhone, connectedNumber) : false;
+  // ── Passo 3: Resolver autor ─────────────────────────────────────────────────
+  // Pass full rawPayload so resolveAuthorPhone can read top-level `sender`
+  // (Evolution API places sender at root, not inside data).
+  const resolved = resolveAuthorPhone(rawPayload);
+  if (resolved.skip) {
+    logger.info({ instanceName, source: resolved.source }, 'msg_handler: author_skip');
+    return { ok: false, reason: resolved.source };
+  }
 
+  // ── Passo 4: Resolver tenant ────────────────────────────────────────────────
+  const effectiveInstance = instanceName ?? parsed.instanceName;
+  const tenant = await resolveTenant(effectiveInstance);
+  if (!tenant) {
+    logger.info({ instanceName: effectiveInstance }, 'msg_handler: tenant_not_found');
+    return { ok: false, reason: 'tenant_not_found' };
+  }
+
+  // ── Passo 5: Verificar assinatura ───────────────────────────────────────────
+  if (!ACTIVE_STATUSES.has(tenant.subscriptionStatus)) {
+    logger.info(
+      { instanceName: effectiveInstance, subscriptionStatus: tenant.subscriptionStatus },
+      'msg_handler: subscription_inactive',
+    );
+    return { ok: false, reason: 'subscription_inactive' };
+  }
+
+  // ── Passo 6: Self-message check (ÚNICO no sistema) ──────────────────────────
+  if (isSelfMessage(resolved.phone, tenant.connectedNumber)) {
+    logger.info(
+      {
+        instanceName: effectiveInstance,
+        authorCanonical: canonicalizePhone(resolved.phone),
+        connectedLast4: last4(tenant.connectedNumber),
+      },
+      'msg_handler: self_message',
+    );
+    return { ok: false, reason: 'self_message' };
+  }
+
+  // ── Passo 7: Deduplicação ───────────────────────────────────────────────────
+  if (parsed.messageId && deduplicator.isDuplicate(parsed.messageId)) {
+    logger.info({ instanceName: effectiveInstance, messageId: parsed.messageId }, 'msg_handler: duplicate');
+    return { ok: false, reason: 'duplicate' };
+  }
+  if (parsed.messageId) deduplicator.markSeen(parsed.messageId);
+
+  // ── Passo 8: Verificar texto ────────────────────────────────────────────────
+  if (!parsed.text?.trim()) {
+    logger.info({ instanceName: effectiveInstance, authorPhone: resolved.phone }, 'msg_handler: no_text');
+    return { ok: false, reason: 'no_text' };
+  }
+
+  // ── Passo 9: Executar bot ───────────────────────────────────────────────────
   logger.info(
     {
-      instanceName,
-      authorPhone,
-      connectedNumber: connectedNumber || null,
-      isSelf: selfCheck,
+      instanceName: effectiveInstance,
+      authorPhone: resolved.phone,
+      barbershopId: tenant.barbershop.id,
+      textPreview: parsed.text.slice(0, 50),
     },
-    'self_check',
+    'msg_handler: processing',
   );
 
-  if (selfCheck) {
-    logger.info(
-      { instanceName, authorPhone, connectedNumber },
-      'message_skipped: self_message_skipped',
-    );
-    return { ok: false, ignored: true, reason: 'self_message_skipped' };
-  }
+  await botOrchestrator.process({
+    barbershopId: tenant.barbershop.id,
+    authorPhone: resolved.phone,
+    text: parsed.text,
+    messageId: parsed.messageId,
+    instanceName: effectiveInstance,
+  });
 
-  // ── 3. Extrair texto ──────────────────────────────────────────────────────
-  const text = extractMessageText(payload);
-
-  if (!text?.trim()) {
-    logger.debug({ instanceName, authorPhone }, 'message_skipped: sem texto');
-    return { ok: false, ignored: true, reason: 'no_text' };
-  }
-
-  // ── 4. Deduplicação por messageId ─────────────────────────────────────────
-  const messageId = extractMessageId(payload);
-
-  if (messageId) {
-    pruneDedupeCache();
-    if (_dedupeCache.has(messageId)) {
-      logger.info({ instanceName, messageId }, 'message_skipped: duplicata');
-      return { ok: false, ignored: true, reason: 'duplicate' };
-    }
-    _dedupeCache.set(messageId, Date.now() + DEDUPE_TTL_MS);
-  }
-
-  // ── 5. Aceito ─────────────────────────────────────────────────────────────
+  // ── Passo 10: Retornar ──────────────────────────────────────────────────────
   logger.info(
-    { instanceName, authorPhone, textPreview: text.slice(0, 60) },
-    'message_accepted',
+    { instanceName: effectiveInstance, ok: true, durationMs: Date.now() - t0 },
+    'msg_handler: done',
   );
 
   return {
     ok: true,
-    ignored: false,
     reason: null,
-    authorPhone,
-    text,
-    messageId: messageId || null,
+    authorPhone: resolved.phone,
+    text: parsed.text,
+    messageId: parsed.messageId ?? null,
+    barbershopId: tenant.barbershop.id,
   };
 };
