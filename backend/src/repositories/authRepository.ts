@@ -308,7 +308,7 @@ export const authRepository = {
       const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT id, email, barbershop_id, supabase_user_id
          FROM users
-         WHERE supabase_user_id = ${supabaseUserId}
+         WHERE supabase_user_id = ${supabaseUserId}::uuid
          LIMIT 1
          FOR UPDATE
       `);
