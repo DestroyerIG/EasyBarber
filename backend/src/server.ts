@@ -3,8 +3,8 @@ if (process.env.OTEL_ENABLED === 'true') {
   await import('./telemetry.js');
 }
 
-import express from 'express';
-import cors from 'cors';
+import express, { Request, Response, NextFunction } from 'express';
+import cors, { CorsOptions } from 'cors';
 import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
@@ -57,6 +57,7 @@ import debugRoutes from './routes/debug.js';
 dotenv.config();
 
 const requiredEnvVars = ['JWT_SECRET', 'DATABASE_URL'];
+
 for (const envVar of requiredEnvVars) {
   if (!process.env[envVar]) {
     logger.fatal(`Variável de ambiente ${envVar} não definida!`);
@@ -84,16 +85,31 @@ const stripeBillingEnabled =
 
 if (stripeBillingEnabled) {
   const missingStripeEnvVars = stripeRequiredEnvVars.filter((v) => !process.env[v]);
+
   if (missingStripeEnvVars.length > 0) {
-    logger.fatal({ missingEnvVars: missingStripeEnvVars }, 'Configuração Stripe incompleta para billing híbrido');
+    logger.fatal(
+      { missingEnvVars: missingStripeEnvVars },
+      'Configuração Stripe incompleta para billing híbrido'
+    );
+
     process.exit(1);
   }
 
-  const oneTimeConfiguredCount = stripeOptionalOneTimeEnvVars.filter((v) => Boolean(process.env[v])).length;
-  if (oneTimeConfiguredCount > 0 && oneTimeConfiguredCount < stripeOptionalOneTimeEnvVars.length) {
+  const oneTimeConfiguredCount = stripeOptionalOneTimeEnvVars.filter(
+    (v) => Boolean(process.env[v])
+  ).length;
+
+  if (
+    oneTimeConfiguredCount > 0 &&
+    oneTimeConfiguredCount < stripeOptionalOneTimeEnvVars.length
+  ) {
     logger.warn(
-      { missingOneTimePriceEnvVars: stripeOptionalOneTimeEnvVars.filter((v) => !process.env[v]) },
-      'Configuração Stripe one-time parcial: fluxo legado pix/boleto em Stripe ficará indisponível'
+      {
+        missingOneTimePriceEnvVars: stripeOptionalOneTimeEnvVars.filter(
+          (v) => !process.env[v]
+        ),
+      },
+      'Configuração Stripe one-time parcial'
     );
   }
 }
@@ -105,19 +121,36 @@ if (process.env.ASAAS_BASE_URL && !process.env.ASAAS_API_KEY) {
 
 if (process.env.ASAAS_API_KEY) {
   logger.info(
-    { event: 'asaas_api_key_diagnostics', ...getAsaasApiKeyDiagnostics() },
+    {
+      event: 'asaas_api_key_diagnostics',
+      ...getAsaasApiKeyDiagnostics(),
+    },
     'Diagnóstico da chave Asaas no boot'
   );
 }
 
 const app = express();
+
 app.set('trust proxy', 1);
 
-const PORT = process.env.PORT || 5000;
+// IMPORTANTE:
+// Render injeta automaticamente PORT.
+// Se existir no Render usa ele.
+// Senão usa 5000 localmente.
+const PORT = Number(process.env.PORT || 5000);
+
 const API_V1 = '/api/v1';
-const API_JSON_BODY_LIMIT = process.env.API_JSON_BODY_LIMIT || '1mb';
-const WHATSAPP_WEBHOOK_BODY_LIMIT = process.env.WHATSAPP_WEBHOOK_BODY_LIMIT || '6mb';
-const BLOCKED_WHATSAPP_WEBHOOK_EVENTS = new Set(['messages-set', 'messageset']);
+
+const API_JSON_BODY_LIMIT =
+  process.env.API_JSON_BODY_LIMIT || '1mb';
+
+const WHATSAPP_WEBHOOK_BODY_LIMIT =
+  process.env.WHATSAPP_WEBHOOK_BODY_LIMIT || '6mb';
+
+const BLOCKED_WHATSAPP_WEBHOOK_EVENTS = new Set([
+  'messages-set',
+  'messageset',
+]);
 
 const normalizeWebhookEventName = (value: string): string =>
   String(value || '')
@@ -127,7 +160,7 @@ const normalizeWebhookEventName = (value: string): string =>
     .replace(/[._\s]+/g, '-')
     .replace(/-+/g, '-');
 
-// Hardened security headers + per-tenant rate limit
+// Security
 applySecurityMiddleware(app);
 
 // CORS
@@ -138,12 +171,17 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
 ].filter((v): v is string => Boolean(v));
 
-const vercelProjectPrefix = process.env.VERCEL_PROJECT_PREFIX || 'barberpro-saas-2-0';
+const vercelProjectPrefix =
+  process.env.VERCEL_PROJECT_PREFIX || 'barberpro-saas-2-0';
 
 const isAllowedVercelPreview = (origin: string): boolean => {
   try {
     const hostname = new URL(origin).hostname;
-    if (!hostname.endsWith('.vercel.app')) return false;
+
+    if (!hostname.endsWith('.vercel.app')) {
+      return false;
+    }
+
     return (
       hostname === `${vercelProjectPrefix}.vercel.app` ||
       hostname.startsWith(`${vercelProjectPrefix}-`)
@@ -153,51 +191,113 @@ const isAllowedVercelPreview = (origin: string): boolean => {
   }
 };
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      if (isAllowedVercelPreview(origin)) return callback(null, true);
-      return callback(new Error(`Origin não permitida pelo CORS: ${origin}`));
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  })
-);
+const corsOptions: CorsOptions = {
+  origin: (
+    origin: string | undefined,
+    callback: (err: Error | null, allow?: boolean) => void
+  ) => {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    if (isAllowedVercelPreview(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(
+      new Error(`Origin não permitida pelo CORS: ${origin}`)
+    );
+  },
+
+  credentials: true,
+
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+};
+
+app.use(cors(corsOptions));
 
 app.use(cookieParser());
 
-// Stripe webhook must come before express.json
-app.post(`${API_V1}/subscriptions/webhook`, express.raw({ type: 'application/json' }), stripeWebhook);
-app.post(`${API_V1}/webhook/stripe`, express.raw({ type: 'application/json' }), stripeWebhook);
-app.post(`${API_V1}/billing/webhook/stripe`, express.raw({ type: 'application/json' }), stripeWebhook);
-app.post(`${API_V1}/billing/webhooks/stripe`, express.raw({ type: 'application/json' }), stripeWebhook);
+// Stripe webhook
+app.post(
+  `${API_V1}/subscriptions/webhook`,
+  express.raw({ type: 'application/json' }),
+  stripeWebhook
+);
 
-// Block heavy WhatsApp webhook events before parsing
-app.post(`${API_V1}/whatsapp/webhook/:event`, (req, res, next) => {
-  const eventName = normalizeWebhookEventName(req.params['event'] ?? '');
-  if (!BLOCKED_WHATSAPP_WEBHOOK_EVENTS.has(eventName)) return next();
-  logger.info({ event: eventName, route: req.originalUrl, ignoredBeforeParser: true }, 'Webhook WhatsApp pesado ignorado');
-  return res.status(200).json({
-    success: true,
-    data: { received: true, processed: false, ignored: true, reason: 'blocked_event', event: eventName },
-  });
-});
+app.post(
+  `${API_V1}/webhook/stripe`,
+  express.raw({ type: 'application/json' }),
+  stripeWebhook
+);
 
-app.use(`${API_V1}/whatsapp/webhook`, express.json({ limit: WHATSAPP_WEBHOOK_BODY_LIMIT }));
-app.use(express.json({ limit: API_JSON_BODY_LIMIT }));
+app.post(
+  `${API_V1}/billing/webhook/stripe`,
+  express.raw({ type: 'application/json' }),
+  stripeWebhook
+);
 
-// Request ID injection (must come before httpLogger)
+app.post(
+  `${API_V1}/billing/webhooks/stripe`,
+  express.raw({ type: 'application/json' }),
+  stripeWebhook
+);
+
+// Block heavy WhatsApp events
+app.post(
+  `${API_V1}/whatsapp/webhook/:event`,
+  (req: Request, res: Response, next: NextFunction) => {
+    const eventName = normalizeWebhookEventName(
+      req.params['event'] ?? ''
+    );
+
+    if (!BLOCKED_WHATSAPP_WEBHOOK_EVENTS.has(eventName)) {
+      return next();
+    }
+
+    logger.info(
+      {
+        event: eventName,
+        route: req.originalUrl,
+        ignoredBeforeParser: true,
+      },
+      'Webhook WhatsApp pesado ignorado'
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        received: true,
+        processed: false,
+        ignored: true,
+        reason: 'blocked_event',
+        event: eventName,
+      },
+    });
+  }
+);
+
+app.use(
+  `${API_V1}/whatsapp/webhook`,
+  express.json({ limit: WHATSAPP_WEBHOOK_BODY_LIMIT })
+);
+
+app.use(
+  express.json({ limit: API_JSON_BODY_LIMIT })
+);
+
+// Middlewares
 app.use(requestIdMiddleware);
 
-// Structured HTTP access log
 app.use(httpLoggerMiddleware);
 
-// Input sanitization
 app.use(sanitizeMiddleware);
 
-// API rate limit (skip webhook paths)
+// Rate limit
 const webhookPaths = [
   `${API_V1}/subscriptions/webhook`,
   `${API_V1}/webhook/stripe`,
@@ -209,60 +309,53 @@ const webhookPaths = [
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
+
   max: 300,
+
   standardHeaders: true,
+
   legacyHeaders: false,
-  skip: (req) => req.method === 'OPTIONS' || webhookPaths.some((p) => req.originalUrl.startsWith(p)),
-  message: { success: false, error: { code: 'RATE_LIMIT', message: 'Muitas requisições. Tente novamente em alguns minutos.' } },
+
+  skip: (req: Request) =>
+    req.method === 'OPTIONS' ||
+    webhookPaths.some((p) =>
+      req.originalUrl.startsWith(p)
+    ),
+
+  message: {
+    success: false,
+    error: {
+      code: 'RATE_LIMIT',
+      message:
+        'Muitas requisições. Tente novamente em alguns minutos.',
+    },
+  },
 });
 
 app.use(API_V1, apiLimiter);
 
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false,
-  skip: (req) => req.method === 'OPTIONS',
-  message: { success: false, error: { code: 'RATE_LIMIT', message: 'Muitas tentativas de login. Tente novamente em 15 minutos.' } },
-});
+// Health
+app.get(
+  '/health',
+  async (_req: Request, res: Response) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
 
-const registerLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 50, standardHeaders: true, legacyHeaders: false,
-  skip: (req) => req.method === 'OPTIONS',
-  message: { success: false, error: { code: 'RATE_LIMIT', message: 'Muitas tentativas de cadastro. Tente novamente em 15 minutos.' } },
-});
-
-const resendVerificationLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false,
-  skip: (req) => req.method === 'OPTIONS',
-  message: { success: false, error: { code: 'RATE_LIMIT', message: 'Muitas tentativas de reenvio. Tente novamente em alguns minutos.' } },
-});
-
-// Health check
-app.get('/health', async (_req, res) => {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: 'ok', db: 'connected', uptime: process.uptime() });
-  } catch {
-    res.status(503).json({ status: 'error', db: 'disconnected' });
+      return res.json({
+        status: 'ok',
+        db: 'connected',
+        uptime: process.uptime(),
+      });
+    } catch {
+      return res.status(503).json({
+        status: 'error',
+        db: 'disconnected',
+      });
+    }
   }
-});
+);
 
-app.get('/debug/ip', async (_req, res) => {
-  try {
-    const response = await fetch('https://api.ipify.org?format=json');
-    const data = await response.json() as { ip: string };
-    return res.json({ success: true, ip: data.ip });
-  } catch (err) {
-    logger.error({ err }, 'Erro ao obter IP público');
-    return res.status(500).json({ success: false, error: (err as Error).message });
-  }
-});
-
-// Auth-specific rate limits must be registered before the auth router
-app.use(`${API_V1}/auth/login`, loginLimiter);
-app.use(`${API_V1}/auth/register`, registerLimiter);
-app.use(`${API_V1}/auth/resend-verification`, resendVerificationLimiter);
-
-// Routes v1
+// Routes
 app.use(`${API_V1}/auth`, authRoutes);
 app.use(`${API_V1}/dashboard`, dashboardRoutes);
 app.use(`${API_V1}/appointments`, appointmentRoutes);
@@ -274,68 +367,127 @@ app.use(`${API_V1}/subscriptions`, subscriptionRoutes);
 app.use(`${API_V1}/billing`, billingRoutes);
 app.use(`${API_V1}/admin`, adminRoutes);
 app.use(`${API_V1}/debug`, debugRoutes);
+
 app.use('/debug', debugRoutes);
 
-// Backward-compat redirect
-app.use('/api', (req, res, next) => {
-  if (!req.path.startsWith('/v1')) {
-    return res.redirect(301, `${API_V1}${req.path}`);
+app.get(
+  '/',
+  (_req: Request, res: Response) => {
+    return res.json({
+      message: '💈 EasyBarber SaaS API',
+      version: '1.0.0',
+      status: 'online',
+      port: PORT,
+    });
   }
-  next();
-});
+);
 
-app.get('/', (_req, res) => {
-  res.json({ message: '💈 EasyBarber SaaS API', version: '1.0.0', status: 'online' });
-});
-
-app.use((_req, res) => {
-  res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Rota não encontrada' } });
-});
+app.use(
+  (_req: Request, res: Response) => {
+    return res.status(404).json({
+      success: false,
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Rota não encontrada',
+      },
+    });
+  }
+);
 
 app.use(errorHandler);
 
 // Graceful shutdown
-let server: ReturnType<typeof app.listen> | undefined;
+let server:
+  | ReturnType<typeof app.listen>
+  | undefined;
 
-const gracefulShutdown = async (signal: string): Promise<void> => {
-  logger.info({ signal }, 'Sinal de shutdown recebido. Encerrando...');
-  if (server) server.close(() => logger.info('Servidor HTTP encerrado'));
+const gracefulShutdown = async (
+  signal: string
+): Promise<void> => {
+  logger.info(
+    { signal },
+    'Sinal de shutdown recebido'
+  );
+
+  if (server) {
+    server.close(() => {
+      logger.info('Servidor HTTP encerrado');
+    });
+  }
+
   try {
     await prisma.$disconnect();
+
     logger.info('Prisma desconectado');
   } catch (err) {
-    logger.error({ err }, 'Erro ao desconectar Prisma');
+    logger.error(
+      { err },
+      'Erro ao desconectar Prisma'
+    );
   }
+
   process.exit(0);
 };
 
-process.on('SIGTERM', () => { void gracefulShutdown('SIGTERM'); });
-process.on('SIGINT', () => { void gracefulShutdown('SIGINT'); });
+process.on('SIGTERM', () => {
+  void gracefulShutdown('SIGTERM');
+});
+
+process.on('SIGINT', () => {
+  void gracefulShutdown('SIGINT');
+});
+
 process.on('unhandledRejection', (reason) => {
-  logger.fatal({ err: reason }, 'Unhandled Rejection — encerrando processo');
+  logger.fatal(
+    { err: reason },
+    'Unhandled Rejection'
+  );
+
   process.exit(1);
 });
 
 const start = async (): Promise<void> => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    logger.info('Conexão com banco de dados verificada');
+
+    logger.info(
+      'Conexão com banco de dados verificada'
+    );
 
     startReminderCron();
+
     initWhatsApp();
 
     try {
-      initBotOrchestrator(createEvolutionClient());
-      logger.info('botOrchestrator: EvolutionClient inicializado');
+      initBotOrchestrator(
+        createEvolutionClient()
+      );
+
+      logger.info(
+        'botOrchestrator inicializado'
+      );
     } catch (err) {
-      logger.warn({ err: (err as Error)?.message }, 'botOrchestrator: EvolutionClient não inicializado (env vars ausentes?)');
+      logger.warn(
+        { err: (err as Error)?.message },
+        'EvolutionClient não inicializado'
+      );
     }
 
-    server = app.listen(Number(PORT), '0.0.0.0', () => {
-      logger.info(`Servidor rodando na porta ${PORT}`);
-    });
+    server = app.listen(
+      PORT,
+      '0.0.0.0',
+      () => {
+        logger.info(
+          `Servidor rodando na porta ${PORT}`
+        );
+      }
+    );
   } catch (error) {
-    logger.fatal({ err: error }, 'Falha ao conectar ao banco de dados');
+    logger.fatal(
+      { err: error },
+      'Falha ao conectar ao banco'
+    );
+
     process.exit(1);
   }
 };
