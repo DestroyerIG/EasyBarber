@@ -448,15 +448,13 @@ process.on('unhandledRejection', (reason) => {
 
 const start = async (): Promise<void> => {
   try {
-    await prisma.$queryRaw`SELECT 1`;
+  await prisma.$connect();
 
-    logger.info(
-      'Conexão com banco de dados verificada'
-    );
-
-    startReminderCron();
-
-    initWhatsApp();
+      logger.info('Conexão com banco de dados verificada');
+  }     catch (error) {
+      logger.fatal(error, 'Falha ao conectar ao banco');
+        process.exit(1);
+    }
 
     try {
       initBotOrchestrator(
