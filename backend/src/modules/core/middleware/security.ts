@@ -1,9 +1,9 @@
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import type { Application, Request } from 'express';
 
 export function applySecurityMiddleware(app: Application): void {
-  // Replace basic helmet with hardened config
+  // Security headers
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -18,13 +18,19 @@ export function applySecurityMiddleware(app: Application): void {
           frameSrc: ["'none'"],
         },
       },
-      hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
-      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+      hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true,
+      },
+      referrerPolicy: {
+        policy: 'strict-origin-when-cross-origin',
+      },
       crossOriginEmbedderPolicy: false,
     })
   );
 
-  // Per-tenant rate limit (keyed by barbershopId from JWT, falls back to IP)
+  // Rate limit por tenant/IP
   app.use(
     '/api/v1',
     rateLimit({
@@ -32,16 +38,33 @@ export function applySecurityMiddleware(app: Application): void {
       max: 120,
       standardHeaders: true,
       legacyHeaders: false,
-      keyGenerator: (req: Request) => {
-        const user = (req as Request & { user?: { barbershopId?: string } }).user;
-        return user?.barbershopId ?? req.ip ?? 'unknown';
+
+      keyGenerator: (req: Request): string => {
+        const user = (
+          req as Request & {
+            user?: { barbershopId?: string };
+          }
+        ).user;
+
+        // Prioriza tenant
+        if (user?.barbershopId) {
+          return `tenant:${user.barbershopId}`;
+        }
+
+        // Fallback seguro IPv4/IPv6
+        return ipKeyGenerator(req.ip ?? 'unknown');
       },
-      skip: (req: Request) =>
+
+      skip: (req: Request): boolean =>
         req.method === 'OPTIONS' ||
         req.originalUrl.includes('/webhook'),
+
       message: {
         success: false,
-        error: { code: 'RATE_LIMIT_TENANT', message: 'Limite de requisições por tenant excedido.' },
+        error: {
+          code: 'RATE_LIMIT_TENANT',
+          message: 'Limite de requisições excedido.',
+        },
       },
     })
   );
