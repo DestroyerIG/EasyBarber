@@ -4,6 +4,9 @@
   "description": "Backend do EasyBarber SaaS para barbearias",
   "main": "dist/server.js",
   "type": "module",
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  },
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "dev": "tsx watch src/server.ts",
