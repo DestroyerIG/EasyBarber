@@ -3,119 +3,104 @@ if (process.env.OTEL_ENABLED === 'true') {
   await import('./telemetry.js');
 }
 
-import express, { Request, Response, NextFunction } from 'express';
+import express, {
+  Request,
+  Response,
+  NextFunction,
+} from 'express';
+
 import cors, { CorsOptions } from 'cors';
-import rateLimit from 'express-rate-limit';
+import rateLimit, {
+  ipKeyGenerator,
+} from 'express-rate-limit';
+
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
+
 import { prisma } from './config/prisma.js';
+
 import logger from './utils/logger.js';
+
 import { errorHandler } from './middleware/errorHandler.js';
+
 import { requestIdMiddleware } from './modules/core/middleware/requestId.js';
+
 import { httpLoggerMiddleware } from './modules/core/middleware/httpLogger.js';
+
 import { sanitizeMiddleware } from './modules/core/middleware/sanitize.js';
+
 import { applySecurityMiddleware } from './modules/core/middleware/security.js';
 
 // Route modules — new TS modules
 import billingRoutes from './modules/billing/billing.routes.js';
 import appointmentRoutes from './modules/appointments/appointments.routes.js';
 
-// Route modules — stub re-exports (pending full migration)
+// Route modules — stub re-exports
 // @ts-ignore
 import authRoutes from './modules/auth/auth.routes.js';
+
 // @ts-ignore
 import dashboardRoutes from './modules/dashboard/dashboard.routes.js';
+
 // @ts-ignore
 import clientRoutes from './modules/clients/clients.routes.js';
+
 // @ts-ignore
 import financeRoutes from './modules/finance/finance.routes.js';
+
 // @ts-ignore
 import barbershopRoutes from './modules/barbershop/barbershop.routes.js';
+
 // @ts-ignore
 import whatsappRoutes from './modules/whatsapp/whatsapp.routes.js';
+
 // @ts-ignore
 import subscriptionRoutes from './modules/subscriptions/subscriptions.routes.js';
+
 // @ts-ignore
 import adminRoutes from './modules/admin/admin.routes.js';
 
-// Legacy JS imports still in use
+// Legacy JS imports
 // @ts-ignore
 import { stripeWebhook } from './controllers/subscriptionController.js';
-// @ts-ignore
-import { startReminderCron } from './services/cronService.js';
-// @ts-ignore
-import { initWhatsApp } from './services/whatsappClient.js';
+
 // @ts-ignore
 import { initBotOrchestrator } from './bot/botOrchestrator.js';
+
 // @ts-ignore
 import { createEvolutionClient } from './services/whatsapp/client/evolutionClient.js';
+
 // @ts-ignore
 import { getAsaasApiKeyDiagnostics } from './integrations/asaas/client.js';
+
 // @ts-ignore
 import debugRoutes from './routes/debug.js';
 
 dotenv.config();
 
-const requiredEnvVars = ['JWT_SECRET', 'DATABASE_URL'];
+const requiredEnvVars = [
+  'JWT_SECRET',
+  'DATABASE_URL',
+];
 
 for (const envVar of requiredEnvVars) {
   if (!process.env[envVar]) {
-    logger.fatal(`Variável de ambiente ${envVar} não definida!`);
-    process.exit(1);
-  }
-}
-
-const stripeRequiredEnvVars = [
-  'STRIPE_SECRET_KEY',
-  'STRIPE_WEBHOOK_SECRET',
-  'STRIPE_PRICE_ID_BASICO',
-  'STRIPE_PRICE_ID_PROFISSIONAL',
-  'STRIPE_PRICE_ID_PREMIUM',
-];
-
-const stripeOptionalOneTimeEnvVars = [
-  'STRIPE_PRICE_ID_BASICO_ONE_TIME',
-  'STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME',
-  'STRIPE_PRICE_ID_PREMIUM_ONE_TIME',
-];
-
-const stripeBillingEnabled =
-  stripeRequiredEnvVars.some((v) => Boolean(process.env[v])) ||
-  stripeOptionalOneTimeEnvVars.some((v) => Boolean(process.env[v]));
-
-if (stripeBillingEnabled) {
-  const missingStripeEnvVars = stripeRequiredEnvVars.filter((v) => !process.env[v]);
-
-  if (missingStripeEnvVars.length > 0) {
     logger.fatal(
-      { missingEnvVars: missingStripeEnvVars },
-      'Configuração Stripe incompleta para billing híbrido'
+      `Variável de ambiente ${envVar} não definida!`
     );
 
     process.exit(1);
   }
-
-  const oneTimeConfiguredCount = stripeOptionalOneTimeEnvVars.filter(
-    (v) => Boolean(process.env[v])
-  ).length;
-
-  if (
-    oneTimeConfiguredCount > 0 &&
-    oneTimeConfiguredCount < stripeOptionalOneTimeEnvVars.length
-  ) {
-    logger.warn(
-      {
-        missingOneTimePriceEnvVars: stripeOptionalOneTimeEnvVars.filter(
-          (v) => !process.env[v]
-        ),
-      },
-      'Configuração Stripe one-time parcial'
-    );
-  }
 }
 
-if (process.env.ASAAS_BASE_URL && !process.env.ASAAS_API_KEY) {
-  logger.fatal('ASAAS_BASE_URL definido sem ASAAS_API_KEY');
+if (
+  process.env.ASAAS_BASE_URL &&
+  !process.env.ASAAS_API_KEY
+) {
+  logger.fatal(
+    'ASAAS_BASE_URL definido sem ASAAS_API_KEY'
+  );
+
   process.exit(1);
 }
 
@@ -133,10 +118,6 @@ const app = express();
 
 app.set('trust proxy', 1);
 
-// IMPORTANTE:
-// Render injeta automaticamente PORT.
-// Se existir no Render usa ele.
-// Senão usa 5000 localmente.
 const PORT = Number(process.env.PORT || 5000);
 
 const API_V1 = '/api/v1';
@@ -147,20 +128,26 @@ const API_JSON_BODY_LIMIT =
 const WHATSAPP_WEBHOOK_BODY_LIMIT =
   process.env.WHATSAPP_WEBHOOK_BODY_LIMIT || '6mb';
 
-const BLOCKED_WHATSAPP_WEBHOOK_EVENTS = new Set([
-  'messages-set',
-  'messageset',
-]);
+const BLOCKED_WHATSAPP_WEBHOOK_EVENTS =
+  new Set([
+    'messages-set',
+    'messageset',
+  ]);
 
-const normalizeWebhookEventName = (value: string): string =>
+const normalizeWebhookEventName = (
+  value: string
+): string =>
   String(value || '')
     .trim()
-    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(
+      /([a-z0-9])([A-Z])/g,
+      '$1-$2'
+    )
     .toLowerCase()
     .replace(/[._\s]+/g, '-')
     .replace(/-+/g, '-');
 
-// Security
+// SECURITY
 applySecurityMiddleware(app);
 
 // CORS
@@ -172,9 +159,12 @@ const allowedOrigins = [
 ].filter((v): v is string => Boolean(v));
 
 const vercelProjectPrefix =
-  process.env.VERCEL_PROJECT_PREFIX || 'barberpro-saas-2-0';
+  process.env.VERCEL_PROJECT_PREFIX ||
+  'barberpro-saas-2-0';
 
-const isAllowedVercelPreview = (origin: string): boolean => {
+const isAllowedVercelPreview = (
+  origin: string
+): boolean => {
   try {
     const hostname = new URL(origin).hostname;
 
@@ -183,8 +173,11 @@ const isAllowedVercelPreview = (origin: string): boolean => {
     }
 
     return (
-      hostname === `${vercelProjectPrefix}.vercel.app` ||
-      hostname.startsWith(`${vercelProjectPrefix}-`)
+      hostname ===
+        `${vercelProjectPrefix}.vercel.app` ||
+      hostname.startsWith(
+        `${vercelProjectPrefix}-`
+      )
     );
   } catch {
     return false;
@@ -194,7 +187,10 @@ const isAllowedVercelPreview = (origin: string): boolean => {
 const corsOptions: CorsOptions = {
   origin: (
     origin: string | undefined,
-    callback: (err: Error | null, allow?: boolean) => void
+    callback: (
+      err: Error | null,
+      allow?: boolean
+    ) => void
   ) => {
     if (!origin) {
       return callback(null, true);
@@ -209,53 +205,79 @@ const corsOptions: CorsOptions = {
     }
 
     return callback(
-      new Error(`Origin não permitida pelo CORS: ${origin}`)
+      new Error(
+        `Origin não permitida pelo CORS: ${origin}`
+      )
     );
   },
 
   credentials: true,
 
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  methods: [
+    'GET',
+    'POST',
+    'PUT',
+    'PATCH',
+    'DELETE',
+    'OPTIONS',
+  ],
 };
 
 app.use(cors(corsOptions));
 
 app.use(cookieParser());
 
-// Stripe webhook
+// Stripe webhooks
 app.post(
   `${API_V1}/subscriptions/webhook`,
-  express.raw({ type: 'application/json' }),
+  express.raw({
+    type: 'application/json',
+  }),
   stripeWebhook
 );
 
 app.post(
   `${API_V1}/webhook/stripe`,
-  express.raw({ type: 'application/json' }),
+  express.raw({
+    type: 'application/json',
+  }),
   stripeWebhook
 );
 
 app.post(
   `${API_V1}/billing/webhook/stripe`,
-  express.raw({ type: 'application/json' }),
+  express.raw({
+    type: 'application/json',
+  }),
   stripeWebhook
 );
 
 app.post(
   `${API_V1}/billing/webhooks/stripe`,
-  express.raw({ type: 'application/json' }),
+  express.raw({
+    type: 'application/json',
+  }),
   stripeWebhook
 );
 
-// Block heavy WhatsApp events
+// BLOCK heavy WhatsApp events
 app.post(
   `${API_V1}/whatsapp/webhook/:event`,
-  (req: Request, res: Response, next: NextFunction) => {
-    const eventName = normalizeWebhookEventName(
-      req.params['event'] ?? ''
-    );
+  (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    const eventName =
+      normalizeWebhookEventName(
+        req.params['event'] ?? ''
+      );
 
-    if (!BLOCKED_WHATSAPP_WEBHOOK_EVENTS.has(eventName)) {
+    if (
+      !BLOCKED_WHATSAPP_WEBHOOK_EVENTS.has(
+        eventName
+      )
+    ) {
       return next();
     }
 
@@ -283,11 +305,15 @@ app.post(
 
 app.use(
   `${API_V1}/whatsapp/webhook`,
-  express.json({ limit: WHATSAPP_WEBHOOK_BODY_LIMIT })
+  express.json({
+    limit: WHATSAPP_WEBHOOK_BODY_LIMIT,
+  })
 );
 
 app.use(
-  express.json({ limit: API_JSON_BODY_LIMIT })
+  express.json({
+    limit: API_JSON_BODY_LIMIT,
+  })
 );
 
 // Middlewares
@@ -297,7 +323,7 @@ app.use(httpLoggerMiddleware);
 
 app.use(sanitizeMiddleware);
 
-// Rate limit
+// GLOBAL RATE LIMIT
 const webhookPaths = [
   `${API_V1}/subscriptions/webhook`,
   `${API_V1}/webhook/stripe`,
@@ -315,6 +341,22 @@ const apiLimiter = rateLimit({
   standardHeaders: true,
 
   legacyHeaders: false,
+
+  keyGenerator: (req: Request) => {
+    const user = (
+      req as Request & {
+        user?: {
+          barbershopId?: string;
+        };
+      }
+    ).user;
+
+    if (user?.barbershopId) {
+      return `tenant:${user.barbershopId}`;
+    }
+
+    return ipKeyGenerator(req.ip || 'unknown');
+  },
 
   skip: (req: Request) =>
     req.method === 'OPTIONS' ||
@@ -334,12 +376,15 @@ const apiLimiter = rateLimit({
 
 app.use(API_V1, apiLimiter);
 
-// Health
+// HEALTH
 app.get(
   '/health',
-  async (_req: Request, res: Response) => {
+  async (
+    _req: Request,
+    res: Response
+  ) => {
     try {
-      await prisma.$connect()
+      await prisma.$queryRaw`SELECT 1`;
 
       return res.json({
         status: 'ok',
@@ -355,26 +400,70 @@ app.get(
   }
 );
 
-// Routes
+// ROUTES
 app.use(`${API_V1}/auth`, authRoutes);
-app.use(`${API_V1}/dashboard`, dashboardRoutes);
-app.use(`${API_V1}/appointments`, appointmentRoutes);
-app.use(`${API_V1}/clients`, clientRoutes);
-app.use(`${API_V1}/finance`, financeRoutes);
-app.use(`${API_V1}/barbershop`, barbershopRoutes);
-app.use(`${API_V1}/whatsapp`, whatsappRoutes);
-app.use(`${API_V1}/subscriptions`, subscriptionRoutes);
-app.use(`${API_V1}/billing`, billingRoutes);
-app.use(`${API_V1}/admin`, adminRoutes);
-app.use(`${API_V1}/debug`, debugRoutes);
+
+app.use(
+  `${API_V1}/dashboard`,
+  dashboardRoutes
+);
+
+app.use(
+  `${API_V1}/appointments`,
+  appointmentRoutes
+);
+
+app.use(
+  `${API_V1}/clients`,
+  clientRoutes
+);
+
+app.use(
+  `${API_V1}/finance`,
+  financeRoutes
+);
+
+app.use(
+  `${API_V1}/barbershop`,
+  barbershopRoutes
+);
+
+app.use(
+  `${API_V1}/whatsapp`,
+  whatsappRoutes
+);
+
+app.use(
+  `${API_V1}/subscriptions`,
+  subscriptionRoutes
+);
+
+app.use(
+  `${API_V1}/billing`,
+  billingRoutes
+);
+
+app.use(
+  `${API_V1}/admin`,
+  adminRoutes
+);
+
+app.use(
+  `${API_V1}/debug`,
+  debugRoutes
+);
 
 app.use('/debug', debugRoutes);
 
 app.get(
   '/',
-  (_req: Request, res: Response) => {
+  (
+    _req: Request,
+    res: Response
+  ) => {
     return res.json({
-      message: '💈 EasyBarber SaaS API',
+      message:
+        '💈 EasyBarber SaaS API',
       version: '1.0.0',
       status: 'online',
       port: PORT,
@@ -382,21 +471,27 @@ app.get(
   }
 );
 
+// 404
 app.use(
-  (_req: Request, res: Response) => {
+  (
+    _req: Request,
+    res: Response
+  ) => {
     return res.status(404).json({
       success: false,
       error: {
         code: 'NOT_FOUND',
-        message: 'Rota não encontrada',
+        message:
+          'Rota não encontrada',
       },
     });
   }
 );
 
+// ERROR HANDLER
 app.use(errorHandler);
 
-// Graceful shutdown
+// GRACEFUL SHUTDOWN
 let server:
   | ReturnType<typeof app.listen>
   | undefined;
@@ -411,14 +506,18 @@ const gracefulShutdown = async (
 
   if (server) {
     server.close(() => {
-      logger.info('Servidor HTTP encerrado');
+      logger.info(
+        'Servidor HTTP encerrado'
+      );
     });
   }
 
   try {
     await prisma.$disconnect();
 
-    logger.info('Prisma desconectado');
+    logger.info(
+      'Prisma desconectado'
+    );
   } catch (err) {
     logger.error(
       { err },
@@ -437,24 +536,29 @@ process.on('SIGINT', () => {
   void gracefulShutdown('SIGINT');
 });
 
-process.on('unhandledRejection', (reason) => {
-  logger.fatal(
-    { err: reason },
-    'Unhandled Rejection'
-  );
+process.on(
+  'unhandledRejection',
+  (reason) => {
+    logger.fatal(
+      { err: reason },
+      'Unhandled Rejection'
+    );
 
-  process.exit(1);
-});
+    process.exit(1);
+  }
+);
 
+// START SERVER
 const start = async (): Promise<void> => {
   try {
-  await prisma.$connect();
+    // NÃO usar prisma.$connect()
+    // evita problema prepared statement no PgBouncer
 
-      logger.info('Conexão com banco de dados verificada');
-  }     catch (error) {
-      logger.fatal(error, 'Falha ao conectar ao banco');
-        process.exit(1);
-    }
+    await prisma.$queryRaw`SELECT 1`;
+
+    logger.info(
+      'Conexão com banco de dados verificada'
+    );
 
     try {
       initBotOrchestrator(
@@ -466,7 +570,9 @@ const start = async (): Promise<void> => {
       );
     } catch (err) {
       logger.warn(
-        { err: (err as Error)?.message },
+        {
+          err: (err as Error)?.message,
+        },
         'EvolutionClient não inicializado'
       );
     }
@@ -483,7 +589,7 @@ const start = async (): Promise<void> => {
   } catch (error) {
     logger.fatal(
       { err: error },
-      'Falha ao conectar ao banco'
+      'Falha ao iniciar servidor'
     );
 
     process.exit(1);
