@@ -339,7 +339,7 @@ app.get(
   '/health',
   async (_req: Request, res: Response) => {
     try {
-      await prisma.$queryRaw`SELECT 1`;
+      await prisma.$connect()
 
       return res.json({
         status: 'ok',
