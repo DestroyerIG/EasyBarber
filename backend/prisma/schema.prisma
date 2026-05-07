@@ -1,0 +1,404 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Barbershop (tenant + billing state) ────────────────────────────────────
+
+model Barbershop {
+  id                           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                         String    @db.VarChar(255)
+  ownerName                    String    @map("owner_name") @db.VarChar(255)
+  email                        String    @unique @db.VarChar(255)
+  whatsapp                     String    @db.VarChar(20)
+  whatsappInstanceName         String?   @map("whatsapp_instance_name") @db.VarChar(255)
+  cpfCnpj                      String?   @map("cpf_cnpj") @db.VarChar(20)
+
+  // Plano e assinatura
+  plan                         String    @default("basico") @db.VarChar(50)
+  desiredPlan                  String    @default("basico") @map("desired_plan") @db.VarChar(50)
+  subscriptionStatus           String    @default("incomplete") @map("subscription_status") @db.VarChar(50)
+  subscriptionCurrentPeriodStart DateTime? @map("subscription_current_period_start")
+  subscriptionCurrentPeriodEnd   DateTime? @map("subscription_current_period_end")
+  subscriptionCancelAtPeriodEnd  Boolean   @default(false) @map("subscription_cancel_at_period_end")
+  currentPeriodStart           DateTime? @map("current_period_start")
+  currentPeriodEnd             DateTime? @map("current_period_end")
+  nextDueDate                  DateTime? @map("next_due_date")
+  lastPaymentDate              DateTime? @map("last_payment_date")
+  canceledAt                   DateTime? @map("canceled_at")
+  subscriptionUpdatedAt        DateTime? @default(now()) @map("subscription_updated_at")
+
+  // Stripe
+  stripeCustomerId             String?   @unique @map("stripe_customer_id") @db.VarChar(255)
+  stripeSubscriptionId         String?   @unique @map("stripe_subscription_id") @db.VarChar(255)
+  stripePriceId                String?   @map("stripe_price_id") @db.VarChar(255)
+  stripePaymentMode            String?   @map("stripe_payment_mode") @db.VarChar(20)
+
+  // Provider genérico (Asaas / Stripe / coupon)
+  provider                     String?   @db.VarChar(20)
+  asaasCustomerId              String?   @map("asaas_customer_id") @db.VarChar(255)
+  providerCustomerId           String?   @map("provider_customer_id") @db.VarChar(255)
+  providerSubscriptionId       String?   @map("provider_subscription_id") @db.VarChar(255)
+  providerPaymentId            String?   @map("provider_payment_id") @db.VarChar(255)
+  paymentMethod                String?   @map("payment_method") @db.VarChar(20)
+
+  // Metadata
+  metadata                     Json      @default("{}")
+  instagramHandle              String?   @map("instagram_handle") @db.VarChar(255)
+  active                       Boolean   @default(true)
+  suspendedAt                  DateTime? @map("suspended_at")
+  suspendedReason              String?   @map("suspended_reason") @db.VarChar(255)
+  createdAt                    DateTime  @default(now()) @map("created_at")
+  updatedAt                    DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  // Relations
+  users                User[]
+  barbers              Barber[]
+  services             Service[]
+  clients              Client[]
+  appointments         Appointment[]
+  earnings             Earning[]
+  expenses             Expense[]
+  subscriptionEvents   SubscriptionEvent[]
+  billingWebhookEvents BillingWebhookEvent[]
+  billingPayments      BillingPayment[]
+  auditLogsAsActor     AuditLog[]          @relation("ActorBarbershop")
+  auditLogsAsTarget    AuditLog[]          @relation("TargetBarbershop")
+  whatsappSessions     WhatsappSession[]
+  whatsappBotConfig    WhatsappBotConfig?
+  whatsappRatings      WhatsappRating[]
+  settings             BarbershopSettings?
+
+  @@map("barbershops")
+}
+
+// ─── User ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id                          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  barbershopId                String    @map("barbershop_id") @db.Uuid
+  email                       String    @unique @db.VarChar(255)
+  passwordHash                String    @map("password_hash") @db.Char(60)
+  role                        String    @default("tenant_admin") @db.VarChar(20)
+  blocked                     Boolean   @default(false)
+  emailVerified               Boolean   @default(false) @map("email_verified")
+  emailVerificationTokenHash  String?   @map("email_verification_token_hash") @db.Char(64)
+  emailVerificationExpiresAt  DateTime? @map("email_verification_expires_at")
+  emailVerifiedAt             DateTime? @map("email_verified_at")
+  verificationSentAt          DateTime? @map("verification_sent_at")
+  blockedAt                   DateTime? @map("blocked_at")
+  blockedReason               String?   @map("blocked_reason") @db.VarChar(255)
+  createdAt                   DateTime  @default(now()) @map("created_at")
+  updatedAt                   DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  barbershop     Barbershop     @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
+  refreshTokens  RefreshToken[]
+  auditLogsAsActor  AuditLog[] @relation("ActorUser")
+  auditLogsAsTarget AuditLog[] @relation("TargetUser")
+
+  @@map("users")
+}
+
+// ─── RefreshToken ─────────────────────────────────────────────────────────────
+
+model RefreshToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+// ─── Barber ────────────────────────────────────────────────────────────────────
+
+model Barber {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  barbershopId String   @map("barbershop_id") @db.Uuid
+  name         String   @db.VarChar(255)
+  photo        String?  @db.Text
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  barbershop   Barbershop    @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+
+  @@map("barbers")
+}
+
+// ─── Service ───────────────────────────────────────────────────────────────────
+
+model Service {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  barbershopId    String   @map("barbershop_id") @db.Uuid
+  name            String   @db.VarChar(255)
+  price           Decimal  @db.Decimal(10, 2)
+  durationMinutes Int      @map("duration_minutes")
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
+
+  barbershop   Barbershop    @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+
+  @@map("services")
+}
+
+// ─── Client ────────────────────────────────────────────────────────────────────
+
+model Client {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  barbershopId String   @map("barbershop_id") @db.Uuid
+  name         String   @db.VarChar(255)
+  phone        String   @db.VarChar(20)
+  email        String?  @db.VarChar(255)
+  notes        String?  @db.Text
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  barbershop   Barbershop    @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+
+  @@map("clients")
+}
+
+// ─── Appointment ───────────────────────────────────────────────────────────────
+
+model Appointment {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  barbershopId String   @map("barbershop_id") @db.Uuid
+  clientId     String   @map("client_id") @db.Uuid
+  barberId     String   @map("barber_id") @db.Uuid
+  serviceId    String   @map("service_id") @db.Uuid
+  date         DateTime @db.Date
+  time         DateTime @db.Time(6)
+  status       String   @default("confirmado") @db.VarChar(20)
+  reminderSent Boolean  @default(false) @map("reminder_sent")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  barbershop     Barbershop      @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
+  client         Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  barber         Barber          @relation(fields: [barberId], references: [id], onDelete: Cascade)
+  service        Service         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  earning        Earning?
+  whatsappRating WhatsappRating?
+
+  @@map("appointments")
+}
+
+// ─── Earning ───────────────────────────────────────────────────────────────────
+
+model Earning {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  barbershopId  String   @map("barbershop_id") @db.Uuid
+  appointmentId String?  @unique @map("appointment_id") @db.Uuid
+  amount        Decimal  @db.Decimal(10, 2)
+  date          DateTime @db.Date
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  barbershop  Barbershop   @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+
+  @@map("earnings")
+}
+
+// ─── Expense ───────────────────────────────────────────────────────────────────
+
+model Expense {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  barbershopId String   @map("barbershop_id") @db.Uuid
+  description  String   @db.VarChar(255)
+  category     String   @db.VarChar(50)
+  amount       Decimal  @db.Decimal(10, 2)
+  date         DateTime @db.Date
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  barbershop Barbershop @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
+
+  @@map("expenses")
+}
+
+// ─── Billing ───────────────────────────────────────────────────────────────────
+
+model SubscriptionEvent {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stripeEventId String   @unique @map("stripe_event_id") @db.VarChar(255)
+  eventType    String    @map("event_type") @db.VarChar(255)
+  barbershopId String?   @map("barbershop_id") @db.Uuid
+  payload      Json?
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  barbershop Barbershop? @relation(fields: [barbershopId], references: [id], onDelete: SetNull)
+
+  @@map("subscription_events")
+}
+
+model BillingWebhookEvent {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider     String    @db.VarChar(20)
+  eventId      String    @map("event_id") @db.VarChar(255)
+  eventType    String    @map("event_type") @db.VarChar(255)
+  barbershopId String?   @map("barbershop_id") @db.Uuid
+  payload      Json?
+  processedAt  DateTime? @map("processed_at")
+  status       String    @default("processed") @db.VarChar(20)
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  barbershop Barbershop? @relation(fields: [barbershopId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, eventId])
+  @@map("billing_webhook_events")
+}
+
+model BillingPayment {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  barbershopId           String    @map("barbershop_id") @db.Uuid
+  provider               String    @db.VarChar(20)
+  providerPaymentId      String    @map("provider_payment_id") @db.VarChar(255)
+  providerSubscriptionId String?   @map("provider_subscription_id") @db.VarChar(255)
+  paymentMethod          String?   @map("payment_method") @db.VarChar(20)
+  externalStatus         String?   @map("external_status") @db.VarChar(60)
+  internalStatus         String?   @map("internal_status") @db.VarChar(50)
+  amount                 Decimal?  @db.Decimal(10, 2)
+  dueDate                DateTime? @map("due_date")
+  paidAt                 DateTime? @map("paid_at")
+  pixCopyPaste           String?   @map("pix_copy_paste") @db.Text
+  qrCode                 String?   @map("qr_code") @db.Text
+  metadata               Json?
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  barbershop Barbershop @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerPaymentId])
+  @@map("billing_payments")
+}
+
+// ─── Coupon ────────────────────────────────────────────────────────────────────
+
+model Coupon {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code          String    @unique @db.VarChar(50)
+  description   String?   @db.VarChar(255)
+  discountType  String    @map("discount_type") @db.VarChar(10)
+  discountValue Decimal   @map("discount_value") @db.Decimal(10, 2)
+  maxUses       Int?      @map("max_uses")
+  currentUses   Int       @default(0) @map("current_uses")
+  validUntil    DateTime? @map("valid_until") @db.Timestamptz()
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@map("coupons")
+}
+
+// ─── Audit ─────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actionType        String    @map("action_type") @db.VarChar(50)
+  actorUserId       String?   @map("actor_user_id") @db.Uuid
+  actorBarbershopId String?   @map("actor_barbershop_id") @db.Uuid
+  targetUserId      String?   @map("target_user_id") @db.Uuid
+  targetBarbershopId String?  @map("target_barbershop_id") @db.Uuid
+  resourceType      String?   @map("resource_type") @db.VarChar(50)
+  resourceId        String?   @map("resource_id") @db.Uuid
+  details           Json?
+  ipAddress         String?   @map("ip_address") @db.VarChar(45)
+  userAgent         String?   @map("user_agent") @db.Text
+  status            String    @default("success") @db.VarChar(20)
+  errorMessage      String?   @map("error_message") @db.Text
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  actorUser         User?       @relation("ActorUser", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorBarbershop   Barbershop? @relation("ActorBarbershop", fields: [actorBarbershopId], references: [id], onDelete: SetNull)
+  targetUser        User?       @relation("TargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  targetBarbershop  Barbershop? @relation("TargetBarbershop", fields: [targetBarbershopId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
+
+// ─── WhatsApp ──────────────────────────────────────────────────────────────────
+
+model WhatsappSession {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  phone        String   @db.VarChar(20)
+  barbershopId String   @map("barbershop_id") @db.Uuid
+  step         String   @db.VarChar(50)
+  data         Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  barbershop Barbershop @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
+
+  @@map("whatsapp_sessions")
+}
+
+model WhatsappBotConfig {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  barbershopId          String   @unique @map("barbershop_id") @db.Uuid
+  welcomeMessage        String?  @map("welcome_message") @db.Text
+  askNameMessage        String?  @map("ask_name_message") @db.Text
+  attendantMessage      String?  @map("attendant_message") @db.Text
+  confirmationMessage   String?  @map("confirmation_message") @db.Text
+  reminderMessage       String?  @map("reminder_message") @db.Text
+  invalidOptionMessage  String?  @map("invalid_option_message") @db.Text
+  sessionExpiredMessage String?  @map("session_expired_message") @db.Text
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at")
+
+  barbershop Barbershop @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
+
+  @@map("whatsapp_bot_config")
+}
+
+model WhatsappRating {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  barbershopId  String   @map("barbershop_id") @db.Uuid
+  appointmentId String   @unique @map("appointment_id") @db.Uuid
+  rating        Int
+  comment       String?  @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  barbershop  Barbershop  @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@map("whatsapp_ratings")
+}
+
+// ─── BarbershopSettings ────────────────────────────────────────────────────────
+
+model BarbershopSettings {
+  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  barbershopId             String   @unique @map("barbershop_id") @db.Uuid
+  contactPhone             String?  @map("contact_phone") @db.VarChar(30)
+  address                  String?  @db.VarChar(255)
+  openingTime              DateTime @default(dbgenerated("'09:00:00'::time")) @map("opening_time") @db.Time(6)
+  closingTime              DateTime @default(dbgenerated("'20:00:00'::time")) @map("closing_time") @db.Time(6)
+  slotIntervalMinutes      Int      @default(30) @map("slot_interval_minutes")
+  diasAbertos              String[] @default(["seg", "ter", "qua", "qui", "sex"]) @map("dias_abertos")
+  allowWalkins             Boolean  @default(true) @map("allow_walkins")
+  autoConfirmAppointments  Boolean  @default(false) @map("auto_confirm_appointments")
+  emailReminders           Boolean  @default(true) @map("email_reminders")
+  whatsappReminders        Boolean  @default(true) @map("whatsapp_reminders")
+  googleCalendarEnabled    Boolean  @default(false) @map("google_calendar_enabled")
+  customWebhookUrl         String?  @map("custom_webhook_url") @db.Text
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @default(now()) @updatedAt @map("updated_at")
+
+  barbershop Barbershop @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
+
+  @@map("barbershop_settings")
+}

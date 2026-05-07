@@ -1,43 +1,32 @@
-# Deploy
+# Deploy — EasyBarber SaaS 2.0
 
-Guia técnico para publicar o EasyBarber SaaS 2.0 em produção.
+Guia de produção. Stack: Node.js 20 + Express + Prisma + PostgreSQL (Supabase) + Vercel (frontend) + Render (backend).
 
-## Requisitos
+---
+
+## Pré-requisitos
 
 - Node.js 20+
-- npm 10+
-- PostgreSQL 14+; recomendado 16 com backup automático.
-- HTTPS no frontend e backend.
-- Supabase Auth configurado.
-- Variáveis de billing e WhatsApp conforme módulos usados.
+- PostgreSQL 14+ (recomendado: Supabase)
+- Supabase Auth configurado
 
-## Variáveis de Ambiente
+---
 
-### Backend Obrigatórias
+## Variáveis de Ambiente — Backend
+
+### Obrigatórias
 
 ```env
-DATABASE_URL=postgresql://user:password@host:5432/barberpro
-JWT_SECRET=chave_forte_com_32_ou_mais_caracteres
+DATABASE_URL=postgresql://user:password@host:5432/barberpro?sslmode=require
+JWT_SECRET=chave_forte_32_chars_minimo
 NODE_ENV=production
 PORT=5000
-FRONTEND_URL=https://seu-frontend.com
-APP_URL=https://seu-frontend.com
+FRONTEND_URL=https://seu-frontend.vercel.app
+APP_URL=https://seu-frontend.vercel.app
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_ANON_KEY=<anon-key>
 SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
-AUTH_SUPABASE_REDIRECT_TO=https://seu-frontend.com/auth/confirm
-```
-
-`AUTH_PROVIDER_MODE` é obsoleto. O fluxo atual usa Supabase Auth obrigatoriamente.
-
-### Backend Opcionais
-
-```env
-LOG_LEVEL=info
-AUTH_COOKIE_DOMAIN=.seudominio.com
-API_JSON_BODY_LIMIT=1mb
-WHATSAPP_WEBHOOK_BODY_LIMIT=6mb
-VERCEL_PROJECT_PREFIX=barberpro-saas-2-0
+AUTH_SUPABASE_REDIRECT_TO=https://seu-frontend.vercel.app/auth/confirm
 ```
 
 ### Stripe
@@ -48,151 +37,200 @@ STRIPE_WEBHOOK_SECRET=whsec_xxx
 STRIPE_PRICE_ID_BASICO=price_xxx
 STRIPE_PRICE_ID_PROFISSIONAL=price_xxx
 STRIPE_PRICE_ID_PREMIUM=price_xxx
-STRIPE_PRICE_ID_BASICO_ONE_TIME=price_xxx
-STRIPE_PRICE_ID_PROFISSIONAL_ONE_TIME=price_xxx
-STRIPE_PRICE_ID_PREMIUM_ONE_TIME=price_xxx
 ```
 
-### Asaas Pix
+### Asaas (opcional)
 
 ```env
 ASAAS_API_KEY=<api-key>
 ASAAS_BASE_URL=https://api.asaas.com/v3
-ASAAS_WEBHOOK_TOKEN=<token-webhook>
-ASAAS_BILLING_DESCRIPTION=EasyBarber - Plano {plan} ({barbershop})
-ASAAS_TIMEOUT_MS=12000
+ASAAS_WEBHOOK_TOKEN=<token>
 ```
 
-### WhatsApp Evolution API
+### WhatsApp Evolution API (opcional)
 
 ```env
-WHATSAPP_PROVIDER=evolution
 EVOLUTION_API_URL=https://sua-evolution.com
 EVOLUTION_API_KEY=<api-key>
-EVOLUTION_INSTANCE_NAME=easybarber
-EVOLUTION_WEBHOOK_URL=https://sua-api.com/api/v1/whatsapp/webhook
-EVOLUTION_API_TIMEOUT_MS=10000
-WHATSAPP_SESSION_TIMEOUT_MS=1800000
-WHATSAPP_INSTANCE_BARBERSHOP_MAP=
+EVOLUTION_WEBHOOK_URL=https://sua-api.render.com/api/v1/whatsapp/webhook
 ```
 
-`WHATSAPP_INSTANCE_BARBERSHOP_MAP` é fallback legado. A fonte de verdade deve ser `barbershops.whatsapp_instance_name`.
-
-### Frontend
+### Opcionais
 
 ```env
-BACKEND_API_URL=https://sua-api.com/api/v1
-NEXT_PUBLIC_API_URL=https://sua-api.com/api/v1
-NEXT_PUBLIC_APP_URL=https://seu-frontend.com
+LOG_LEVEL=info
+API_JSON_BODY_LIMIT=1mb
+WHATSAPP_WEBHOOK_BODY_LIMIT=6mb
+VERCEL_PROJECT_PREFIX=barberpro-saas-2-0
+OTEL_ENABLED=false
+```
+
+---
+
+## Variáveis de Ambiente — Frontend (Vercel)
+
+```env
+BACKEND_API_URL=https://sua-api.render.com/api/v1
+NEXT_PUBLIC_API_URL=https://sua-api.render.com/api/v1
+NEXT_PUBLIC_APP_URL=https://seu-frontend.vercel.app
 NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
-NEXT_PUBLIC_WHATSAPP_CONTACT_URL=https://wa.me/55...
 ```
 
-## Banco em Produção
+---
 
-1. Faça backup.
-2. Aplique `database.sql` apenas em banco novo.
-3. Aplique migrations em ordem até `migration_v19_business_days_and_intervals.sql`.
-4. Valide tabelas críticas.
+## Render (Backend)
 
-Comandos:
+### Build & Start Commands
+
+```
+Build Command:  npm install && npx prisma generate && npm run build
+Start Command:  npx prisma migrate deploy && npm start
+```
+
+### Ordem de execução no deploy
 
 ```bash
-pg_dump "$DATABASE_URL" > backup_barberpro_$(date +%Y%m%d_%H%M%S).sql
+npm install                    # instala dependências
+npx prisma generate            # gera Prisma Client
+npm run build                  # tsc → dist/
+npx prisma migrate deploy      # aplica migrations pendentes (seguro, idempotente)
+npm start                      # node dist/server.js
 ```
+
+### Banco novo (primeira vez)
 
 ```bash
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v16_supabase_only_auth.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v17_subscription_access_gate.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v18_asaas_customer_id.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/src/config/migration_v19_business_days_and_intervals.sql
+# Na máquina local com DATABASE_URL apontando para produção:
+npm run db:sync                # detecta estado e aplica baseline ou migrate deploy
 ```
 
-Para banco novo, consulte POSTGRESQL_SETUP.md para a lista completa desde `database.sql`.
-
-## Build e Start
-
-Backend:
+### Banco existente (migração de pg bruto para Prisma)
 
 ```bash
-cd backend
-npm ci
-npm start
+# Na máquina local:
+npm run db:sync                # detecta banco legado → aplica baseline sem executar SQL
 ```
 
-Frontend:
+### Migrations futuras
 
 ```bash
-cd frontend
-npm ci
-npm run build
-npm start
+# Local (gera migration file):
+npm run db:migrate -- --name descricao_da_mudanca
+
+# Produção (aplica automaticamente via Start Command acima):
+npx prisma migrate deploy
 ```
+
+---
+
+## Vercel (Frontend)
+
+- Framework: Next.js
+- Build Command: `npm run build` (padrão)
+- Output Directory: `.next` (padrão)
+- Variáveis de ambiente: configurar no painel Vercel → Settings → Environment Variables
+
+Nenhuma mudança de configuração necessária pelo Prisma — o Prisma roda apenas no backend (Render).
+
+---
+
+## Supabase
+
+- Supabase é **somente Auth** neste projeto.
+- O banco PostgreSQL é acoplado diretamente via `DATABASE_URL` no Render.
+- **Não** use o banco interno do Supabase para os dados da aplicação; use `DATABASE_URL` apontando para o Postgres do Supabase (connection pooler via pgBouncer recomendado).
+
+### Connection String Supabase
+
+```
+postgresql://postgres.[project-ref]:[password]@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require&pgbouncer=true
+```
+
+O Prisma requer `?pgbouncer=true&connection_limit=1` quando usa pgBouncer em modo transaction.
+
+---
 
 ## Webhooks
 
 ### Stripe
 
-Configure um ou mais endpoints aceitos:
-
-- `https://sua-api.com/api/v1/billing/webhooks/stripe`
-- `https://sua-api.com/api/v1/billing/webhook/stripe`
-- `https://sua-api.com/api/v1/subscriptions/webhook`
-
-Use o signing secret em `STRIPE_WEBHOOK_SECRET`.
+Endpoints aceitos:
+```
+POST https://sua-api.render.com/api/v1/billing/webhooks/stripe
+POST https://sua-api.render.com/api/v1/billing/webhook/stripe
+```
+Signing secret: `STRIPE_WEBHOOK_SECRET`
 
 ### Asaas
 
-Endpoint:
+```
+POST https://sua-api.render.com/api/v1/billing/webhooks/asaas
+```
+Token: `ASAAS_WEBHOOK_TOKEN`
 
-- `https://sua-api.com/api/v1/billing/webhooks/asaas`
+### Evolution API (WhatsApp)
 
-Configure o mesmo token em `ASAAS_WEBHOOK_TOKEN`.
-
-### Evolution API
-
-Endpoint:
-
-- `https://sua-api.com/api/v1/whatsapp/webhook`
-- Opcional por evento: `https://sua-api.com/api/v1/whatsapp/webhook/:event`
-
-Eventos recomendados:
-
-- `MESSAGES_UPSERT`
-- `CONNECTION_UPDATE`
-
-Evite `MESSAGES_SET` em produção por payload alto.
-
-## Smoke Test
-
-```bash
-curl https://sua-api.com/health
-curl https://sua-api.com/api/v1/auth/me
+```
+POST https://sua-api.render.com/api/v1/whatsapp/webhook
 ```
 
-Valide no navegador:
+Eventos recomendados: `MESSAGES_UPSERT`, `CONNECTION_UPDATE`.
+Evite `MESSAGES_SET` — payload pesado, bloqueado automaticamente.
 
-- Cadastro e confirmação de e-mail.
-- Login.
-- Dashboard.
-- Status de assinatura.
-- Checkout cartão/Pix.
-- Webhook de billing em ambiente sandbox antes de produção real.
-- Conexão WhatsApp.
+---
+
+## Comandos de Banco
+
+| Comando | Uso |
+|---|---|
+| `npm run db:sync` | Primeiro deploy — detecta estado e sincroniza |
+| `npm run db:migrate` | Criar nova migration (desenvolvimento) |
+| `npm run db:migrate:deploy` | Aplicar migrations em produção |
+| `npm run db:migrate:status` | Ver migrations pendentes |
+| `npm run db:generate` | Regenerar Prisma Client após mudança no schema |
+| `npm run db:studio` | Abrir Prisma Studio (visualizar dados) |
+| `npm run typecheck` | Verificar tipagem TypeScript |
+
+---
+
+## Smoke Test Pós-Deploy
+
+```bash
+curl https://sua-api.render.com/health
+# Espera: {"status":"ok","db":"connected"}
+
+curl https://sua-api.render.com/api/v1/auth/me
+# Espera: 401 (sem token)
+```
+
+Validação manual:
+- [ ] Cadastro + confirmação e-mail
+- [ ] Login
+- [ ] Dashboard carrega dados
+- [ ] Checkout cartão (Stripe sandbox)
+- [ ] Checkout PIX (Asaas sandbox)
+- [ ] Webhook Stripe recebido (stripe listen)
+- [ ] Status de assinatura atualiza
+
+---
 
 ## Rollback
 
-- Aplicação: volte para a release anterior.
-- Banco: restaure backup se a migration aplicada causou incompatibilidade.
-- Billing: pause webhooks no provedor se houver duplicidade ou erro crítico.
+- **Aplicação**: redeploy da versão anterior no Render
+- **Banco**: `prisma migrate resolve --rolled-back <migration_name>` (não executa SQL — apenas desfaz o registro)
+- **Schema**: restaure backup antes de reverter migration destrutiva
+
+---
 
 ## Riscos Comuns
 
-- Banco sem v16-v19.
-- Supabase redirect diferente de `AUTH_SUPABASE_REDIRECT_TO`.
-- CORS sem `FRONTEND_URL` correto.
-- Cookies com domínio incorreto.
-- Webhook Stripe com secret errado.
-- Webhook Asaas sem token ou endpoint incorreto.
-- Evolution API configurada para eventos pesados.
+| Risco | Solução |
+|---|---|
+| `DATABASE_URL` sem `?sslmode=require` | Adicionar ao connection string |
+| `pgBouncer` sem `?pgbouncer=true` | Prisma falha em transaction mode |
+| `prisma generate` não rodou no build | Adicionar ao Build Command |
+| `prisma migrate deploy` em banco inconsistente | Rodar `db:sync` primeiro |
+| CORS sem `FRONTEND_URL` | Configurar env var no Render |
+| Supabase redirect diferente de `AUTH_SUPABASE_REDIRECT_TO` | Sincronizar URLs |
+| Webhook Stripe com secret errado | Verificar `STRIPE_WEBHOOK_SECRET` |

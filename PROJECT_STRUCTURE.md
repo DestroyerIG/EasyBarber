@@ -1,179 +1,153 @@
-# Estrutura do Projeto
+# Project Structure — EasyBarber SaaS 2.0
 
-Visão técnica do layout atual do repositório e das responsabilidades principais.
+Stack: Node.js 20 + Express 4 + TypeScript + Prisma 5 + PostgreSQL + Next.js (frontend).
 
-## Raiz
+---
 
-```text
-.
-├── backend/
-├── frontend/
-├── docker-compose.yml
-├── package.json
-├── README.md
-├── QUICK_START.md
-├── INSTALL.md
-├── POSTGRESQL_SETUP.md
-├── API_DOCS.md
-├── DEPLOY.md
-└── TROUBLESHOOTING.md
+## Backend (`backend/`)
+
 ```
-
-## Backend
-
-```text
 backend/
-├── Dockerfile
-├── check-db.js
-├── jest.config.js
-├── package.json
-└── src/
-    ├── __tests__/
-    ├── config/
-    ├── controllers/
-    ├── integrations/
-    ├── middleware/
-    ├── repositories/
-    ├── routes/
-    ├── scripts/
-    ├── services/
-    ├── utils/
-    ├── validators/
-    └── server.js
+├── prisma/
+│   ├── schema.prisma              # Schema único — fonte de verdade do banco
+│   └── migrations/
+│       ├── 0_init/                # Baseline do banco legado
+│       └── legacy/                # Histórico SQL antigo (não executar)
+├── src/
+│   ├── server.ts                  # Entry point principal (TypeScript)
+│   ├── telemetry.ts               # OpenTelemetry (opcional via OTEL_ENABLED)
+│   ├── types/
+│   │   ├── domain.ts              # Interfaces de domínio + Zod schemas
+│   │   └── express.d.ts           # Augmentação do Request (req.user, req.requestId)
+│   ├── config/
+│   │   ├── prisma.ts              # Prisma Client singleton
+│   │   ├── stripe.ts              # Stripe Client
+│   │   ├── authProviderMode.ts    # Config do modo de auth
+│   │   └── planPermissions.ts     # Mapa de permissões por plano
+│   ├── middleware/
+│   │   ├── auth.ts                # JWT + subscription enforcement
+│   │   ├── rbac.ts                # Role-based access control
+│   │   ├── validate.ts            # Zod request validation
+│   │   ├── subscriptionGuard.ts   # Feature gating por plano
+│   │   └── errorHandler.ts        # Global error handler
+│   ├── utils/
+│   │   ├── errors.ts              # AppError + subclasses tipadas
+│   │   ├── logger.ts              # Pino logger estruturado
+│   │   ├── response.ts            # sendSuccess / sendCreated helpers
+│   │   ├── roles.ts               # Role constants
+│   │   ├── date.ts                # Date helpers
+│   │   ├── cpfCnpj.ts             # CPF/CNPJ validation
+│   │   ├── whatsapp.ts            # WhatsApp message utils
+│   │   └── whatsappGreeting.ts    # Greeting generation
+│   ├── modules/                   # Módulos TypeScript + Prisma
+│   │   ├── appointments/          # controller, service, repository, routes, types
+│   │   ├── billing/               # controller, repository, routes, types
+│   │   ├── auth/                  # routes (re-exporta routes/auth.ts)
+│   │   ├── dashboard/             # routes (re-exporta routes/dashboard.ts)
+│   │   ├── clients/               # routes (re-exporta routes/clients.ts)
+│   │   ├── finance/               # routes (re-exporta routes/finance.ts)
+│   │   ├── barbershop/            # routes (re-exporta routes/barbershop.ts)
+│   │   ├── whatsapp/              # routes (re-exporta routes/whatsapp.ts)
+│   │   ├── subscriptions/         # routes (re-exporta routes/subscriptions.ts)
+│   │   ├── admin/                 # routes (re-exporta routes/admin.ts)
+│   │   └── core/
+│   │       ├── index.ts           # Re-exports de utils, config, middleware
+│   │       └── middleware/
+│   │           ├── requestId.ts   # UUID por request
+│   │           ├── httpLogger.ts  # HTTP access log estruturado
+│   │           ├── sanitize.ts    # XSS sanitization
+│   │           └── security.ts    # Helmet + rate limit por tenant
+│   ├── repositories/              # 100% Prisma
+│   │   ├── adminRepository.ts
+│   │   ├── auditRepository.ts
+│   │   ├── authRepository.ts
+│   │   ├── barberRepository.ts
+│   │   ├── barbershopSettingsRepository.ts
+│   │   ├── clientRepository.ts
+│   │   ├── dashboardRepository.ts
+│   │   ├── financeRepository.ts
+│   │   ├── serviceRepository.ts
+│   │   └── subscriptionRepository.ts
+│   ├── controllers/               # TypeScript
+│   ├── services/                  # TypeScript
+│   │   ├── billing/               # billingProviderFactory, providers (Stripe/Asaas)
+│   │   └── whatsapp/              # WhatsApp services (alto volume de lógica)
+│   ├── routes/                    # TypeScript
+│   ├── integrations/
+│   │   └── asaas/                 # Asaas HTTP client
+│   ├── bot/
+│   │   └── botOrchestrator.ts     # WhatsApp bot orchestrator
+│   ├── validators/schemas/        # Zod schemas
+│   └── scripts/
+│       ├── db-sync.ts             # Sincroniza banco com Prisma (idempotente)
+│       └── seedSystemUsers.ts     # Seed de usuários de sistema
+├── tsconfig.json                  # strict + noUncheckedIndexedAccess + moduleResolution: bundler
+└── package.json
 ```
 
-### `backend/src/config`
+---
 
-- `database.js`: pool PostgreSQL.
-- `database.sql`: schema base.
-- `migration_v2.sql` até `migration_v19_business_days_and_intervals.sql`: evoluções de schema.
-- `authProviderMode.js`: legado; Supabase Auth é obrigatório no fluxo atual.
-- `planPermissions.js`: matriz de features por plano/status.
-- `stripe.js`: cliente e helpers Stripe.
+## Fluxo de Dados
 
-### `backend/src/controllers`
-
-Traduzem HTTP para serviços de domínio:
-
-- Auth, dashboard, agendamentos, clientes, financeiro, serviços, barbeiros.
-- Configurações da barbearia/conta.
-- Assinaturas/billing.
-- Admin de plataforma.
-
-### `backend/src/routes`
-
-Rotas sob `/api/v1`:
-
-- `/auth`
-- `/dashboard`
-- `/appointments`
-- `/clients`
-- `/finance`
-- `/barbershop`
-- `/whatsapp`
-- `/subscriptions`
-- `/billing`
-- `/admin`
-- `/debug`
-
-Rotas `/api/*` sem `/v1` são redirecionadas para `/api/v1/*`.
-
-### `backend/src/services`
-
-Contém regras de negócio e integrações de domínio:
-
-- `authService.js` e `supabaseAuthService.js`.
-- `billingService.js`, `stripeCheckoutService.js` e `services/billing/*`.
-- `integrations/asaas/*` para Pix.
-- `whatsapp/*` e `evolutionApiService.js`.
-- `featureAccessService.js` para plano/status.
-- `cronService.js` para lembretes.
-
-### `backend/src/repositories`
-
-Acesso a PostgreSQL por domínio. A camada service deve preferir repositories em vez de SQL espalhado.
-
-### `backend/src/validators`
-
-Schemas Zod para validação de payloads, params e queries.
-
-### `backend/src/__tests__`
-
-Testes Jest/Supertest cobrindo auth, CRUDs, billing, Asaas, WhatsApp e regras de acesso.
-
-## Frontend
-
-```text
-frontend/
-├── Dockerfile
-├── next.config.js
-├── package.json
-├── tailwind.config.js
-├── tsconfig.json
-└── src/
-    ├── app/
-    ├── assets/
-    ├── components/
-    ├── contexts/
-    ├── hooks/
-    ├── lib/
-    ├── styles/
-    ├── types/
-    └── utils/
+```
+Request
+  → server.ts (requestId, httpLogger, sanitize, helmet, rate-limit)
+  → modules/*/routes.ts
+  → controllers/*.ts
+  → services/*.ts
+  → repositories/*.ts (100% Prisma)
+  → Prisma Client → PostgreSQL
 ```
 
-### `frontend/src/app`
+---
 
-Next.js App Router:
+## Acesso a Dados
 
-- Públicas: `/`, `/login`, `/cadastro`, `/verificar-email`, `/esqueci-senha`, `/pagamento`.
-- Auth callback: `/auth/confirm`.
-- Dashboard tenant: `/dashboard/*`.
-- Admin plataforma: `/admin/*`.
-- BFF/proxy interno: `/api/*`.
+| Camada | Tecnologia |
+|---|---|
+| Repositories | Prisma Client API |
+| Modules (appointments, billing) | Prisma Client API |
+| Services / Controllers / Routes | Prisma via repositories |
 
-### `frontend/src/components`
+---
 
-Componentes de domínio e UI:
+## Migrations
 
-- Dashboard, agenda, clientes, financeiro, serviços/barbeiros.
-- Billing, WhatsApp, auth, admin e componentes reutilizáveis.
+Não há SQL manual. Todas mudanças de schema via:
 
-### `frontend/src/lib`
+```bash
+npm run db:migrate -- --name descricao   # cria migration (dev)
+npm run db:migrate:deploy               # aplica em produção
+npm run db:sync                         # primeiro deploy (detecta estado do banco)
+```
 
-Clientes e helpers:
+Schema: `prisma/schema.prisma` — edite aqui para qualquer mudança de banco.
 
-- `api.ts`: cliente HTTP.
-- `adminApi.ts`: chamadas admin.
-- `billing.ts`, `plans.ts`, `subscriptionAccess.ts`.
-- `supabase/*`: cliente Supabase frontend.
-- `server/*`: BFF/proxy.
+---
 
-## Scripts Principais
+## Frontend (`frontend/`)
 
-Raiz:
+Next.js App Router. Consome a API REST do backend.
 
-- `npm run install:all`
-- `npm run dev:backend`
-- `npm run dev:frontend`
-- `npm run seed:auth-admin`
-- `npm run seed:system-users`
+---
 
-Backend:
+## Serviços Externos
 
-- `npm run dev`
-- `npm start`
-- `npm test`
-- `npm run seed:system-users`
-- `npm run migrate:legacy-auth`
+| Serviço | Uso |
+|---|---|
+| Supabase Auth | Autenticação (somente Auth — banco PostgreSQL é externo) |
+| Stripe | Pagamento via cartão |
+| Asaas | Pagamento via PIX/boleto |
+| Evolution API | WhatsApp Business (bot de agendamento) |
 
-Frontend:
+---
 
-- `npm run dev`
-- `npm run build`
-- `npm start`
-- `npm run lint`
+## Testes
 
-## Observação Sobre Bootstrap
+Vitest 2.x + Supertest. Arquivos em `src/__tests__/`. Configuração em `vitest.config.ts`.
 
-`docker-compose.yml` e `setup.ps1` aplicam automaticamente migrations até `migration_v15.sql`. Para o schema mais recente, aplique manualmente `migration_v16_supabase_only_auth.sql`, `migration_v17_subscription_access_gate.sql`, `migration_v18_asaas_customer_id.sql` e `migration_v19_business_days_and_intervals.sql` em bancos criados por esses fluxos.
+```bash
+npm test          # run once
+npm run test:watch  # watch mode
+npm run test:cov    # coverage
+```

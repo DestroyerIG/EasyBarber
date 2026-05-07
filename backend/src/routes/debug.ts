@@ -1,0 +1,313 @@
+import express, { Request, Response, NextFunction } from 'express';
+// @ts-ignore
+import {
+  asaasClient,
+  getAsaasApiKeyDiagnostics,
+  rawAsaasRequest,
+  removeEmptyFields,
+} from '../integrations/asaas/client.js';
+
+const router = express.Router();
+
+const extractProviderErrors = (error: unknown): unknown[] => {
+  const err = error as Record<string, unknown> | null | undefined;
+  const candidates = [
+    (err?.response as Record<string, unknown> | undefined)?.data as Record<string, unknown> | undefined,
+    (err?.details as Record<string, unknown> | undefined)?.payload as Record<string, unknown> | undefined,
+    err?.providerData as Record<string, unknown> | undefined,
+  ].map((obj) => (obj as Record<string, unknown> | undefined)?.errors);
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+
+  return [];
+};
+
+const resolveProviderStatus = (error: unknown): number | null => {
+  const err = error as Record<string, unknown> | null | undefined;
+  return (
+    (err?.providerStatus as number | undefined) ??
+    ((err?.response as Record<string, unknown> | undefined)?.status as number | undefined) ??
+    ((err?.details as Record<string, unknown> | undefined)?.statusCode as number | undefined) ??
+    (err?.statusCode as number | undefined) ??
+    null
+  );
+};
+
+const isInvalidAccessToken = (error: unknown, errors: unknown[] = []): boolean => {
+  const err = error as Record<string, unknown> | null | undefined;
+  return (
+    String(err?.code ?? '').toUpperCase() === 'ASAAS_INVALID_ACCESS_TOKEN' ||
+    errors.some((item) => String((item as Record<string, unknown> | undefined)?.code ?? '').toLowerCase() === 'invalid_access_token')
+  );
+};
+
+const pickRelevantHeaders = (headers: Record<string, unknown> = {}): Record<string, unknown> => {
+  const relevant = [
+    'content-type',
+    'x-cache',
+    'x-amz-cf-id',
+    'x-amz-cf-pop',
+    'x-request-id',
+    'cf-cache-status',
+    'server',
+    'date',
+  ];
+  const normalizedEntries = Object.entries(headers).map(([key, value]) => [
+    String(key).toLowerCase(),
+    value,
+  ]);
+
+  return Object.fromEntries(
+    normalizedEntries.filter(([key]) => relevant.includes(key as string))
+  );
+};
+
+const maskCpfCnpj = (value: unknown): string => {
+  const digits = String(value ?? '').replace(/\D+/g, '');
+  if (digits.length <= 4) {
+    return '***';
+  }
+
+  return `${digits.slice(0, 3)}***${digits.slice(-2)}`;
+};
+
+const addDays = (referenceDate: Date, days: number): Date => {
+  const date = new Date(referenceDate);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date;
+};
+
+const toDateYYYYMMDD = (value: Date): string => value.toISOString().slice(0, 10);
+
+const buildFieldTypes = (payload: Record<string, unknown> = {}): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(payload).map(([key, value]) => [key, typeof value])
+  );
+
+const ensureDebugEnabled = (req: Request, res: Response, next: NextFunction): void => {
+  if (process.env.ENABLE_DEBUG_ROUTES !== 'true') {
+    res.status(404).json({
+      success: false,
+      error: {
+        code: 'NOT_FOUND',
+        message: `Rota ${req.method} ${req.path} não encontrada`,
+      },
+    });
+    return;
+  }
+
+  const debugToken = process.env.DEBUG_TOKEN;
+  if (!debugToken) {
+    res.status(404).json({
+      success: false,
+      error: {
+        code: 'NOT_FOUND',
+        message: `Rota ${req.method} ${req.path} não encontrada`,
+      },
+    });
+    return;
+  }
+
+  if (req.get('x-debug-token') !== debugToken) {
+    res.status(403).json({
+      success: false,
+      error: {
+        code: 'FORBIDDEN',
+        message: 'Token de diagnóstico inválido',
+      },
+    });
+    return;
+  }
+
+  next();
+};
+
+// Rota temporária de diagnóstico. Remover após resolver integração Asaas.
+router.get('/asaas-auth', ensureDebugEnabled, async (_req: Request, res: Response) => {
+  const diagnostics = getAsaasApiKeyDiagnostics();
+  const baseUrl = process.env.ASAAS_BASE_URL || 'https://api.asaas.com/v3';
+  const testBase = {
+    method: 'GET',
+    path: '/customers',
+    query: { limit: 1 },
+  };
+
+  try {
+    await asaasClient.get('/customers', { query: { limit: 1 } });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Autenticação Asaas OK',
+      diagnostics,
+      baseUrl,
+      test: {
+        ...testBase,
+        ok: true,
+        statusCode: 200,
+        code: null,
+        message: 'Autenticação Asaas OK',
+        errors: [],
+      },
+    });
+  } catch (error) {
+    const errors = extractProviderErrors(error);
+    const providerStatus = resolveProviderStatus(error);
+
+    if (isInvalidAccessToken(error, errors)) {
+      return res.status(503).json({
+        success: false,
+        code: 'ASAAS_INVALID_ACCESS_TOKEN',
+        message: 'A chave ASAAS_API_KEY não foi aceita pelo Asaas.',
+        errors,
+        diagnostics,
+        baseUrl,
+        test: {
+          ...testBase,
+          ok: false,
+          statusCode: providerStatus,
+          code: 'ASAAS_INVALID_ACCESS_TOKEN',
+          message: 'A chave ASAAS_API_KEY não foi aceita pelo Asaas.',
+          errors,
+        },
+      });
+    }
+
+    const err = error as Record<string, unknown> | null | undefined;
+    return res.status(502).json({
+      success: false,
+      code: err?.code ?? 'ASAAS_DEBUG_AUTH_ERROR',
+      message: err?.message ?? 'Falha ao testar autenticação Asaas.',
+      providerStatus,
+      errors,
+      diagnostics,
+      baseUrl,
+      test: {
+        ...testBase,
+        ok: false,
+        statusCode: providerStatus,
+        code: err?.code ?? 'ASAAS_DEBUG_AUTH_ERROR',
+        message: err?.message ?? 'Falha ao testar autenticação Asaas.',
+        errors,
+      },
+    });
+  }
+});
+
+// Rota temporária de diagnóstico. Remover após resolver POST /customers no Asaas.
+router.get('/asaas/customer-test', ensureDebugEnabled, async (_req: Request, res: Response) => {
+  const payload = {
+    name: 'Cliente Teste EasyBarber',
+    cpfCnpj: '70596090404',
+    mobilePhone: '83996311811',
+  };
+
+  try {
+    const result = await rawAsaasRequest('POST', '/customers', { body: payload });
+    const empty400 = result.status === 400 && result.bodyRaw === '';
+
+    return res.status(200).json({
+      success: result.ok,
+      provider: 'asaas',
+      method: 'POST',
+      path: '/customers',
+      status: result.status,
+      headers: pickRelevantHeaders(result.headers),
+      bodyRaw: result.bodyRaw,
+      bodyJson: result.bodyJson,
+      payload: {
+        ...payload,
+        cpfCnpj: maskCpfCnpj(payload.cpfCnpj),
+      },
+      conclusion: empty400
+        ? 'Teste mínimo falhou com 400 vazio: provável bloqueio externo/Asaas/CloudFront/conta/API.'
+        : result.ok
+          ? 'Teste mínimo funcionou: compare com o payload real do checkout.'
+          : 'Teste mínimo falhou com body: veja status, headers e body retornados pelo Asaas.',
+    });
+  } catch (error) {
+    const err = error as Record<string, unknown> | null | undefined;
+    return res.status(502).json({
+      success: false,
+      provider: 'asaas',
+      method: 'POST',
+      path: '/customers',
+      status: null,
+      headers: {},
+      bodyRaw: '',
+      bodyJson: null,
+      payload: {
+        ...payload,
+        cpfCnpj: maskCpfCnpj(payload.cpfCnpj),
+      },
+      conclusion: 'Falha de comunicação antes de receber resposta do Asaas.',
+      error: {
+        code: err?.code ?? 'ASAAS_DEBUG_CUSTOMER_TEST_ERROR',
+        message: err?.message ?? 'Falha ao testar criação de customer Asaas.',
+      },
+    });
+  }
+});
+
+// Rota temporária de diagnóstico. Remover após resolver POST /payments PIX no Asaas.
+router.get('/asaas/pix-minimal', ensureDebugEnabled, async (_req: Request, res: Response) => {
+  const now = new Date();
+  const payload = removeEmptyFields({
+    customer: 'cus_000173482205',
+    billingType: 'PIX',
+    value: Number(Number(10).toFixed(2)),
+    dueDate: toDateYYYYMMDD(addDays(now, 1)),
+  }) as Record<string, unknown>;
+  const fieldTypes = buildFieldTypes(payload);
+
+  try {
+    const result = await rawAsaasRequest('POST', '/payments', { body: payload });
+    const empty400 = result.status === 400 && result.bodyRaw === '';
+
+    return res.status(200).json({
+      success: result.ok,
+      provider: 'asaas',
+      method: 'POST',
+      path: '/payments',
+      status: result.status,
+      headers: pickRelevantHeaders(result.headers),
+      bodyRaw: result.bodyRaw,
+      bodyJson: result.bodyJson,
+      payload,
+      fieldTypes,
+      serverCurrentDate: now.toISOString(),
+      dueDate: payload.dueDate,
+      conclusion: empty400
+        ? 'Payload mínimo Pix correto ainda falhou com 400 vazio: provável bloqueio WAF/CloudFront/infra do Asaas.'
+        : result.ok
+          ? 'Payload mínimo Pix funcionou: reintroduza description e externalReference gradualmente.'
+          : 'Payload mínimo Pix falhou com body: veja status, headers e body retornados pelo Asaas.',
+    });
+  } catch (error) {
+    const err = error as Record<string, unknown> | null | undefined;
+    return res.status(502).json({
+      success: false,
+      provider: 'asaas',
+      method: 'POST',
+      path: '/payments',
+      status: null,
+      headers: {},
+      bodyRaw: '',
+      bodyJson: null,
+      payload,
+      fieldTypes,
+      serverCurrentDate: now.toISOString(),
+      dueDate: payload.dueDate,
+      conclusion: 'Falha de comunicação antes de receber resposta do Asaas.',
+      error: {
+        code: err?.code ?? 'ASAAS_DEBUG_PIX_MINIMAL_ERROR',
+        message: err?.message ?? 'Falha ao testar cobrança Pix mínima no Asaas.',
+      },
+    });
+  }
+});
+
+export default router;

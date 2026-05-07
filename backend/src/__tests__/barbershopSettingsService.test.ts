@@ -1,0 +1,233 @@
+import { vi, describe, it, beforeEach, expect } from 'vitest';
+
+const mockFindAccountUserById = vi.hoisted(() => vi.fn());
+const mockFindAccountProfileByUserId = vi.hoisted(() => vi.fn());
+const mockUpdateAccountProfile = vi.hoisted(() => vi.fn());
+const mockFindOtherUserByEmail = vi.hoisted(() => vi.fn());
+const mockGetClient = vi.hoisted(() => vi.fn());
+const mockUpdateUserEmailById = vi.hoisted(() => vi.fn());
+
+vi.mock('../repositories/barbershopSettingsRepository.js', () => ({
+  barbershopSettingsRepository: {
+    findAccountUserById: mockFindAccountUserById,
+    findAccountProfileByUserId: mockFindAccountProfileByUserId,
+    updateAccountProfile: mockUpdateAccountProfile,
+  },
+}));
+
+vi.mock('../repositories/authRepository.js', () => ({
+  authRepository: {
+    findOtherUserByEmail: mockFindOtherUserByEmail,
+    getClient: mockGetClient,
+  },
+}));
+
+vi.mock('../services/supabaseAuthService.js', () => ({
+  supabaseAuthService: {
+    updateUserEmailById: mockUpdateUserEmailById,
+  },
+}));
+
+vi.mock('../utils/logger.js', () => ({
+  default: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  },
+}));
+
+const { barbershopSettingsService } = await import('../services/barbershopSettingsService.js');
+const { ConflictError } = await import('../utils/errors.js');
+
+describe('barbershopSettingsService.updateAccountProfile', () => {
+  const baseAuthUser = {
+    barbershopId: 'shop-1',
+    userId: 'user-1',
+    role: 'tenant_admin',
+  };
+
+  const basePayload = {
+    barbershopName: '  Barbearia Central  ',
+    ownerName: '  Joao da Silva  ',
+    whatsapp: '(11) 99876-5432',
+    cpfCnpj: '705.960.904-04',
+    email: '  Novo@Email.com ',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockFindAccountUserById.mockResolvedValue({
+      userId: 'user-1',
+      barbershopId: 'shop-1',
+      role: 'tenant_admin',
+      email: 'atual@email.com',
+      supabaseUserId: 'sb-user-1',
+      passwordHash: 'hash',
+      authProvider: 'supabase',
+      emailVerified: true,
+      plan: 'profissional',
+      barbershopName: 'Barbearia Central',
+      subscriptionStatus: 'active',
+      subscriptionCurrentPeriodEnd: null,
+    });
+
+    mockFindAccountProfileByUserId.mockResolvedValue({
+      barbershopName: 'Barbearia Atual',
+      ownerName: 'Responsavel Atual',
+      whatsapp: '11911112222',
+      cpfCnpj: '70596090404',
+      email: 'atual@email.com',
+    });
+
+    mockFindOtherUserByEmail.mockResolvedValue(null);
+    mockUpdateUserEmailById.mockResolvedValue({
+      userId: 'sb-user-1',
+      email: 'novo@email.com',
+    });
+
+    mockUpdateAccountProfile.mockResolvedValue({
+      barbershopName: 'Barbearia Central',
+      ownerName: 'Joao da Silva',
+      whatsapp: '11998765432',
+      cpfCnpj: '70596090404',
+      email: 'novo@email.com',
+    });
+
+    mockGetClient.mockResolvedValue({
+      query: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    });
+  });
+
+  it('normaliza payload e atualiza auth externo antes do commit local', async () => {
+    const dbClient = {
+      query: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    mockGetClient.mockResolvedValue(dbClient);
+
+    const result = await barbershopSettingsService.updateAccountProfile(baseAuthUser, basePayload);
+
+    expect(mockFindOtherUserByEmail).toHaveBeenCalledWith('novo@email.com', 'user-1');
+    expect(mockUpdateUserEmailById).toHaveBeenCalledWith('sb-user-1', 'novo@email.com');
+    expect(mockUpdateAccountProfile).toHaveBeenCalledWith(
+      'shop-1',
+      'user-1',
+      {
+        barbershopName: 'Barbearia Central',
+        ownerName: 'Joao da Silva',
+        whatsapp: '11998765432',
+        cpfCnpj: '70596090404',
+        email: 'novo@email.com',
+        emailChanged: true,
+      },
+      dbClient
+    );
+    expect(dbClient.query).toHaveBeenNthCalledWith(1, 'BEGIN');
+    expect(dbClient.query).toHaveBeenNthCalledWith(2, 'COMMIT');
+    expect(result.profile).toEqual(
+      expect.objectContaining({
+        email: 'novo@email.com',
+        cpfCnpj: '70596090404',
+      })
+    );
+  });
+
+  it('salva normalmente quando apenas outros campos mudam e o e-mail permanece igual', async () => {
+    const dbClient = {
+      query: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+
+    mockGetClient.mockResolvedValue(dbClient);
+    mockUpdateAccountProfile.mockResolvedValue({
+      barbershopName: 'Barbearia Central',
+      ownerName: 'Joao da Silva',
+      whatsapp: '11999998888',
+      cpfCnpj: '70596090404',
+      email: 'atual@email.com',
+    });
+
+    const result = await barbershopSettingsService.updateAccountProfile(baseAuthUser, {
+      ...basePayload,
+      whatsapp: '(11) 99999-8888',
+      email: '  atual@email.com  ',
+    });
+
+    expect(mockFindOtherUserByEmail).not.toHaveBeenCalled();
+    expect(mockUpdateUserEmailById).not.toHaveBeenCalled();
+    expect(mockUpdateAccountProfile).toHaveBeenCalledWith(
+      'shop-1',
+      'user-1',
+      expect.objectContaining({
+        whatsapp: '11999998888',
+        email: 'atual@email.com',
+        emailChanged: false,
+      }),
+      dbClient
+    );
+    expect(result.profile.email).toBe('atual@email.com');
+  });
+
+  it('trata como mesmo e-mail quando muda apenas casing', async () => {
+    const dbClient = {
+      query: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+
+    mockGetClient.mockResolvedValue(dbClient);
+
+    await barbershopSettingsService.updateAccountProfile(baseAuthUser, {
+      ...basePayload,
+      email: '  ATUAL@EMAIL.COM ',
+    });
+
+    expect(mockFindOtherUserByEmail).not.toHaveBeenCalled();
+    expect(mockUpdateUserEmailById).not.toHaveBeenCalled();
+    expect(mockUpdateAccountProfile).toHaveBeenCalledWith(
+      'shop-1',
+      'user-1',
+      expect.objectContaining({
+        email: 'atual@email.com',
+        emailChanged: false,
+      }),
+      dbClient
+    );
+  });
+
+  it('retorna 409 quando o e-mail já pertence a outro usuário', async () => {
+    mockFindOtherUserByEmail.mockResolvedValue({
+      id: 'user-2',
+      email: 'novo@email.com',
+    });
+
+    await expect(
+      barbershopSettingsService.updateAccountProfile(baseAuthUser, basePayload)
+    ).rejects.toBeInstanceOf(ConflictError);
+
+    expect(mockUpdateUserEmailById).not.toHaveBeenCalled();
+    expect(mockUpdateAccountProfile).not.toHaveBeenCalled();
+  });
+
+  it('restaura o e-mail no auth externo quando o update local falha após sincronização', async () => {
+    const dbClient = {
+      query: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    const dbError = new Error('violacao inesperada');
+
+    mockGetClient.mockResolvedValue(dbClient);
+    mockUpdateAccountProfile.mockRejectedValue(dbError);
+
+    await expect(
+      barbershopSettingsService.updateAccountProfile(baseAuthUser, basePayload)
+    ).rejects.toThrow('violacao inesperada');
+
+    expect(dbClient.query).toHaveBeenCalledWith('BEGIN');
+    expect(dbClient.query).toHaveBeenCalledWith('ROLLBACK');
+    expect(mockUpdateUserEmailById).toHaveBeenNthCalledWith(1, 'sb-user-1', 'novo@email.com');
+    expect(mockUpdateUserEmailById).toHaveBeenNthCalledWith(2, 'sb-user-1', 'atual@email.com');
+  });
+});

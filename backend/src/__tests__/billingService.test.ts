@@ -1,0 +1,373 @@
+import { vi, describe, it, expect, beforeEach } from 'vitest';
+
+const mockSubscriptionRepository = vi.hoisted(() => ({
+  getBarbershopBillingContext: vi.fn(),
+  updateSubscriptionState: vi.fn(),
+  upsertBillingPayment: vi.fn(),
+  findBillingPaymentByProviderPaymentId: vi.fn(),
+}));
+
+const mockBillingProviderFactory = vi.hoisted(() => ({
+  resolveProviderByPaymentMethod: vi.fn(),
+  getProvider: vi.fn(),
+}));
+
+const mockAsaasService = vi.hoisted(() => ({
+  resolveBillingPeriodFromPayment: vi.fn(),
+}));
+
+const mockAsaasMapper = vi.hoisted(() => ({
+  mapAsaasPaymentToPixData: vi.fn(),
+  extractBarbershopIdFromExternalReference: vi.fn(),
+}));
+
+const mockLogger = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+}));
+
+vi.mock('../repositories/subscriptionRepository.js', () => ({
+  subscriptionRepository: mockSubscriptionRepository,
+}));
+
+vi.mock('../services/billing/billingProviderFactory.js', () => ({
+  billingProviderFactory: mockBillingProviderFactory,
+}));
+
+vi.mock('../integrations/asaas/service.js', () => ({
+  asaasService: mockAsaasService,
+}));
+
+vi.mock('../integrations/asaas/mapper.js', () => ({
+  asaasMapper: mockAsaasMapper,
+}));
+
+vi.mock('../utils/logger.js', () => ({
+  default: mockLogger,
+}));
+
+const { billingService } = await import('../services/billingService.js');
+
+describe('billingService', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockLogger.info.mockReset();
+    mockLogger.warn.mockReset();
+    mockLogger.error.mockReset();
+    mockLogger.debug.mockReset();
+
+    mockAsaasService.resolveBillingPeriodFromPayment.mockReturnValue({
+      periodStart: null,
+      periodEnd: null,
+    });
+
+    mockAsaasMapper.mapAsaasPaymentToPixData.mockReturnValue({
+      qrCode: null,
+      pixCopyPaste: null,
+      expiresAt: null,
+      dueDate: null,
+      confirmedDate: null,
+    });
+
+    mockAsaasMapper.extractBarbershopIdFromExternalReference.mockReturnValue('tenant-3');
+  });
+
+  it('creates Stripe checkout session preserving provider response', async () => {
+    const stripeProvider = {
+      createSubscription: vi.fn().mockResolvedValue({
+        provider: 'stripe',
+        sessionId: 'cs_test_123',
+        checkoutUrl: 'https://checkout.stripe.com/test',
+      }),
+    };
+
+    mockSubscriptionRepository.getBarbershopBillingContext.mockResolvedValue({
+      id: 'tenant-1',
+      plan: 'basico',
+      desired_plan: 'premium',
+    });
+
+    mockBillingProviderFactory.resolveProviderByPaymentMethod.mockReturnValue('stripe');
+    mockBillingProviderFactory.getProvider.mockReturnValue(stripeProvider);
+
+    const result = await billingService.createCheckoutSession('tenant-1', 'premium', 'card');
+
+    expect(result).toEqual({
+      provider: 'stripe',
+      sessionId: 'cs_test_123',
+      checkoutUrl: 'https://checkout.stripe.com/test',
+      plan: 'premium',
+    });
+
+    expect(stripeProvider.createSubscription).toHaveBeenCalledWith({
+      barbershopId: 'tenant-1',
+      plan: 'premium',
+      paymentMethod: 'card',
+    });
+  });
+
+  it('creates Pix checkout session via Asaas and stores billing state', async () => {
+    const asaasProvider = {
+      createSubscription: vi.fn().mockResolvedValue({
+        customer: { id: 'cus_asaas' },
+        subscription: null,
+        payment: {
+          id: 'pay_asaas',
+          status: 'PENDING',
+          dueDate: '2026-04-20',
+          value: 99.9,
+          invoiceUrl: 'https://asaas.test/invoice/pay_asaas',
+          bankSlipUrl: 'https://asaas.test/boleto/pay_asaas',
+          externalReference: 'barbershop:tenant-2:plan:profissional',
+        },
+        pixData: {
+          qrCode: 'data:image/png;base64,abc',
+          pixCopyPaste: '000201...',
+          expiresAt: '2026-04-20T23:59:00.000Z',
+        },
+      }),
+      mapExternalStatusToInternalStatus: vi.fn().mockReturnValue('pending'),
+    };
+
+    mockSubscriptionRepository.getBarbershopBillingContext.mockResolvedValue({
+      id: 'tenant-2',
+      name: 'Barbearia Teste',
+      owner_name: 'Joao',
+      email: 'teste@barber.com',
+      whatsapp: '11999999999',
+      plan: 'basico',
+      desired_plan: 'profissional',
+    });
+
+    mockSubscriptionRepository.updateSubscriptionState.mockResolvedValue({
+      id: 'tenant-2',
+      subscription_status: 'pending',
+    });
+
+    mockSubscriptionRepository.upsertBillingPayment.mockResolvedValue({ id: 'bp_1' });
+
+    mockBillingProviderFactory.resolveProviderByPaymentMethod.mockReturnValue('asaas');
+    mockBillingProviderFactory.getProvider.mockReturnValue(asaasProvider);
+
+    const result = await billingService.createCheckoutSession('tenant-2', 'profissional', 'pix');
+
+    expect(result).toEqual({
+      provider: 'asaas',
+      paymentId: 'pay_asaas',
+      subscriptionId: null,
+      invoiceUrl: 'https://asaas.test/invoice/pay_asaas',
+      bankSlipUrl: 'https://asaas.test/boleto/pay_asaas',
+      status: 'pending',
+      plan: 'profissional',
+      pixQrCode: 'data:image/png;base64,abc',
+      qrCode: 'data:image/png;base64,abc',
+      pixCopyPaste: '000201...',
+      expiresAt: '2026-04-20T23:59:00.000Z',
+    });
+
+    expect(mockSubscriptionRepository.updateSubscriptionState).toHaveBeenCalledWith(
+      'tenant-2',
+      expect.objectContaining({
+        provider: 'asaas',
+        providerCustomerId: 'cus_asaas',
+        providerSubscriptionId: null,
+        providerPaymentId: 'pay_asaas',
+        paymentMethod: 'pix',
+        subscriptionStatus: 'pending',
+      }),
+      null
+    );
+
+    expect(mockSubscriptionRepository.upsertBillingPayment).toHaveBeenCalled();
+  });
+
+  it('keeps initial Pix checkout pending even if provider status maps to active before webhook', async () => {
+    const asaasProvider = {
+      createSubscription: vi.fn().mockResolvedValue({
+        customer: { id: 'cus_asaas_active' },
+        subscription: null,
+        payment: {
+          id: 'pay_asaas_active',
+          status: 'CONFIRMED',
+          dueDate: '2026-04-20',
+          value: 99.9,
+          externalReference: 'barbershop:tenant-active-pix:plan:profissional',
+        },
+        pixData: {
+          qrCode: null,
+          pixCopyPaste: '000201...',
+          expiresAt: '2026-04-20T23:59:00.000Z',
+        },
+      }),
+      mapExternalStatusToInternalStatus: vi.fn().mockReturnValue('active'),
+    };
+
+    mockSubscriptionRepository.getBarbershopBillingContext.mockResolvedValue({
+      id: 'tenant-active-pix',
+      name: 'Barbearia Teste',
+      owner_name: 'Joao',
+      email: 'teste@barber.com',
+      whatsapp: '11999999999',
+      plan: 'basico',
+      desired_plan: 'profissional',
+    });
+    mockSubscriptionRepository.updateSubscriptionState.mockResolvedValue({
+      id: 'tenant-active-pix',
+      subscription_status: 'pending',
+    });
+    mockSubscriptionRepository.upsertBillingPayment.mockResolvedValue({ id: 'bp_active_pix' });
+    mockBillingProviderFactory.resolveProviderByPaymentMethod.mockReturnValue('asaas');
+    mockBillingProviderFactory.getProvider.mockReturnValue(asaasProvider);
+
+    const result = await billingService.createCheckoutSession(
+      'tenant-active-pix',
+      'profissional',
+      'pix'
+    );
+
+    expect(result.status).toBe('pending');
+    expect(mockSubscriptionRepository.updateSubscriptionState).toHaveBeenCalledWith(
+      'tenant-active-pix',
+      expect.objectContaining({
+        subscriptionStatus: 'pending',
+        providerPaymentId: 'pay_asaas_active',
+        providerSubscriptionId: null,
+      }),
+      null
+    );
+  });
+
+  it('maps Asaas customer create failures to controlled Pix checkout error', async () => {
+    const asaasProvider = {
+      createSubscription: vi.fn().mockRejectedValue({
+        code: 'ASAAS_CUSTOMER_CREATE_ERROR',
+        statusCode: 400,
+        providerStatus: 400,
+        providerData: {
+          method: 'POST',
+          path: '/customers',
+          statusCode: 400,
+          payload: {
+            errors: [
+              {
+                code: 'invalid_field',
+                description: 'Campo inválido',
+              },
+            ],
+          },
+          errors: [
+            {
+              code: 'invalid_field',
+              description: 'Campo inválido',
+            },
+          ],
+        },
+      }),
+      mapExternalStatusToInternalStatus: vi.fn(),
+    };
+
+    mockSubscriptionRepository.getBarbershopBillingContext.mockResolvedValue({
+      id: 'tenant-asaas-error-1',
+      name: 'Barbearia Teste',
+      owner_name: 'Joao',
+      email: 'teste@barber.com',
+      whatsapp: '11999999999',
+      plan: 'basico',
+      desired_plan: 'profissional',
+    });
+
+    mockBillingProviderFactory.resolveProviderByPaymentMethod.mockReturnValue('asaas');
+    mockBillingProviderFactory.getProvider.mockReturnValue(asaasProvider);
+
+    await expect(
+      billingService.createCheckoutSession('tenant-asaas-error-1', 'profissional', 'pix')
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'ASAAS_CUSTOMER_CREATE_ERROR',
+      message:
+        'Não foi possível criar o cliente no Asaas. Verifique os dados cadastrais e tente novamente.',
+      details: {
+        traceCode: expect.any(String),
+      },
+    });
+
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'billing_checkout_error',
+        barbershopId: 'tenant-asaas-error-1',
+        paymentMethod: 'pix',
+        code: 'ASAAS_CUSTOMER_CREATE_ERROR',
+      }),
+      'Falha ao criar checkout de billing'
+    );
+  });
+
+  it('refreshes Pix payment status and updates local subscription state', async () => {
+    const asaasProvider = {
+      getPaymentStatus: vi.fn().mockResolvedValue({
+        payment: {
+          id: 'pay_refresh',
+          subscription: 'sub_refresh',
+          customer: 'cus_refresh',
+          status: 'CONFIRMED',
+          confirmedDate: '2026-04-16',
+          dueDate: '2026-04-16',
+          value: 49.9,
+          externalReference: 'barbershop:tenant-3:plan:basico',
+        },
+        pixData: {
+          qrCode: null,
+          pixCopyPaste: '000201...',
+          expiresAt: '2026-04-16T23:59:59.000Z',
+          dueDate: '2026-04-16T00:00:00.000Z',
+          confirmedDate: '2026-04-16T12:00:00.000Z',
+        },
+      }),
+      mapExternalStatusToInternalStatus: vi.fn().mockReturnValue('active'),
+    };
+
+    mockBillingProviderFactory.getProvider.mockReturnValue(asaasProvider);
+
+    mockSubscriptionRepository.findBillingPaymentByProviderPaymentId.mockResolvedValue({
+      provider: 'asaas',
+      provider_payment_id: 'pay_refresh',
+      barbershop_id: 'tenant-3',
+    });
+
+    mockSubscriptionRepository.getBarbershopBillingContext.mockResolvedValue({
+      id: 'tenant-3',
+      plan: 'basico',
+      provider_subscription_id: 'sub_refresh',
+      provider_customer_id: 'cus_refresh',
+    });
+
+    mockSubscriptionRepository.updateSubscriptionState.mockResolvedValue({
+      id: 'tenant-3',
+      subscription_status: 'active',
+    });
+
+    mockSubscriptionRepository.upsertBillingPayment.mockResolvedValue({ id: 'bp_refresh' });
+
+    const result = await billingService.getPixPaymentStatus('tenant-3', 'pay_refresh');
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: 'asaas',
+        paymentId: 'pay_refresh',
+        subscriptionId: 'sub_refresh',
+        status: 'active',
+      })
+    );
+
+    expect(mockSubscriptionRepository.updateSubscriptionState).toHaveBeenCalledWith(
+      'tenant-3',
+      expect.objectContaining({
+        subscriptionStatus: 'active',
+        provider: 'asaas',
+      }),
+      null
+    );
+  });
+});

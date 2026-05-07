@@ -31,15 +31,16 @@ O projeto é dividido em:
 Backend:
 
 - Node.js 20+
+- TypeScript (strict)
 - Express 4
-- PostgreSQL com `pg`
+- PostgreSQL via Prisma 5
 - Zod
 - JWT
 - Supabase JS
 - Pino
 - Stripe
 - Asaas via HTTP
-- Jest/Supertest
+- Vitest/Supertest
 
 Frontend:
 
@@ -77,14 +78,19 @@ O frontend nunca chama Evolution API, Stripe secret ou Asaas diretamente.
 
 ```text
 backend/
+  prisma/
+    schema.prisma  # fonte de verdade do banco
+    migrations/    # migrations Prisma (baseline + incrementais)
   src/
-    config/        # database.sql e migrations até v19
+    config/        # Prisma client, Stripe client, plan permissions
     controllers/
     integrations/  # Asaas
     middleware/
-    repositories/
+    modules/       # módulos TS completos (appointments, billing, etc.)
+    repositories/  # 100% Prisma
     routes/
     services/
+    types/         # interfaces de domínio + Zod schemas
     validators/
     __tests__/
 
@@ -155,12 +161,16 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
 
 ## Banco
 
-Banco novo exige:
+Banco novo exige aplicar o schema Prisma:
 
-- `backend/src/config/database.sql`
-- migrations v3 até `migration_v19_business_days_and_intervals.sql`
+```bash
+cd backend
+npm run db:migrate:deploy   # produção
+# ou
+npm run db:migrate          # desenvolvimento
+```
 
-Consulte POSTGRESQL_SETUP.md para a ordem completa e comandos por sistema operacional.
+Schema em `prisma/schema.prisma`. Consulte DEPLOY.md para fluxo completo de banco em produção.
 
 ## Scripts
 
