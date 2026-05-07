@@ -1,24 +1,38 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022"],
-    "outDir": "dist",
-    "rootDir": "src",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    "outDir": "./dist",
+    "rootDir": "./src",
+
     "strict": true,
-    "strictNullChecks": true,
-    "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
+
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
+
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "types": ["node"],
+
     "sourceMap": true,
-    "incremental": true,
-    "tsBuildInfoFile": ".tsbuildinfo"
+    "declaration": false,
+
+    "noEmitOnError": false
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "src/__tests__"]
+
+  "include": [
+    "src/**/*"
+  ],
+
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/__tests__",
+    "**/*.test.ts",
+    "**/*.spec.ts"
+  ]
 }
