@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { prisma } from '../config/prisma.js';
 import { Prisma } from '@prisma/client';
 import { authRepository } from '../repositories/authRepository.js';
+import { refreshTokenRepository } from '../repositories/refreshTokenRepository.js';
 import { subscriptionRepository } from '../repositories/subscriptionRepository.js';
 
 const SUPABASE_PAGE_SIZE = 200;
@@ -356,7 +357,7 @@ const ensureInternalUser = async ({
     throw new Error(`Falha ao persistir usuario interno: ${account.email}`);
   }
 
-  await authRepository.revokeUserRefreshTokens(null, user.id);
+  await refreshTokenRepository.revokeUserRefreshTokens(user.id);
 
   return {
     ...user,

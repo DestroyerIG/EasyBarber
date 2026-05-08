@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { authRepository } from '../repositories/authRepository.js';
+import { refreshTokenRepository } from '../repositories/refreshTokenRepository.js';
 import { AppError, ConflictError, UnauthorizedError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 import { normalizeRole } from '../utils/roles.js';
@@ -195,9 +196,9 @@ const normalizeEmail = (email: unknown): string =>
 const generateRefreshToken = async (dbClient: unknown, userId: string): Promise<string> => {
   const token = crypto.randomBytes(64).toString('hex');
   const tokenHash = hashToken(token);
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-  await authRepository.saveRefreshToken(dbClient, { userId, tokenHash, expiresAt });
+  await refreshTokenRepository.saveRefreshToken({ userId, tokenHash, expiresAt });
   return token;
 };
 
@@ -837,7 +838,7 @@ const createInternalSessionForConfirmedUser = async (
     throw new UnauthorizedError('Usuário não encontrado');
   }
 
-  await authRepository.revokeUserRefreshTokens(null, user.id as string);
+  await refreshTokenRepository.revokeUserRefreshTokens(user.id as string);
 
   const normalizedRole = normalizeRole(user.role as string);
   const accessToken = generateAccessToken({
@@ -1078,7 +1079,7 @@ export const authService = {
         );
       }
 
-      await authRepository.revokeUserRefreshTokens(null, user.id as string);
+      await refreshTokenRepository.revokeUserRefreshTokens(user.id as string);
 
       const accessToken = generateAccessToken({
         userId: user.id as string,
@@ -1128,7 +1129,7 @@ export const authService = {
     }
 
     const tokenHash = hashToken(refreshCookieToken);
-    const row = await authRepository.findValidRefreshToken(tokenHash) as Record<string, unknown> | null;
+    const row = await refreshTokenRepository.findValidRefreshToken(tokenHash) as Record<string, unknown> | null;
 
     if (!row) {
       throw new UnauthorizedError('Refresh token inválido ou expirado');
@@ -1136,7 +1137,7 @@ export const authService = {
 
     const normalizedRole = normalizeRole(row.role as string);
 
-    await authRepository.revokeRefreshTokenById(null, row.id as string);
+    await refreshTokenRepository.revokeRefreshTokenById(row.id as string);
 
     const newRefreshToken = await generateRefreshToken(null, row.user_id as string);
 
@@ -1169,7 +1170,7 @@ export const authService = {
   },
 
   async refreshAuthenticatedSession(res: Response, sessionUser: SessionUser): Promise<RefreshResponse> {
-    await authRepository.revokeUserRefreshTokens(null, sessionUser.userId);
+    await refreshTokenRepository.revokeUserRefreshTokens(sessionUser.userId);
 
     const normalizedRole = normalizeRole(sessionUser.role);
     const accessToken = generateAccessToken({
@@ -1205,7 +1206,7 @@ export const authService = {
   async logout(refreshCookieToken: string | undefined, res: Response): Promise<void> {
     if (refreshCookieToken) {
       const tokenHash = hashToken(refreshCookieToken);
-      await authRepository.revokeRefreshTokenByHash(tokenHash);
+      await refreshTokenRepository.revokeRefreshTokenByHash(tokenHash);
     }
 
     clearAuthCookies(res);

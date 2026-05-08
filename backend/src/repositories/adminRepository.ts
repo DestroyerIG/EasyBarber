@@ -468,22 +468,36 @@ export const adminRepository = {
   },
 
   async revokeUserRefreshTokens(_client: unknown = null, userId: string): Promise<void> {
-    await prisma.$queryRaw(
-      Prisma.sql`UPDATE refresh_tokens
-       SET revoked_at = NOW()
-        WHERE user_id = ${userId}::uuid AND revoked_at IS NULL`
-    );
+    await prisma.refreshToken.updateMany({
+      where: {
+        userId,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
   },
 
   async revokeTenantRefreshTokens(_client: unknown = null, tenantId: string): Promise<void> {
-    await prisma.$queryRaw(
-      Prisma.sql`UPDATE refresh_tokens
-       SET revoked_at = NOW()
-       WHERE user_id IN (
-         SELECT id FROM users WHERE barbershop_id = ${tenantId}::uuid
-       )
-       AND revoked_at IS NULL`
-    );
+    const users = await prisma.user.findMany({
+      where: { barbershopId: tenantId },
+      select: { id: true },
+    });
+
+    const userIds = users.map((u) => u.id);
+
+    if (userIds.length > 0) {
+      await prisma.refreshToken.updateMany({
+        where: {
+          userId: { in: userIds },
+          revokedAt: null,
+        },
+        data: {
+          revokedAt: new Date(),
+        },
+      });
+    }
   },
 
   async listSubscriptions(filters: Record<string, unknown> = {}): Promise<unknown> {

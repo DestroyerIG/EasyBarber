@@ -879,61 +879,6 @@ export const authRepository = {
   },
 
   // -------------------------------------------------------------------------
-  // Refresh tokens
-  // -------------------------------------------------------------------------
-
-  async saveRefreshToken(
-    _client: unknown = null,
-    { userId, tokenHash, expiresAt }: { userId: string; tokenHash: string; expiresAt: string }
-  ): Promise<void> {
-    await prisma.$queryRaw(Prisma.sql`
-      INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
-      VALUES (${userId}::uuid, ${tokenHash}, ${expiresAt})
-    `);
-  },
-
-  async revokeUserRefreshTokens(_client: unknown = null, userId: string): Promise<void> {
-    await prisma.$queryRaw(Prisma.sql`
-      UPDATE refresh_tokens
-      SET revoked_at = NOW()
-      WHERE user_id    = ${userId}::uuid
-        AND revoked_at IS NULL
-    `);
-  },
-
-  async revokeRefreshTokenById(_client: unknown = null, tokenId: string): Promise<void> {
-    await prisma.$queryRaw(Prisma.sql`
-      UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = ${tokenId}::uuid
-    `);
-  },
-
-  async revokeRefreshTokenByHash(tokenHash: string): Promise<void> {
-    await prisma.$queryRaw(Prisma.sql`
-      UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = ${tokenHash}
-    `);
-  },
-
-  async findValidRefreshToken(tokenHash: string): Promise<Record<string, unknown> | null> {
-    const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
-      SELECT
-        rt.id, rt.user_id, u.email, u.role, u.email_verified,
-        b.id AS barbershop_id, b.plan, b.name AS barbershop_name,
-        b.subscription_status, b.subscription_current_period_end
-      FROM refresh_tokens rt
-      JOIN users       u ON rt.user_id      = u.id
-      JOIN barbershops b ON u.barbershop_id = b.id
-      WHERE rt.token_hash   = ${tokenHash}
-        AND rt.revoked_at   IS NULL
-        AND rt.expires_at   > NOW()
-        AND u.blocked        = false
-        AND u.email_verified = true
-        AND b.active         = true
-      LIMIT 1
-    `);
-    return result[0] ?? null;
-  },
-
-  // -------------------------------------------------------------------------
   // Utilitário de compatibilidade (legado pg-pool)
   // -------------------------------------------------------------------------
 
