@@ -1,13 +1,15 @@
 import { prisma } from '../config/prisma.js';
 import { Prisma } from '@prisma/client';
+import { toDate, startOfDay, endOfDay } from '../utils/dateUtils.js';
 
 export const financeRepository = {
-  async getSummary(barbershopId: string, today: Date) {
+  async getSummary(barbershopId: string, rawToday: Date | string) {
+    const today = toDate(rawToday);
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
     const [earningsToday, expensesToday, earningsMonth, expensesMonth] = await Promise.all([
-      prisma.earning.aggregate({ where: { barbershopId, date: today }, _sum: { amount: true } }),
-      prisma.expense.aggregate({ where: { barbershopId, date: today }, _sum: { amount: true } }),
+      prisma.earning.aggregate({ where: { barbershopId, date: { gte: startOfDay(today), lte: endOfDay(today) } }, _sum: { amount: true } }),
+      prisma.expense.aggregate({ where: { barbershopId, date: { gte: startOfDay(today), lte: endOfDay(today) } }, _sum: { amount: true } }),
       prisma.earning.aggregate({ where: { barbershopId, date: { gte: startOfMonth } }, _sum: { amount: true } }),
       prisma.expense.aggregate({ where: { barbershopId, date: { gte: startOfMonth } }, _sum: { amount: true } }),
     ]);

@@ -18,20 +18,15 @@ interface ClientData {
 export const clientService = {
   async getAll(barbershopId: string, { page, limit }: PaginationOptions = {}) {
     if (page && limit) {
-      return (clientRepository as unknown as {
-        findAllPaginated(
-          barbershopId: string,
-          options: { page: number; limit: number; orderBy: string }
-        ): Promise<unknown>;
-      }).findAllPaginated(barbershopId, {
-        page: parseInt(String(page)),
-        limit: Math.min(parseInt(String(limit)), 100),
+      const data = await clientRepository.findManyPaginated(barbershopId, {
+        page: parseInt(String(page), 10),
+        limit: Math.min(parseInt(String(limit), 10), 100),
         orderBy: 'created_at DESC',
       });
+      return { data, meta: undefined as any };
     }
-    return (clientRepository as unknown as {
-      findAll(barbershopId: string, options: { orderBy: string }): Promise<unknown>;
-    }).findAll(barbershopId, { orderBy: 'created_at DESC' });
+    const data = await clientRepository.findMany(barbershopId, { orderBy: 'created_at DESC' });
+    return { data, meta: undefined as any };
   },
 
   async create(barbershopId: string, data: ClientData) {
@@ -40,46 +35,23 @@ export const clientService = {
       throw new ConflictError('Cliente já cadastrado com este telefone');
     }
 
-    return (clientRepository as unknown as {
-      create(data: {
-        barbershop_id: string;
-        name: string;
-        phone: string;
-        email: string | null;
-        birth_date: string | null;
-        address: string | null;
-        notes: string | null;
-      }): Promise<unknown>;
-    }).create({
-      barbershop_id: barbershopId,
+    return clientRepository.create({
+      barbershopId: barbershopId,
       name: data.name,
       phone: data.phone,
       email: data.email ?? null,
-      birth_date: data.birthDate ?? null,
+      birthDate: data.birthDate ?? null,
       address: data.address ?? null,
       notes: data.notes ?? null,
     });
   },
 
   async update(id: string, barbershopId: string, data: ClientData) {
-    const result = await (clientRepository as unknown as {
-      update(
-        id: string,
-        barbershopId: string,
-        data: {
-          name: string;
-          phone: string;
-          email: string | null;
-          birth_date: string | null;
-          address: string | null;
-          notes: string | null;
-        }
-      ): Promise<unknown>;
-    }).update(id, barbershopId, {
+    const result = await clientRepository.update(id, barbershopId, {
       name: data.name,
       phone: data.phone,
       email: data.email ?? null,
-      birth_date: data.birthDate ?? null,
+      birthDate: data.birthDate ?? null,
       address: data.address ?? null,
       notes: data.notes ?? null,
     });
