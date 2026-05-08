@@ -48,7 +48,7 @@ const upsertManagedUser = async (_client: unknown = null, {
          last_identity_sync_at
        )
        VALUES (
-         ${barbershopId},
+         ${barbershopId}::uuid,
          ${email},
          ${passwordHash},
          ${role},
@@ -57,7 +57,7 @@ const upsertManagedUser = async (_client: unknown = null, {
          NULL,
          ${emailVerified},
          CASE WHEN ${emailVerified} THEN NOW() ELSE NULL END,
-         ${supabaseUserId},
+         ${supabaseUserId}::uuid,
          ${authProvider},
          NOW()
        )
@@ -97,7 +97,7 @@ const upsertManagedUser = async (_client: unknown = null, {
 
     const legacyResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
       INSERT INTO users (barbershop_id, email, password_hash, role, blocked)
-       VALUES (${barbershopId}, ${email}, ${passwordHash}, ${role}, false)
+       VALUES (${barbershopId}::uuid, ${email}, ${passwordHash}, ${role}, false)
        ON CONFLICT (email)
        DO UPDATE SET
          barbershop_id = EXCLUDED.barbershop_id,
@@ -264,7 +264,7 @@ export const authRepository = {
          FROM users u
          JOIN barbershops b ON u.barbershop_id = b.id
          WHERE LOWER(u.email) = LOWER(${email})
-           AND u.id <> ${excludedUserId}
+           AND u.id <> ${excludedUserId}::uuid
          LIMIT 1
       `);
 
@@ -283,7 +283,7 @@ export const authRepository = {
          FROM users u
          JOIN barbershops b ON u.barbershop_id = b.id
          WHERE LOWER(u.email) = LOWER(${email})
-           AND u.id <> ${excludedUserId}
+           AND u.id <> ${excludedUserId}::uuid
          LIMIT 1
       `);
 
@@ -413,12 +413,12 @@ export const authRepository = {
            email_verified_at
          )
          VALUES (
-           ${barbershopId},
+           ${barbershopId}::uuid,
            ${email},
            ${passwordHash},
            ${role},
            ${emailVerified},
-           ${supabaseUserId},
+           ${supabaseUserId}::uuid,
            ${authProvider},
            CASE WHEN ${emailVerified} THEN NOW() ELSE NULL END
          )
@@ -429,7 +429,7 @@ export const authRepository = {
       if (error?.code === '42703') {
         const legacyResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
           INSERT INTO users (barbershop_id, email, password_hash, role)
-           VALUES (${barbershopId}, ${email}, ${passwordHash}, ${role}) RETURNING id
+           VALUES (${barbershopId}::uuid, ${email}, ${passwordHash}, ${role}) RETURNING id
         `);
         return legacyResult[0] || null;
       }
@@ -474,7 +474,7 @@ export const authRepository = {
            status,
            verification_sent_at
          )
-         VALUES (${email}, ${supabaseUserId}, ${barbershopName}, ${ownerName}, ${whatsapp}, ${normalizedCpfCnpj}, ${desiredPlan}, ${passwordHash}, 'supabase', 'pending', NOW())
+         VALUES (${email}, ${supabaseUserId}::uuid, ${barbershopName}, ${ownerName}, ${whatsapp}, ${normalizedCpfCnpj}, ${desiredPlan}, ${passwordHash}, 'supabase', 'pending', NOW())
          ON CONFLICT (email)
          DO UPDATE SET
            supabase_user_id = COALESCE(EXCLUDED.supabase_user_id, pending_registrations.supabase_user_id),
@@ -522,7 +522,7 @@ export const authRepository = {
            status,
            verification_sent_at
          )
-         VALUES (${email}, ${supabaseUserId}, ${barbershopName}, ${ownerName}, ${whatsapp}, ${desiredPlan}, ${passwordHash}, 'supabase', 'pending', NOW())
+         VALUES (${email}, ${supabaseUserId}::uuid, ${barbershopName}, ${ownerName}, ${whatsapp}, ${desiredPlan}, ${passwordHash}, 'supabase', 'pending', NOW())
          ON CONFLICT (email)
          DO UPDATE SET
            supabase_user_id = COALESCE(EXCLUDED.supabase_user_id, pending_registrations.supabase_user_id),
@@ -680,7 +680,7 @@ export const authRepository = {
 
       if (supabaseUserId) {
         values.push(supabaseUserId);
-        filters.push(`supabase_user_id = $${values.length}`);
+        filters.push(`supabase_user_id = $${values.length}::uuid`);
       }
 
       if (filters.length === 0) {
@@ -730,7 +730,7 @@ export const authRepository = {
 
         if (supabaseUserId) {
           values.push(supabaseUserId);
-          filters.push(`supabase_user_id = $${values.length}`);
+          filters.push(`supabase_user_id = $${values.length}::uuid`);
         }
 
         if (filters.length === 0) {
@@ -776,7 +776,7 @@ export const authRepository = {
         UPDATE pending_registrations
          SET status = 'completed',
              confirmed_at = NOW()
-         WHERE id = ${pendingRegistrationId}
+         WHERE id = ${pendingRegistrationId}::uuid
            AND status = 'pending'
          RETURNING id
       `);
@@ -823,9 +823,9 @@ export const authRepository = {
         UPDATE pending_registrations
          SET status = 'completed',
              confirmed_at = COALESCE(${confirmedAt}::timestamp, confirmed_at, NOW()),
-             supabase_user_id = COALESCE(${supabaseUserId}, supabase_user_id),
+             supabase_user_id = COALESCE(${supabaseUserId}::uuid, supabase_user_id),
              updated_at = NOW()
-         WHERE id = ${pendingRegistrationId}
+         WHERE id = ${pendingRegistrationId}::uuid
            AND status <> 'canceled'
          RETURNING id, status, confirmed_at, supabase_user_id
       `);
@@ -841,8 +841,8 @@ export const authRepository = {
           UPDATE pending_registrations
            SET status = 'completed',
                confirmed_at = COALESCE(${confirmedAt}::timestamp, confirmed_at, NOW()),
-               supabase_user_id = COALESCE(${supabaseUserId}, supabase_user_id)
-           WHERE id = ${pendingRegistrationId}
+               supabase_user_id = COALESCE(${supabaseUserId}::uuid, supabase_user_id)
+           WHERE id = ${pendingRegistrationId}::uuid
              AND status <> 'canceled'
            RETURNING id, status, confirmed_at, supabase_user_id
         `);
@@ -859,7 +859,7 @@ export const authRepository = {
       await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         UPDATE pending_registrations
          SET verification_sent_at = NOW()
-         WHERE id = ${pendingRegistrationId}
+         WHERE id = ${pendingRegistrationId}::uuid
            AND status = 'pending'
       `);
     } catch (error: any) {
@@ -887,13 +887,13 @@ export const authRepository = {
         UPDATE users
          SET email_verified = true,
              email_verified_at = COALESCE(${emailVerifiedAt || null}::timestamp, NOW()),
-             supabase_user_id = COALESCE(${supabaseUserId}, supabase_user_id),
+             supabase_user_id = COALESCE(${supabaseUserId}::uuid, supabase_user_id),
              auth_provider = ${authProvider},
              last_identity_sync_at = NOW(),
              email_verification_token_hash = NULL,
              email_verification_expires_at = NULL,
              verification_sent_at = NULL
-         WHERE id = ${userId}
+         WHERE id = ${userId}::uuid
          RETURNING id, email, email_verified, email_verified_at, supabase_user_id, auth_provider
       `);
 
@@ -915,7 +915,7 @@ export const authRepository = {
            email_verification_token_hash = ${tokenHash},
            email_verification_expires_at = ${expiresAt},
            verification_sent_at = NOW()
-       WHERE id = ${userId}
+       WHERE id = ${userId}::uuid
     `);
   },
 
@@ -941,7 +941,7 @@ export const authRepository = {
        SET email_verification_token_hash = NULL,
            email_verification_expires_at = NULL,
            verification_sent_at = NULL
-       WHERE id = ${userId}
+       WHERE id = ${userId}::uuid
     `);
   },
 
@@ -953,7 +953,7 @@ export const authRepository = {
            email_verification_token_hash = NULL,
            email_verification_expires_at = NULL,
            verification_sent_at = NULL
-       WHERE id = ${userId}
+       WHERE id = ${userId}::uuid
        RETURNING id, email, email_verified, email_verified_at
     `);
 
@@ -964,10 +964,10 @@ export const authRepository = {
     try {
       const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         UPDATE users
-         SET supabase_user_id = COALESCE(${supabaseUserId}, supabase_user_id),
+         SET supabase_user_id = COALESCE(${supabaseUserId}::uuid, supabase_user_id),
              auth_provider = COALESCE(${authProvider}, auth_provider),
              last_identity_sync_at = NOW()
-         WHERE id = ${userId}
+         WHERE id = ${userId}::uuid
          RETURNING id, supabase_user_id, auth_provider, last_identity_sync_at
       `);
 
@@ -980,7 +980,7 @@ export const authRepository = {
       const legacyResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         UPDATE users
          SET updated_at = CURRENT_TIMESTAMP
-         WHERE id = ${userId}
+         WHERE id = ${userId}::uuid
          RETURNING id
       `);
 
@@ -1019,20 +1019,20 @@ export const authRepository = {
   async saveRefreshToken(_client: unknown = null, { userId, tokenHash, expiresAt }: { userId: string; tokenHash: string; expiresAt: string }): Promise<void> {
     await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
       INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
-       VALUES (${userId}, ${tokenHash}, ${expiresAt})
+      VALUES (${userId}::uuid, ${tokenHash}, ${expiresAt})
     `);
   },
 
   async revokeUserRefreshTokens(_client: unknown = null, userId: string): Promise<void> {
     await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
       UPDATE refresh_tokens SET revoked_at = NOW()
-       WHERE user_id = ${userId} AND revoked_at IS NULL
+      WHERE user_id = ${userId}::uuid AND revoked_at IS NULL
     `);
   },
 
   async revokeRefreshTokenById(_client: unknown = null, tokenId: string): Promise<void> {
     await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
-      UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = ${tokenId}
+      UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = ${tokenId}::uuid
     `);
   },
 

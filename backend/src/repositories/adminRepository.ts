@@ -331,7 +331,7 @@ export const adminRepository = {
           u.created_at ASC
         LIMIT 1
       ) owner_user ON true
-      WHERE b.id = ${tenantId}`
+      WHERE b.id = ${tenantId}::uuid`
     );
 
     const tenant = tenantResult[0];
@@ -351,31 +351,31 @@ export const adminRepository = {
         Prisma.sql`SELECT COUNT(*)::int AS total_users,
                 COUNT(*) FILTER (WHERE blocked = true)::int AS blocked_users
          FROM users
-         WHERE barbershop_id = ${tenantId}`
+         WHERE barbershop_id = ${tenantId}::uuid`
       ),
       prisma.$queryRaw<Array<Record<string, unknown>>>(
-        Prisma.sql`SELECT COUNT(*)::int AS total_clients FROM clients WHERE barbershop_id = ${tenantId}`
+        Prisma.sql`SELECT COUNT(*)::int AS total_clients FROM clients WHERE barbershop_id = ${tenantId}::uuid`
       ),
       prisma.$queryRaw<Array<Record<string, unknown>>>(
         Prisma.sql`SELECT COUNT(*)::int AS total_appointments_month
          FROM appointments
-         WHERE barbershop_id = ${tenantId}
+         WHERE barbershop_id = ${tenantId}::uuid
            AND created_at >= date_trunc('month', NOW())`
       ),
       prisma.$queryRaw<Array<Record<string, unknown>>>(
         Prisma.sql`SELECT COUNT(*)::int AS total_services
          FROM services
-         WHERE barbershop_id = ${tenantId} AND active = true`
+         WHERE barbershop_id = ${tenantId}::uuid AND active = true`
       ),
       prisma.$queryRaw<Array<Record<string, unknown>>>(
         Prisma.sql`SELECT COUNT(*)::int AS total_barbers
          FROM barbers
-         WHERE barbershop_id = ${tenantId} AND active = true`
+         WHERE barbershop_id = ${tenantId}::uuid AND active = true`
       ),
       prisma.$queryRaw<Array<Record<string, unknown>>>(
         Prisma.sql`SELECT MAX(created_at) AS last_activity_at
          FROM appointments
-         WHERE barbershop_id = ${tenantId}`
+         WHERE barbershop_id = ${tenantId}::uuid`
       ),
     ]);
 
@@ -404,7 +404,7 @@ export const adminRepository = {
            suspended_at = CASE WHEN ${active} = false THEN NOW() ELSE NULL END,
            suspended_reason = CASE WHEN ${active} = false THEN COALESCE(${reason || null}, suspended_reason) ELSE NULL END,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = ${tenantId}
+        WHERE id = ${tenantId}::uuid
        RETURNING id, name, active, suspended_at, suspended_reason, updated_at`
     );
 
@@ -422,7 +422,7 @@ export const adminRepository = {
            suspended_at = NOW(),
            suspended_reason = COALESCE(${reason || null}, 'soft_deleted'),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = ${tenantId}
+        WHERE id = ${tenantId}::uuid
        RETURNING id, name, active, suspended_at, suspended_reason, updated_at`
     );
 
@@ -443,7 +443,7 @@ export const adminRepository = {
         b.active AS barbershop_active
        FROM users u
        JOIN barbershops b ON b.id = u.barbershop_id
-       WHERE u.id = ${userId}`
+        WHERE u.id = ${userId}::uuid`
     );
 
     return result[0] || null;
@@ -460,7 +460,7 @@ export const adminRepository = {
            blocked_at = CASE WHEN ${blocked} = true THEN NOW() ELSE NULL END,
            blocked_reason = CASE WHEN ${blocked} = true THEN ${reason || null} ELSE NULL END,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = ${userId}
+        WHERE id = ${userId}::uuid
        RETURNING id, email, role, barbershop_id, blocked, blocked_at, blocked_reason`
     );
 
@@ -471,7 +471,7 @@ export const adminRepository = {
     await prisma.$queryRaw(
       Prisma.sql`UPDATE refresh_tokens
        SET revoked_at = NOW()
-       WHERE user_id = ${userId} AND revoked_at IS NULL`
+        WHERE user_id = ${userId}::uuid AND revoked_at IS NULL`
     );
   },
 
@@ -480,7 +480,7 @@ export const adminRepository = {
       Prisma.sql`UPDATE refresh_tokens
        SET revoked_at = NOW()
        WHERE user_id IN (
-         SELECT id FROM users WHERE barbershop_id = ${tenantId}
+         SELECT id FROM users WHERE barbershop_id = ${tenantId}::uuid
        )
        AND revoked_at IS NULL`
     );

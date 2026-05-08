@@ -69,7 +69,7 @@ export const barbershopSettingsRepository = {
          COALESCE(s.custom_webhook_url, '') AS custom_webhook_url
        FROM barbershops b
        LEFT JOIN barbershop_settings s ON s.barbershop_id = b.id
-       WHERE b.id = ${barbershopId} AND b.active = true
+       WHERE b.id = ${barbershopId}::uuid AND b.active = true
     `);
 
     if (result.length === 0) {
@@ -91,7 +91,7 @@ export const barbershopSettingsRepository = {
          COALESCE(NULLIF(to_jsonb(s) ->> 'timezone', ''), NULLIF(to_jsonb(b) ->> 'timezone', '')) AS timezone
        FROM barbershops b
        LEFT JOIN barbershop_settings s ON s.barbershop_id = b.id
-       WHERE b.id = ${barbershopId} AND b.active = true
+       WHERE b.id = ${barbershopId}::uuid AND b.active = true
        LIMIT 1
     `);
 
@@ -106,7 +106,7 @@ export const barbershopSettingsRepository = {
     const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
       SELECT b.cpf_cnpj
        FROM barbershops b
-       WHERE b.id = ${barbershopId}
+       WHERE b.id = ${barbershopId}::uuid
          AND b.active = true
     `);
 
@@ -127,8 +127,8 @@ export const barbershopSettingsRepository = {
          u.email
        FROM users u
        JOIN barbershops b ON b.id = u.barbershop_id
-       WHERE u.id = ${userId}
-         AND u.barbershop_id = ${barbershopId}
+       WHERE u.id = ${userId}::uuid
+         AND u.barbershop_id = ${barbershopId}::uuid
          AND u.blocked = false
          AND b.active = true
        LIMIT 1
@@ -159,8 +159,8 @@ export const barbershopSettingsRepository = {
            b.subscription_current_period_end
          FROM users u
          JOIN barbershops b ON b.id = u.barbershop_id
-         WHERE u.id = ${userId}
-           AND u.barbershop_id = ${barbershopId}
+         WHERE u.id = ${userId}::uuid
+           AND u.barbershop_id = ${barbershopId}::uuid
            AND u.blocked = false
            AND b.active = true
          LIMIT 1
@@ -192,8 +192,8 @@ export const barbershopSettingsRepository = {
            b.subscription_current_period_end
          FROM users u
          JOIN barbershops b ON b.id = u.barbershop_id
-         WHERE u.id = ${userId}
-           AND u.barbershop_id = ${barbershopId}
+         WHERE u.id = ${userId}::uuid
+           AND u.barbershop_id = ${barbershopId}::uuid
            AND u.blocked = false
            AND b.active = true
          LIMIT 1
@@ -214,7 +214,7 @@ export const barbershopSettingsRepository = {
               active,
               whatsapp_instance_name
          FROM barbershops
-        WHERE id = ${barbershopId}
+        WHERE id = ${barbershopId}::uuid
         LIMIT 1
     `);
 
@@ -236,7 +236,7 @@ export const barbershopSettingsRepository = {
       UPDATE barbershops
        SET cpf_cnpj = ${payload.cpfCnpj},
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = ${barbershopId}
+       WHERE id = ${barbershopId}::uuid
          AND active = true
        RETURNING cpf_cnpj
     `);
@@ -274,13 +274,13 @@ export const barbershopSettingsRepository = {
              cpf_cnpj = ${payload.cpfCnpj},
              email = ${payload.email},
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = ${barbershopId}
+         WHERE id = ${barbershopId}::uuid
            AND active = true
            AND EXISTS (
              SELECT 1
              FROM users u
-             WHERE u.id = ${userId}
-               AND u.barbershop_id = ${barbershopId}
+             WHERE u.id = ${userId}::uuid
+               AND u.barbershop_id = ${barbershopId}::uuid
                AND u.blocked = false
            )
          RETURNING id
@@ -293,13 +293,13 @@ export const barbershopSettingsRepository = {
              whatsapp = ${payload.whatsapp},
              cpf_cnpj = ${payload.cpfCnpj},
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = ${barbershopId}
+         WHERE id = ${barbershopId}::uuid
            AND active = true
            AND EXISTS (
              SELECT 1
              FROM users u
-             WHERE u.id = ${userId}
-               AND u.barbershop_id = ${barbershopId}
+             WHERE u.id = ${userId}::uuid
+               AND u.barbershop_id = ${barbershopId}::uuid
                AND u.blocked = false
            )
          RETURNING id
@@ -315,8 +315,8 @@ export const barbershopSettingsRepository = {
         UPDATE users
          SET email = ${payload.email},
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = ${userId}
-           AND barbershop_id = ${barbershopId}
+         WHERE id = ${userId}::uuid
+           AND barbershop_id = ${barbershopId}::uuid
            AND blocked = false
       `);
     }
@@ -329,8 +329,8 @@ export const barbershopSettingsRepository = {
       UPDATE users
        SET password_hash = ${passwordHash},
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = ${userId}
-         AND barbershop_id = ${barbershopId}
+       WHERE id = ${userId}::uuid
+         AND barbershop_id = ${barbershopId}::uuid
          AND blocked = false
        RETURNING id
     `);
@@ -358,7 +358,7 @@ export const barbershopSettingsRepository = {
     const barbershopResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
       UPDATE barbershops
        SET whatsapp_instance_name = NULLIF(lower(btrim(${payload.whatsappInstanceName}::text)), '')
-       WHERE id = ${barbershopId} AND active = true
+       WHERE id = ${barbershopId}::uuid AND active = true
        RETURNING id
     `);
 
@@ -380,7 +380,7 @@ export const barbershopSettingsRepository = {
          google_calendar_enabled,
          custom_webhook_url
        ) VALUES (
-         ${barbershopId},
+         ${barbershopId}::uuid,
          ${payload.openingTime},
          ${payload.closingTime},
          ${payload.slotIntervalMinutes},
@@ -454,7 +454,7 @@ export const barbershopSettingsRepository = {
               active,
               whatsapp_instance_name
          FROM barbershops
-        WHERE id = ${barbershopId}
+        WHERE id = ${barbershopId}::uuid
     `);
 
     if (!result.length || result[0]!.active !== true) {
@@ -486,7 +486,7 @@ export const barbershopSettingsRepository = {
       UPDATE barbershops
           SET whatsapp_instance_name = ${nextInstanceName},
               updated_at = CURRENT_TIMESTAMP
-        WHERE id = ${barbershopId}
+        WHERE id = ${barbershopId}::uuid
         RETURNING id, name, active, whatsapp_instance_name
     `);
 
