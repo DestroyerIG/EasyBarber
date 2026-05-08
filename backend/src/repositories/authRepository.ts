@@ -204,7 +204,7 @@ export const authRepository = {
                 b.subscription_current_period_end
          FROM users u
          JOIN barbershops b ON u.barbershop_id = b.id
-         WHERE u.supabase_user_id = ${supabaseUserId}
+         WHERE u.supabase_user_id = ${supabaseUserId}::uuid
            AND b.active = true
          LIMIT 1
       `);
