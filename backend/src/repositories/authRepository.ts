@@ -209,7 +209,16 @@ export const authRepository = {
       `);
       return result[0] ?? null;
     } catch (error: any) {
-      if (error?.code === '42703') return null;
+      // Prisma errors on raw queries are wrapped in a PrismaClientKnownRequestError (P2010)
+      // The actual database error code is found in error.meta.code
+      const isColumnMissing = 
+        error?.code === '42703' || 
+        (error?.code === 'P2010' && error?.meta?.code === '42703');
+
+      if (isColumnMissing) {
+        // Se a coluna supabase_user_id não existe, é impossível o usuário existir por ela
+        return null;
+      }
       throw error;
     }
   },

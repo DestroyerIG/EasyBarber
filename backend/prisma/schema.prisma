@@ -85,6 +85,8 @@ model User {
   email                       String    @unique @db.VarChar(255)
   passwordHash                String    @map("password_hash") @db.Char(60)
   supabaseUserId              String?   @unique @map("supabase_user_id") @db.Uuid
+  authProvider                String    @default("email") @map("auth_provider") @db.VarChar(50)
+  lastIdentitySyncAt          DateTime? @map("last_identity_sync_at")
   role                        String    @default("tenant_admin") @db.VarChar(20)
   blocked                     Boolean   @default(false)
   emailVerified               Boolean   @default(false) @map("email_verified")
