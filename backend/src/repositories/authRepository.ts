@@ -1,12 +1,34 @@
 import { prisma } from '../config/prisma.js';
 import { Prisma } from '@prisma/client';
 
+// ---------------------------------------------------------------------------
+// Helpers internos
+// ---------------------------------------------------------------------------
+
 const normalizeCpfCnpj = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
   const digits = value.replace(/\D+/g, '');
   if (digits.length !== 11 && digits.length !== 14) return null;
   return digits;
 };
+
+/**
+ * Retorna o fragmento SQL correto para um UUID nullable.
+ * Quando value é null/undefined emite NULL::uuid, caso contrário ${value}::uuid.
+ */
+const uuidOrNull = (value: string | null | undefined): Prisma.Sql =>
+  value ? Prisma.sql`${value}::uuid` : Prisma.sql`NULL::uuid`;
+
+/**
+ * Retorna o fragmento SQL correto para um timestamp nullable.
+ */
+const timestampOrNull = (value: string | null | undefined): Prisma.Sql =>
+  value ? Prisma.sql`${value}::timestamp` : Prisma.sql`NULL::timestamp`;
+
+// ---------------------------------------------------------------------------
+// upsertManagedUser (função interna reutilizada por upsertPlatformAdminUser
+// e upsertTenantAdminUser)
+// ---------------------------------------------------------------------------
 
 const upsertManagedUser = async (
   _client: unknown = null,
@@ -39,22 +61,22 @@ const upsertManagedUser = async (
         false, NULL, NULL,
         ${emailVerified},
         CASE WHEN ${emailVerified} THEN NOW() ELSE NULL END,
-        ${supabaseUserId}::uuid, ${authProvider}, NOW()
+        ${uuidOrNull(supabaseUserId)}, ${authProvider}, NOW()
       )
       ON CONFLICT (email) DO UPDATE SET
-        barbershop_id        = EXCLUDED.barbershop_id,
-        password_hash        = EXCLUDED.password_hash,
-        role                 = EXCLUDED.role,
-        blocked              = false,
-        blocked_at           = NULL,
-        blocked_reason       = NULL,
-        email_verified       = EXCLUDED.email_verified,
-        email_verified_at    = CASE
+        barbershop_id         = EXCLUDED.barbershop_id,
+        password_hash         = EXCLUDED.password_hash,
+        role                  = EXCLUDED.role,
+        blocked               = false,
+        blocked_at            = NULL,
+        blocked_reason        = NULL,
+        email_verified        = EXCLUDED.email_verified,
+        email_verified_at     = CASE
           WHEN EXCLUDED.email_verified THEN COALESCE(users.email_verified_at, NOW())
           ELSE NULL
         END,
-        supabase_user_id     = COALESCE(EXCLUDED.supabase_user_id, users.supabase_user_id),
-        auth_provider        = EXCLUDED.auth_provider,
+        supabase_user_id      = COALESCE(EXCLUDED.supabase_user_id, users.supabase_user_id),
+        auth_provider         = EXCLUDED.auth_provider,
         last_identity_sync_at = NOW()
       RETURNING
         id, email, role, barbershop_id, blocked, email_verified,
@@ -78,7 +100,16 @@ const upsertManagedUser = async (
   }
 };
 
+// ---------------------------------------------------------------------------
+// authRepository
+// ---------------------------------------------------------------------------
+
 export const authRepository = {
+
+  // -------------------------------------------------------------------------
+  // Busca de usuários
+  // -------------------------------------------------------------------------
+
   async findUserByEmail(email: string): Promise<Record<string, unknown> | null> {
     try {
       const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
@@ -92,8 +123,9 @@ export const authRepository = {
         FROM users u
         JOIN barbershops b ON u.barbershop_id = b.id
         WHERE LOWER(u.email) = LOWER(${email})
-          AND b.active = true
-          AND u.blocked = false
+          AND b.active    = true
+          AND u.blocked   = false
+        LIMIT 1
       `);
       return result[0] ?? null;
     } catch (error: any) {
@@ -112,8 +144,9 @@ export const authRepository = {
         FROM users u
         JOIN barbershops b ON u.barbershop_id = b.id
         WHERE LOWER(u.email) = LOWER(${email})
-          AND b.active = true
-          AND u.blocked = false
+          AND b.active    = true
+          AND u.blocked   = false
+        LIMIT 1
       `);
       return legacyResult[0] ?? null;
     }
@@ -249,6 +282,11 @@ export const authRepository = {
     }
   },
 
+  // -------------------------------------------------------------------------
+  // Busca com FOR UPDATE (usadas dentro de transações explícitas da aplicação)
+  // NOTA: _client é ignorado pois o projeto usa prisma.$transaction quando necessário.
+  // -------------------------------------------------------------------------
+
   async findUserByEmailForSync(_client: unknown = null, email: string): Promise<Record<string, unknown> | null> {
     const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
       SELECT id, email, barbershop_id
@@ -286,6 +324,10 @@ export const authRepository = {
     `);
     return result[0] ?? null;
   },
+
+  // -------------------------------------------------------------------------
+  // Criação de registros
+  // -------------------------------------------------------------------------
 
   async createBarbershop(
     _client: unknown = null,
@@ -356,7 +398,7 @@ export const authRepository = {
         )
         VALUES (
           ${barbershopId}::uuid, ${email}, ${passwordHash}, ${role},
-          ${emailVerified}, ${supabaseUserId}::uuid, ${authProvider},
+          ${emailVerified}, ${uuidOrNull(supabaseUserId)}, ${authProvider},
           CASE WHEN ${emailVerified} THEN NOW() ELSE NULL END
         )
         RETURNING id
@@ -373,6 +415,10 @@ export const authRepository = {
       return legacyResult[0] ?? null;
     }
   },
+
+  // -------------------------------------------------------------------------
+  // Pending registrations
+  // -------------------------------------------------------------------------
 
   async upsertPendingRegistration(
     _client: unknown = null,
@@ -405,7 +451,7 @@ export const authRepository = {
           cpf_cnpj, desired_plan, password_hash, auth_provider, status, verification_sent_at
         )
         VALUES (
-          ${email}, ${supabaseUserId}::uuid, ${barbershopName}, ${ownerName}, ${whatsapp},
+          ${email}, ${uuidOrNull(supabaseUserId)}, ${barbershopName}, ${ownerName}, ${whatsapp},
           ${normalizedCpfCnpj}, ${desiredPlan}, ${passwordHash}, 'supabase', 'pending', NOW()
         )
         ON CONFLICT (email) DO UPDATE SET
@@ -435,7 +481,7 @@ export const authRepository = {
           desired_plan, password_hash, auth_provider, status, verification_sent_at
         )
         VALUES (
-          ${email}, ${supabaseUserId}::uuid, ${barbershopName}, ${ownerName}, ${whatsapp},
+          ${email}, ${uuidOrNull(supabaseUserId)}, ${barbershopName}, ${ownerName}, ${whatsapp},
           ${desiredPlan}, ${passwordHash}, 'supabase', 'pending', NOW()
         )
         ON CONFLICT (email) DO UPDATE SET
@@ -531,7 +577,6 @@ export const authRepository = {
   ): Promise<Record<string, unknown> | null> {
     if (!email && !supabaseUserId) return null;
 
-    // Build a composable WHERE clause using Prisma.sql fragments
     const emailFilter = email
       ? Prisma.sql`LOWER(email) = LOWER(${email})`
       : Prisma.sql`FALSE`;
@@ -631,8 +676,8 @@ export const authRepository = {
       const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         UPDATE pending_registrations
         SET status           = 'completed',
-            confirmed_at     = COALESCE(${confirmedAt ?? null}::timestamp, confirmed_at, NOW()),
-            supabase_user_id = COALESCE(${supabaseUserId}::uuid, supabase_user_id),
+            confirmed_at     = COALESCE(${timestampOrNull(confirmedAt)}, confirmed_at, NOW()),
+            supabase_user_id = COALESCE(${uuidOrNull(supabaseUserId)}, supabase_user_id),
             updated_at       = NOW()
         WHERE id     = ${pendingRegistrationId}::uuid
           AND status <> 'canceled'
@@ -646,8 +691,8 @@ export const authRepository = {
       const legacyResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         UPDATE pending_registrations
         SET status           = 'completed',
-            confirmed_at     = COALESCE(${confirmedAt ?? null}::timestamp, confirmed_at, NOW()),
-            supabase_user_id = COALESCE(${supabaseUserId}::uuid, supabase_user_id)
+            confirmed_at     = COALESCE(${timestampOrNull(confirmedAt)}, confirmed_at, NOW()),
+            supabase_user_id = COALESCE(${uuidOrNull(supabaseUserId)}, supabase_user_id)
         WHERE id     = ${pendingRegistrationId}::uuid
           AND status <> 'canceled'
         RETURNING id, status, confirmed_at, supabase_user_id
@@ -670,6 +715,10 @@ export const authRepository = {
     }
   },
 
+  // -------------------------------------------------------------------------
+  // Email verification
+  // -------------------------------------------------------------------------
+
   async markEmailAsVerifiedWithSupabaseIdentity(
     _client: unknown = null,
     {
@@ -687,14 +736,14 @@ export const authRepository = {
     try {
       const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         UPDATE users
-        SET email_verified                  = true,
-            email_verified_at              = COALESCE(${emailVerifiedAt ?? null}::timestamp, NOW()),
-            supabase_user_id               = COALESCE(${supabaseUserId}::uuid, supabase_user_id),
-            auth_provider                  = ${authProvider},
-            last_identity_sync_at          = NOW(),
-            email_verification_token_hash  = NULL,
-            email_verification_expires_at  = NULL,
-            verification_sent_at           = NULL
+        SET email_verified                 = true,
+            email_verified_at             = COALESCE(${timestampOrNull(emailVerifiedAt)}, NOW()),
+            supabase_user_id              = COALESCE(${uuidOrNull(supabaseUserId)}, supabase_user_id),
+            auth_provider                 = ${authProvider},
+            last_identity_sync_at         = NOW(),
+            email_verification_token_hash = NULL,
+            email_verification_expires_at = NULL,
+            verification_sent_at          = NULL
         WHERE id = ${userId}::uuid
         RETURNING id, email, email_verified, email_verified_at, supabase_user_id, auth_provider
       `);
@@ -729,8 +778,8 @@ export const authRepository = {
       FROM users u
       JOIN barbershops b ON u.barbershop_id = b.id
       WHERE u.email_verification_token_hash = ${tokenHash}
-        AND u.blocked   = false
-        AND b.active    = true
+        AND u.blocked = false
+        AND b.active  = true
       LIMIT 1
     `);
     return result[0] ?? null;
@@ -760,14 +809,26 @@ export const authRepository = {
     return result[0] ?? null;
   },
 
+  // -------------------------------------------------------------------------
+  // Identity sync
+  // -------------------------------------------------------------------------
+
   async updateUserIdentitySync(
     _client: unknown = null,
-    { userId, supabaseUserId, authProvider = 'supabase' }: { userId: string; supabaseUserId: string | null; authProvider?: string }
+    {
+      userId,
+      supabaseUserId,
+      authProvider = 'supabase',
+    }: {
+      userId: string;
+      supabaseUserId: string | null;
+      authProvider?: string;
+    }
   ): Promise<Record<string, unknown> | null> {
     try {
       const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         UPDATE users
-        SET supabase_user_id      = COALESCE(${supabaseUserId}::uuid, supabase_user_id),
+        SET supabase_user_id      = COALESCE(${uuidOrNull(supabaseUserId)}, supabase_user_id),
             auth_provider         = COALESCE(${authProvider}, auth_provider),
             last_identity_sync_at = NOW()
         WHERE id = ${userId}::uuid
@@ -786,6 +847,10 @@ export const authRepository = {
       return legacyResult[0] ?? null;
     }
   },
+
+  // -------------------------------------------------------------------------
+  // Managed users (platform_admin / tenant_admin)
+  // -------------------------------------------------------------------------
 
   async upsertPlatformAdminUser(
     _client: unknown = null,
@@ -812,6 +877,10 @@ export const authRepository = {
   ): Promise<Record<string, unknown> | null> {
     return upsertManagedUser(null, { ...payload, role: 'tenant_admin', authProvider: 'supabase' });
   },
+
+  // -------------------------------------------------------------------------
+  // Refresh tokens
+  // -------------------------------------------------------------------------
 
   async saveRefreshToken(
     _client: unknown = null,
@@ -853,15 +922,20 @@ export const authRepository = {
       FROM refresh_tokens rt
       JOIN users       u ON rt.user_id      = u.id
       JOIN barbershops b ON u.barbershop_id = b.id
-      WHERE rt.token_hash  = ${tokenHash}
-        AND rt.revoked_at  IS NULL
-        AND rt.expires_at  > NOW()
-        AND u.blocked       = false
+      WHERE rt.token_hash   = ${tokenHash}
+        AND rt.revoked_at   IS NULL
+        AND rt.expires_at   > NOW()
+        AND u.blocked        = false
         AND u.email_verified = true
-        AND b.active        = true
+        AND b.active         = true
+      LIMIT 1
     `);
     return result[0] ?? null;
   },
+
+  // -------------------------------------------------------------------------
+  // Utilitário de compatibilidade (legado pg-pool)
+  // -------------------------------------------------------------------------
 
   async getClient(): Promise<null> {
     return null;
