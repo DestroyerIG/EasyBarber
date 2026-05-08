@@ -84,6 +84,7 @@ model User {
   barbershopId                String    @map("barbershop_id") @db.Uuid
   email                       String    @unique @db.VarChar(255)
   passwordHash                String    @map("password_hash") @db.Char(60)
+  supabaseUserId              String?   @unique @map("supabase_user_id") @db.Uuid
   role                        String    @default("tenant_admin") @db.VarChar(20)
   blocked                     Boolean   @default(false)
   emailVerified               Boolean   @default(false) @map("email_verified")
@@ -96,10 +97,10 @@ model User {
   createdAt                   DateTime  @default(now()) @map("created_at")
   updatedAt                   DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  barbershop     Barbershop     @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
-  refreshTokens  RefreshToken[]
-  auditLogsAsActor  AuditLog[] @relation("ActorUser")
-  auditLogsAsTarget AuditLog[] @relation("TargetUser")
+  barbershop        Barbershop     @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
+  refreshTokens     RefreshToken[]
+  auditLogsAsActor  AuditLog[]     @relation("ActorUser")
+  auditLogsAsTarget AuditLog[]     @relation("TargetUser")
 
   @@map("users")
 }
@@ -234,12 +235,12 @@ model Expense {
 // ─── Billing ───────────────────────────────────────────────────────────────────
 
 model SubscriptionEvent {
-  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  stripeEventId String   @unique @map("stripe_event_id") @db.VarChar(255)
-  eventType    String    @map("event_type") @db.VarChar(255)
-  barbershopId String?   @map("barbershop_id") @db.Uuid
-  payload      Json?
-  createdAt    DateTime  @default(now()) @map("created_at")
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stripeEventId String    @unique @map("stripe_event_id") @db.VarChar(255)
+  eventType     String    @map("event_type") @db.VarChar(255)
+  barbershopId  String?   @map("barbershop_id") @db.Uuid
+  payload       Json?
+  createdAt     DateTime  @default(now()) @map("created_at")
 
   barbershop Barbershop? @relation(fields: [barbershopId], references: [id], onDelete: SetNull)
 
@@ -308,20 +309,20 @@ model Coupon {
 // ─── Audit ─────────────────────────────────────────────────────────────────────
 
 model AuditLog {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  actionType        String    @map("action_type") @db.VarChar(50)
-  actorUserId       String?   @map("actor_user_id") @db.Uuid
-  actorBarbershopId String?   @map("actor_barbershop_id") @db.Uuid
-  targetUserId      String?   @map("target_user_id") @db.Uuid
-  targetBarbershopId String?  @map("target_barbershop_id") @db.Uuid
-  resourceType      String?   @map("resource_type") @db.VarChar(50)
-  resourceId        String?   @map("resource_id") @db.Uuid
-  details           Json?
-  ipAddress         String?   @map("ip_address") @db.VarChar(45)
-  userAgent         String?   @map("user_agent") @db.Text
-  status            String    @default("success") @db.VarChar(20)
-  errorMessage      String?   @map("error_message") @db.Text
-  createdAt         DateTime  @default(now()) @map("created_at")
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actionType         String    @map("action_type") @db.VarChar(50)
+  actorUserId        String?   @map("actor_user_id") @db.Uuid
+  actorBarbershopId  String?   @map("actor_barbershop_id") @db.Uuid
+  targetUserId       String?   @map("target_user_id") @db.Uuid
+  targetBarbershopId String?   @map("target_barbershop_id") @db.Uuid
+  resourceType       String?   @map("resource_type") @db.VarChar(50)
+  resourceId         String?   @map("resource_id") @db.Uuid
+  details            Json?
+  ipAddress          String?   @map("ip_address") @db.VarChar(45)
+  userAgent          String?   @map("user_agent") @db.Text
+  status             String    @default("success") @db.VarChar(20)
+  errorMessage       String?   @map("error_message") @db.Text
+  createdAt          DateTime  @default(now()) @map("created_at")
 
   actorUser         User?       @relation("ActorUser", fields: [actorUserId], references: [id], onDelete: SetNull)
   actorBarbershop   Barbershop? @relation("ActorBarbershop", fields: [actorBarbershopId], references: [id], onDelete: SetNull)
