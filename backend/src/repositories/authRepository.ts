@@ -437,8 +437,8 @@ export const authRepository = {
       barbershopName,
       ownerName,
       whatsapp,
-      cpfCnpj,
-      desiredPlan,
+      cpfCnpj: _cpfCnpj,
+      desiredPlan: _desiredPlan,
       passwordHash,
     }: {
       email: string;
@@ -451,33 +451,65 @@ export const authRepository = {
       passwordHash: string;
     }
   ): Promise<Record<string, unknown> | null> {
-    const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
-      INSERT INTO pending_registrations (
-        email, supabase_user_id, barbershop_name, owner_name, whatsapp,
-        password_hash, auth_provider, status, verification_sent_at
-      )
-      VALUES (
-        ${email}, ${uuidOrNull(supabaseUserId)}, ${barbershopName}, ${ownerName}, ${whatsapp},
-        ${passwordHash}, 'supabase', 'pending', NOW()
-      )
-      ON CONFLICT (email) DO UPDATE SET
-        supabase_user_id     = COALESCE(EXCLUDED.supabase_user_id, pending_registrations.supabase_user_id),
-        barbershop_name      = EXCLUDED.barbershop_name,
-        owner_name           = EXCLUDED.owner_name,
-        whatsapp             = EXCLUDED.whatsapp,
-        password_hash        = EXCLUDED.password_hash,
-        auth_provider        = 'supabase',
-        status               = 'pending',
-        verification_sent_at = NOW(),
-        confirmed_at         = NULL
-      RETURNING
-        id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
-        NULL::VARCHAR AS cpf_cnpj,
-        NULL::VARCHAR AS desired_plan,
-        password_hash, auth_provider, status,
-        verification_sent_at, confirmed_at
-    `);
-    return result[0] ?? null;
+    try {
+      const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+        INSERT INTO pending_registrations (
+          email, supabase_user_id, barbershop_name, owner_name, whatsapp,
+          password_hash, auth_provider, status, verification_sent_at
+        )
+        VALUES (
+          ${email}, ${uuidOrNull(supabaseUserId)}, ${barbershopName}, ${ownerName}, ${whatsapp},
+          ${passwordHash}, 'supabase', 'pending', NOW()
+        )
+        ON CONFLICT (email) DO UPDATE SET
+          supabase_user_id     = COALESCE(EXCLUDED.supabase_user_id, pending_registrations.supabase_user_id),
+          barbershop_name      = EXCLUDED.barbershop_name,
+          owner_name           = EXCLUDED.owner_name,
+          whatsapp             = EXCLUDED.whatsapp,
+          password_hash        = EXCLUDED.password_hash,
+          auth_provider        = 'supabase',
+          status               = 'pending',
+          verification_sent_at = NOW(),
+          confirmed_at         = NULL
+        RETURNING
+          id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
+          NULL::VARCHAR AS cpf_cnpj,
+          NULL::VARCHAR AS desired_plan,
+          password_hash, auth_provider, status,
+          verification_sent_at, confirmed_at
+      `);
+      return result[0] ?? null;
+    } catch (error: any) {
+      if (!isColumnMissingError(error)) throw error;
+
+      const fallbackResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+        INSERT INTO pending_registrations (
+          email, supabase_user_id, barbershop_name, owner_name, whatsapp,
+          auth_provider, status, verification_sent_at
+        )
+        VALUES (
+          ${email}, ${uuidOrNull(supabaseUserId)}, ${barbershopName}, ${ownerName}, ${whatsapp},
+          'supabase', 'pending', NOW()
+        )
+        ON CONFLICT (email) DO UPDATE SET
+          supabase_user_id     = COALESCE(EXCLUDED.supabase_user_id, pending_registrations.supabase_user_id),
+          barbershop_name      = EXCLUDED.barbershop_name,
+          owner_name           = EXCLUDED.owner_name,
+          whatsapp             = EXCLUDED.whatsapp,
+          auth_provider        = 'supabase',
+          status               = 'pending',
+          verification_sent_at = NOW(),
+          confirmed_at         = NULL
+        RETURNING
+          id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
+          NULL::VARCHAR AS cpf_cnpj,
+          NULL::VARCHAR AS desired_plan,
+          NULL::VARCHAR AS password_hash,
+          auth_provider, status,
+          verification_sent_at, confirmed_at
+      `);
+      return fallbackResult[0] ?? null;
+    }
   },
 
   async findPendingRegistrationByEmail(email: string): Promise<Record<string, unknown> | null> {
@@ -497,7 +529,22 @@ export const authRepository = {
       return result[0] ?? null;
     } catch (error: any) {
       if (error?.code === '42P01') return null;
-      throw error;
+      if (!isColumnMissingError(error)) throw error;
+
+      const fallback = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+        SELECT
+          id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
+          NULL::VARCHAR AS cpf_cnpj,
+          NULL::VARCHAR AS desired_plan,
+          NULL::VARCHAR AS password_hash,
+          auth_provider, status,
+          verification_sent_at, confirmed_at
+        FROM pending_registrations
+        WHERE LOWER(email) = LOWER(${email})
+          AND status = 'pending'
+        LIMIT 1
+      `).catch(() => [] as Array<Record<string, unknown>>);
+      return fallback[0] ?? null;
     }
   },
 
@@ -519,7 +566,23 @@ export const authRepository = {
       return result[0] ?? null;
     } catch (error: any) {
       if (error?.code === '42P01') return null;
-      throw error;
+      if (!isColumnMissingError(error)) throw error;
+
+      const fallback = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+        SELECT
+          id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
+          NULL::VARCHAR AS cpf_cnpj,
+          NULL::VARCHAR AS desired_plan,
+          NULL::VARCHAR AS password_hash,
+          auth_provider, status,
+          verification_sent_at, confirmed_at
+        FROM pending_registrations
+        WHERE LOWER(email) = LOWER(${email})
+          AND status = 'pending'
+        LIMIT 1
+        FOR UPDATE
+      `).catch(() => [] as Array<Record<string, unknown>>);
+      return fallback[0] ?? null;
     }
   },
 
@@ -559,7 +622,28 @@ export const authRepository = {
       return result[0] ?? null;
     } catch (error: any) {
       if (error?.code === '42P01') return null;
-      throw error;
+      if (!isColumnMissingError(error)) throw error;
+
+      const fallback = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+        SELECT
+          id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
+          NULL::VARCHAR AS cpf_cnpj,
+          NULL::VARCHAR AS desired_plan,
+          NULL::VARCHAR AS password_hash,
+          auth_provider, status,
+          verification_sent_at, confirmed_at
+        FROM pending_registrations
+        WHERE (${emailFilter} OR ${uuidFilter})
+          AND status <> 'canceled'
+        ORDER BY CASE status
+          WHEN 'pending'   THEN 0
+          WHEN 'completed' THEN 1
+          ELSE 2
+        END
+        LIMIT 1
+        FOR UPDATE
+      `).catch(() => [] as Array<Record<string, unknown>>);
+      return fallback[0] ?? null;
     }
   },
 
