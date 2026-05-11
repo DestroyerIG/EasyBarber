@@ -66,7 +66,7 @@ const upsertManagedUser = async (
         ${uuidOrNull(supabaseUserId)}, ${authProvider}, NOW()
       )
       ON CONFLICT (email) DO UPDATE SET
-        barbershop_id         = EXCLUDED.barbershop_id,
+        barbershop_id         = COALESCE(users.barbershop_id, EXCLUDED.barbershop_id),
         password_hash         = EXCLUDED.password_hash,
         role                  = EXCLUDED.role,
         blocked               = false,
@@ -92,7 +92,7 @@ const upsertManagedUser = async (
       INSERT INTO users (barbershop_id, email, password_hash, role, blocked)
       VALUES (${barbershopId}::uuid, ${email}, ${passwordHash}, ${role}, false)
       ON CONFLICT (email) DO UPDATE SET
-        barbershop_id = EXCLUDED.barbershop_id,
+        barbershop_id = COALESCE(users.barbershop_id, EXCLUDED.barbershop_id),
         password_hash = EXCLUDED.password_hash,
         role          = EXCLUDED.role,
         blocked       = false
@@ -113,6 +113,7 @@ export const authRepository = {
   // -------------------------------------------------------------------------
 
   async findUserByEmail(email: string): Promise<Record<string, unknown> | null> {
+    // Level 1: all real columns
     try {
       const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT
@@ -132,8 +133,11 @@ export const authRepository = {
       return result[0] ?? null;
     } catch (error: any) {
       if (!isColumnMissingError(error)) throw error;
+    }
 
-      const legacyResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+    // Level 2: null-alias optional user columns — keep real barbershop columns
+    try {
+      const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT
           u.id, u.email,
           NULL::VARCHAR     AS password_hash,
@@ -145,7 +149,7 @@ export const authRepository = {
           NULL::UUID        AS supabase_user_id,
           'supabase'::VARCHAR AS auth_provider,
           NULL::TIMESTAMP   AS last_identity_sync_at,
-          b.plan, NULL::VARCHAR AS desired_plan, b.name AS barbershop_name, b.id AS barbershop_id,
+          b.plan, b.desired_plan, b.name AS barbershop_name, b.id AS barbershop_id,
           b.subscription_status, b.subscription_current_period_end
         FROM users u
         JOIN barbershops b ON u.barbershop_id = b.id
@@ -154,11 +158,39 @@ export const authRepository = {
           AND u.blocked   = false
         LIMIT 1
       `);
-      return legacyResult[0] ?? null;
+      return result[0] ?? null;
+    } catch (error: any) {
+      if (!isColumnMissingError(error)) throw error;
     }
+
+    // Level 3: null-alias all optional columns in both tables
+    const finalResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+      SELECT
+        u.id, u.email,
+        NULL::VARCHAR     AS password_hash,
+        u.role, u.blocked,
+        u.email_verified, u.email_verified_at,
+        NULL::VARCHAR     AS email_verification_token_hash,
+        NULL::TIMESTAMP   AS email_verification_expires_at,
+        NULL::TIMESTAMP   AS verification_sent_at,
+        NULL::UUID        AS supabase_user_id,
+        'supabase'::VARCHAR AS auth_provider,
+        NULL::TIMESTAMP   AS last_identity_sync_at,
+        b.plan, NULL::VARCHAR AS desired_plan, b.name AS barbershop_name, b.id AS barbershop_id,
+        NULL::VARCHAR     AS subscription_status,
+        NULL::TIMESTAMP   AS subscription_current_period_end
+      FROM users u
+      JOIN barbershops b ON u.barbershop_id = b.id
+      WHERE LOWER(u.email) = LOWER(${email})
+        AND b.active    = true
+        AND u.blocked   = false
+      LIMIT 1
+    `).catch(() => [] as Array<Record<string, unknown>>);
+    return finalResult[0] ?? null;
   },
 
   async findUserByEmailIncludingBlocked(email: string): Promise<Record<string, unknown> | null> {
+    // Level 1: all real columns
     try {
       const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT
@@ -177,8 +209,11 @@ export const authRepository = {
       return result[0] ?? null;
     } catch (error: any) {
       if (!isColumnMissingError(error)) throw error;
+    }
 
-      const legacyResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+    // Level 2: null-alias optional user columns — keep real barbershop columns
+    try {
+      const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT
           u.id, u.email,
           NULL::VARCHAR     AS password_hash,
@@ -190,7 +225,7 @@ export const authRepository = {
           NULL::UUID        AS supabase_user_id,
           'supabase'::VARCHAR AS auth_provider,
           NULL::TIMESTAMP   AS last_identity_sync_at,
-          b.plan, NULL::VARCHAR AS desired_plan, b.name AS barbershop_name, b.id AS barbershop_id,
+          b.plan, b.desired_plan, b.name AS barbershop_name, b.id AS barbershop_id,
           b.subscription_status, b.subscription_current_period_end
         FROM users u
         JOIN barbershops b ON u.barbershop_id = b.id
@@ -198,11 +233,38 @@ export const authRepository = {
           AND b.active = true
         LIMIT 1
       `);
-      return legacyResult[0] ?? null;
+      return result[0] ?? null;
+    } catch (error: any) {
+      if (!isColumnMissingError(error)) throw error;
     }
+
+    // Level 3: null-alias all optional columns in both tables
+    const finalResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+      SELECT
+        u.id, u.email,
+        NULL::VARCHAR     AS password_hash,
+        u.role, u.blocked,
+        u.email_verified, u.email_verified_at,
+        NULL::VARCHAR     AS email_verification_token_hash,
+        NULL::TIMESTAMP   AS email_verification_expires_at,
+        NULL::TIMESTAMP   AS verification_sent_at,
+        NULL::UUID        AS supabase_user_id,
+        'supabase'::VARCHAR AS auth_provider,
+        NULL::TIMESTAMP   AS last_identity_sync_at,
+        b.plan, NULL::VARCHAR AS desired_plan, b.name AS barbershop_name, b.id AS barbershop_id,
+        NULL::VARCHAR     AS subscription_status,
+        NULL::TIMESTAMP   AS subscription_current_period_end
+      FROM users u
+      JOIN barbershops b ON u.barbershop_id = b.id
+      WHERE LOWER(u.email) = LOWER(${email})
+        AND b.active = true
+      LIMIT 1
+    `).catch(() => [] as Array<Record<string, unknown>>);
+    return finalResult[0] ?? null;
   },
 
   async findUserBySupabaseUserId(supabaseUserId: string): Promise<Record<string, unknown> | null> {
+    // Level 1: all real columns
     try {
       const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT
@@ -219,15 +281,33 @@ export const authRepository = {
       `);
       return result[0] ?? null;
     } catch (error: any) {
-      // Prisma errors on raw queries are wrapped in a PrismaClientKnownRequestError (P2010)
-      // The actual database error code is found in error.meta.code
-      const isColumnMissing = isColumnMissingError(error);
+      if (!isColumnMissingError(error)) throw error;
+    }
 
-      if (isColumnMissing) {
-        // Se a coluna supabase_user_id não existe, é impossível o usuário existir por ela
-        return null;
-      }
-      throw error;
+    // Level 2: null-alias optional columns — keep supabase_user_id in WHERE
+    // If supabase_user_id column itself is missing, this also fails → return null
+    try {
+      const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+        SELECT
+          u.id, u.email,
+          NULL::VARCHAR     AS password_hash,
+          u.role, u.blocked,
+          u.email_verified, u.email_verified_at,
+          u.supabase_user_id,
+          'supabase'::VARCHAR AS auth_provider,
+          NULL::TIMESTAMP   AS last_identity_sync_at,
+          b.plan, NULL::VARCHAR AS desired_plan, b.name AS barbershop_name, b.id AS barbershop_id,
+          NULL::VARCHAR     AS subscription_status,
+          NULL::TIMESTAMP   AS subscription_current_period_end
+        FROM users u
+        JOIN barbershops b ON u.barbershop_id = b.id
+        WHERE u.supabase_user_id = ${supabaseUserId}::uuid
+          AND b.active = true
+        LIMIT 1
+      `);
+      return result[0] ?? null;
+    } catch {
+      return null;
     }
   },
 
@@ -332,14 +412,51 @@ export const authRepository = {
   },
 
   async findBarbershopByEmailForUpdate(_client: unknown = null, email: string): Promise<Record<string, unknown> | null> {
-    const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
-      SELECT id, email, name, owner_name, plan, desired_plan, active
-      FROM barbershops
-      WHERE LOWER(email) = LOWER(${email})
-      LIMIT 1
-      FOR UPDATE
-    `);
-    return result[0] ?? null;
+    try {
+      const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+        SELECT id, email, name, owner_name, plan, desired_plan, active
+        FROM barbershops
+        WHERE LOWER(email) = LOWER(${email})
+        LIMIT 1
+        FOR UPDATE
+      `);
+      return result[0] ?? null;
+    } catch (error: any) {
+      if (!isColumnMissingError(error)) throw error;
+      const fallback = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+        SELECT id, email, name, owner_name, plan, NULL::VARCHAR AS desired_plan, active
+        FROM barbershops
+        WHERE LOWER(email) = LOWER(${email})
+        LIMIT 1
+        FOR UPDATE
+      `).catch(() => [] as Array<Record<string, unknown>>);
+      return fallback[0] ?? null;
+    }
+  },
+
+  async findBarbershopById(_client: unknown = null, barbershopId: string): Promise<Record<string, unknown> | null> {
+    try {
+      const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+        SELECT id, plan, desired_plan, subscription_status, subscription_current_period_end, active
+        FROM barbershops
+        WHERE id = ${barbershopId}::uuid
+        LIMIT 1
+      `);
+      return result[0] ?? null;
+    } catch (error: any) {
+      if (!isColumnMissingError(error)) throw error;
+      const fallback = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+        SELECT id, plan,
+          NULL::VARCHAR   AS desired_plan,
+          NULL::VARCHAR   AS subscription_status,
+          NULL::TIMESTAMP AS subscription_current_period_end,
+          active
+        FROM barbershops
+        WHERE id = ${barbershopId}::uuid
+        LIMIT 1
+      `).catch(() => [] as Array<Record<string, unknown>>);
+      return fallback[0] ?? null;
+    }
   },
 
   // -------------------------------------------------------------------------
@@ -490,14 +607,48 @@ export const authRepository = {
     } catch (error: any) {
       if (!isColumnMissingError(error)) throw error;
 
-      const fallbackResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+      // Fallback 2: omit password_hash, keep status
+      try {
+        const fallbackResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+          INSERT INTO pending_registrations (
+            email, supabase_user_id, barbershop_name, owner_name, whatsapp,
+            auth_provider, status, verification_sent_at
+          )
+          VALUES (
+            ${email}, ${uuidOrNull(supabaseUserId)}, ${barbershopName}, ${ownerName}, ${whatsapp},
+            'supabase', 'pending', NOW()
+          )
+          ON CONFLICT (email) DO UPDATE SET
+            supabase_user_id     = COALESCE(EXCLUDED.supabase_user_id, pending_registrations.supabase_user_id),
+            barbershop_name      = EXCLUDED.barbershop_name,
+            owner_name           = EXCLUDED.owner_name,
+            whatsapp             = EXCLUDED.whatsapp,
+            auth_provider        = 'supabase',
+            status               = 'pending',
+            verification_sent_at = NOW(),
+            confirmed_at         = NULL
+          RETURNING
+            id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
+            NULL::VARCHAR AS cpf_cnpj,
+            NULL::VARCHAR AS desired_plan,
+            NULL::VARCHAR AS password_hash,
+            auth_provider, status,
+            verification_sent_at, confirmed_at
+        `);
+        return fallbackResult[0] ?? null;
+      } catch (err2: any) {
+        if (!isColumnMissingError(err2)) throw err2;
+      }
+
+      // Fallback 3: minimal insert — no password_hash, no status column
+      const minimalResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         INSERT INTO pending_registrations (
           email, supabase_user_id, barbershop_name, owner_name, whatsapp,
-          auth_provider, status, verification_sent_at
+          auth_provider, verification_sent_at
         )
         VALUES (
           ${email}, ${uuidOrNull(supabaseUserId)}, ${barbershopName}, ${ownerName}, ${whatsapp},
-          'supabase', 'pending', NOW()
+          'supabase', NOW()
         )
         ON CONFLICT (email) DO UPDATE SET
           supabase_user_id     = COALESCE(EXCLUDED.supabase_user_id, pending_registrations.supabase_user_id),
@@ -505,18 +656,18 @@ export const authRepository = {
           owner_name           = EXCLUDED.owner_name,
           whatsapp             = EXCLUDED.whatsapp,
           auth_provider        = 'supabase',
-          status               = 'pending',
-          verification_sent_at = NOW(),
-          confirmed_at         = NULL
+          verification_sent_at = NOW()
         RETURNING
           id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
           NULL::VARCHAR AS cpf_cnpj,
           NULL::VARCHAR AS desired_plan,
           NULL::VARCHAR AS password_hash,
-          auth_provider, status,
-          verification_sent_at, confirmed_at
-      `);
-      return fallbackResult[0] ?? null;
+          auth_provider,
+          NULL::VARCHAR AS status,
+          verification_sent_at,
+          NULL::TIMESTAMP AS confirmed_at
+      `).catch(() => [] as Array<Record<string, unknown>>);
+      return minimalResult[0] ?? null;
     }
   },
 
@@ -668,6 +819,7 @@ export const authRepository = {
       return result[0] ?? null;
     } catch (error: any) {
       if (error?.code === '42P01') return null;
+      if (isColumnMissingError(error)) return null;
       throw error;
     }
   },
@@ -683,6 +835,7 @@ export const authRepository = {
       `);
     } catch (error: any) {
       if (error?.code === '42P01') return;
+      if (isColumnMissingError(error)) return;
       throw error;
     }
   },

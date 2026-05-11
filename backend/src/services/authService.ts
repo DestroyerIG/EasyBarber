@@ -624,15 +624,26 @@ const reconcileSupabaseConfirmedUser = async ({
     let localUser: Record<string, unknown> | null = userBySupabaseIdRow || userByEmailRow || null;
     summary.localUserFound = Boolean(localUser);
 
+    // barbershop_id from the user row — always prefer existing tenant
     let barbershopId: string | null = (localUser?.barbershop_id as string) || null;
 
-    if (!barbershopId) {
+    if (barbershopId) {
+      summary.barbershopReused = true;
+      logger.info(
+        { event: 'tenant_reused', barbershopId, email: normalizedEmail, supabaseUserId, reason },
+        'Reconciliação: tenant existente reutilizado via usuário local'
+      );
+    } else {
       const lookupEmail = (pendingReg?.email as string) || normalizedEmail;
       const reusableBarbershop = await authRepository.findBarbershopByEmailForUpdate(client, lookupEmail);
 
       if (reusableBarbershop) {
         barbershopId = (reusableBarbershop as Record<string, unknown>).id as string;
         summary.barbershopReused = true;
+        logger.info(
+          { event: 'tenant_reused', barbershopId, email: normalizedEmail, supabaseUserId, reason },
+          'Reconciliação: tenant existente reutilizado via email'
+        );
       } else if (pendingReg) {
         const createdBarbershop = await authRepository.createBarbershop(client, {
           name: pendingReg.barbershop_name as string,
@@ -645,6 +656,10 @@ const reconcileSupabaseConfirmedUser = async ({
         });
         barbershopId = (createdBarbershop as Record<string, unknown>).id as string;
         summary.barbershopCreated = true;
+        logger.info(
+          { event: 'tenant_created', barbershopId, email: normalizedEmail, supabaseUserId, reason, source: 'pending_registration' },
+          'Reconciliação: novo tenant criado a partir de pending_registration'
+        );
       } else {
         const meta = (supabaseUser.user_metadata as Record<string, unknown>) || {};
         const displayName = (meta.full_name as string) || (meta.name as string) || normalizedEmail;
@@ -659,12 +674,28 @@ const reconcileSupabaseConfirmedUser = async ({
         });
         barbershopId = (createdBarbershop as Record<string, unknown>).id as string;
         summary.barbershopCreated = true;
+        logger.info(
+          { event: 'tenant_created', barbershopId, email: normalizedEmail, supabaseUserId, reason, source: 'supabase_identity' },
+          'Reconciliação: novo tenant criado a partir de identidade Supabase'
+        );
       }
     }
 
     summary.barbershopId = barbershopId;
     summary.desiredPlan = (pendingReg?.desired_plan as string) || (localUser?.desired_plan as string) || DEFAULT_PLAN;
-    summary.subscriptionStatus = (localUser?.subscription_status as string) || 'incomplete';
+
+    // Get real subscription status from barbershop — never infer incomplete blindly
+    if (barbershopId) {
+      const barbershop = await authRepository.findBarbershopById(client, barbershopId);
+      summary.subscriptionStatus = (barbershop?.subscription_status as string) || 'incomplete';
+      summary.desiredPlan = (pendingReg?.desired_plan as string) ||
+        (barbershop?.desired_plan as string) ||
+        (localUser?.desired_plan as string) ||
+        DEFAULT_PLAN;
+    } else {
+      summary.subscriptionStatus = 'incomplete';
+    }
+
     summary.paymentRequired = !['active', 'trialing'].includes(summary.subscriptionStatus);
 
     if (!localUser && barbershopId) {
@@ -678,6 +709,10 @@ const reconcileSupabaseConfirmedUser = async ({
       }) as Record<string, unknown> | null;
       summary.localUserCreated = Boolean(localUser);
       summary.localUserFound = Boolean(localUser);
+      logger.info(
+        { event: 'user_created', userId: localUser?.id, barbershopId, email: normalizedEmail, supabaseUserId, reason },
+        'Reconciliação: usuário local criado'
+      );
     } else if (localUser) {
       const syncedUser = await authRepository.updateUserIdentitySync(client, {
         userId: localUser.id as string,
@@ -688,6 +723,10 @@ const reconcileSupabaseConfirmedUser = async ({
       if (syncedUser) {
         summary.localUserUpdated = true;
       }
+      logger.info(
+        { event: 'user_reconciled', userId: localUser.id, barbershopId, email: normalizedEmail, supabaseUserId, reason },
+        'Reconciliação: usuário local sincronizado'
+      );
     }
 
     if (localUser?.id) {
