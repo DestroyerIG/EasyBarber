@@ -454,18 +454,17 @@ export const authRepository = {
     const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
       INSERT INTO pending_registrations (
         email, supabase_user_id, barbershop_name, owner_name, whatsapp,
-        desired_plan, password_hash, auth_provider, status, verification_sent_at
+        password_hash, auth_provider, status, verification_sent_at
       )
       VALUES (
         ${email}, ${uuidOrNull(supabaseUserId)}, ${barbershopName}, ${ownerName}, ${whatsapp},
-        ${desiredPlan}, ${passwordHash}, 'supabase', 'pending', NOW()
+        ${passwordHash}, 'supabase', 'pending', NOW()
       )
       ON CONFLICT (email) DO UPDATE SET
         supabase_user_id     = COALESCE(EXCLUDED.supabase_user_id, pending_registrations.supabase_user_id),
         barbershop_name      = EXCLUDED.barbershop_name,
         owner_name           = EXCLUDED.owner_name,
         whatsapp             = EXCLUDED.whatsapp,
-        desired_plan         = EXCLUDED.desired_plan,
         password_hash        = EXCLUDED.password_hash,
         auth_provider        = 'supabase',
         status               = 'pending',
@@ -474,7 +473,8 @@ export const authRepository = {
       RETURNING
         id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
         NULL::VARCHAR AS cpf_cnpj,
-        desired_plan, password_hash, auth_provider, status,
+        NULL::VARCHAR AS desired_plan,
+        password_hash, auth_provider, status,
         verification_sent_at, confirmed_at
     `);
     return result[0] ?? null;
@@ -486,7 +486,8 @@ export const authRepository = {
         SELECT
           id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
           NULL::VARCHAR AS cpf_cnpj,
-          desired_plan, password_hash, auth_provider, status,
+          NULL::VARCHAR AS desired_plan,
+          password_hash, auth_provider, status,
           verification_sent_at, confirmed_at
         FROM pending_registrations
         WHERE LOWER(email) = LOWER(${email})
@@ -506,7 +507,8 @@ export const authRepository = {
         SELECT
           id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
           NULL::VARCHAR AS cpf_cnpj,
-          desired_plan, password_hash, auth_provider, status,
+          NULL::VARCHAR AS desired_plan,
+          password_hash, auth_provider, status,
           verification_sent_at, confirmed_at
         FROM pending_registrations
         WHERE LOWER(email) = LOWER(${email})
@@ -540,7 +542,8 @@ export const authRepository = {
         SELECT
           id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
           NULL::VARCHAR AS cpf_cnpj,
-          desired_plan, password_hash, auth_provider, status,
+          NULL::VARCHAR AS desired_plan,
+          password_hash, auth_provider, status,
           verification_sent_at, confirmed_at
         FROM pending_registrations
         WHERE (${emailFilter} OR ${uuidFilter})
