@@ -626,26 +626,37 @@ const reconcileSupabaseConfirmedUser = async ({
 
     let barbershopId: string | null = (localUser?.barbershop_id as string) || null;
 
-    if (!barbershopId && pendingReg) {
-      const reusableBarbershop = await authRepository.findBarbershopByEmailForUpdate(
-        client,
-        pendingReg.email as string
-      );
+    if (!barbershopId) {
+      const lookupEmail = (pendingReg?.email as string) || normalizedEmail;
+      const reusableBarbershop = await authRepository.findBarbershopByEmailForUpdate(client, lookupEmail);
 
       if (reusableBarbershop) {
         barbershopId = (reusableBarbershop as Record<string, unknown>).id as string;
         summary.barbershopReused = true;
-      } else {
+      } else if (pendingReg) {
         const createdBarbershop = await authRepository.createBarbershop(client, {
           name: pendingReg.barbershop_name as string,
           ownerName: pendingReg.owner_name as string,
           email: pendingReg.email as string,
           whatsapp: pendingReg.whatsapp as string,
-          cpfCnpj: pendingReg.cpf_cnpj as string,
+          cpfCnpj: (pendingReg.cpf_cnpj as string) || null,
           plan: DEFAULT_PLAN,
           desiredPlan: (pendingReg.desired_plan as string) || DEFAULT_PLAN,
         });
-
+        barbershopId = (createdBarbershop as Record<string, unknown>).id as string;
+        summary.barbershopCreated = true;
+      } else {
+        const meta = (supabaseUser.user_metadata as Record<string, unknown>) || {};
+        const displayName = (meta.full_name as string) || (meta.name as string) || normalizedEmail;
+        const createdBarbershop = await authRepository.createBarbershop(client, {
+          name: displayName,
+          ownerName: displayName,
+          email: normalizedEmail,
+          whatsapp: '',
+          cpfCnpj: null,
+          plan: DEFAULT_PLAN,
+          desiredPlan: DEFAULT_PLAN,
+        });
         barbershopId = (createdBarbershop as Record<string, unknown>).id as string;
         summary.barbershopCreated = true;
       }
@@ -656,11 +667,12 @@ const reconcileSupabaseConfirmedUser = async ({
     summary.subscriptionStatus = (localUser?.subscription_status as string) || 'incomplete';
     summary.paymentRequired = !['active', 'trialing'].includes(summary.subscriptionStatus);
 
-    if (!localUser && pendingReg && barbershopId) {
+    if (!localUser && barbershopId) {
+      const passwordHash = (pendingReg?.password_hash as string) || generateSupabasePasswordHashPlaceholder();
       localUser = await authRepository.upsertTenantAdminUser(client, {
         barbershopId,
-        email: pendingReg.email as string,
-        passwordHash: pendingReg.password_hash as string,
+        email: normalizedEmail,
+        passwordHash,
         supabaseUserId,
         emailVerified: true,
       }) as Record<string, unknown> | null;
@@ -834,8 +846,16 @@ const createInternalSessionForConfirmedUser = async (
     user = await authRepository.findUserByEmailIncludingBlocked(email) as Record<string, unknown> | null;
   }
 
-  if (!user || user.blocked) {
-    throw new UnauthorizedError('Usuário não encontrado');
+  if (user?.blocked) {
+    throw new UnauthorizedError('Conta bloqueada');
+  }
+
+  if (!user) {
+    throw new AppError(
+      'Usuário local não encontrado após reconciliação. Contate o suporte.',
+      500,
+      'LOCAL_USER_NOT_FOUND_AFTER_RECONCILE'
+    );
   }
 
   await refreshTokenRepository.revokeUserRefreshTokens(user.id as string);
@@ -976,16 +996,20 @@ export const authService = {
       }
 
       if (!user) {
-        logger.warn(
+        logger.error(
           {
             email: normalizedEmail,
             authMode: getAuthProviderMode(),
             supabaseUserId: supabaseIdentity.userId,
-            reason: 'local_user_not_found',
+            reason: 'local_user_creation_failed_after_reconcile',
           },
-          'Login negado: usuário local não encontrado após autenticação Supabase'
+          'Login falhou: reconciliação Supabase não criou usuário local'
         );
-        throw new UnauthorizedError('Email ou senha incorretos');
+        throw new AppError(
+          'Não foi possível completar o login. Tente novamente ou entre em contato com o suporte.',
+          500,
+          'LOCAL_USER_RECONCILE_FAILED'
+        );
       }
 
       const authProvider = 'supabase';

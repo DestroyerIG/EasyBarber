@@ -135,11 +135,15 @@ export const authRepository = {
 
       const legacyResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT
-          u.id, u.email, u.password_hash, u.role, u.blocked,
+          u.id, u.email,
+          NULL::VARCHAR     AS password_hash,
+          u.role, u.blocked,
           u.email_verified, u.email_verified_at,
-          u.email_verification_token_hash, u.email_verification_expires_at, u.verification_sent_at,
+          NULL::VARCHAR     AS email_verification_token_hash,
+          NULL::TIMESTAMP   AS email_verification_expires_at,
+          NULL::TIMESTAMP   AS verification_sent_at,
           NULL::UUID        AS supabase_user_id,
-          'legacy'::VARCHAR AS auth_provider,
+          'supabase'::VARCHAR AS auth_provider,
           NULL::TIMESTAMP   AS last_identity_sync_at,
           b.plan, NULL::VARCHAR AS desired_plan, b.name AS barbershop_name, b.id AS barbershop_id,
           b.subscription_status, b.subscription_current_period_end
@@ -176,11 +180,15 @@ export const authRepository = {
 
       const legacyResult = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT
-          u.id, u.email, u.password_hash, u.role, u.blocked,
+          u.id, u.email,
+          NULL::VARCHAR     AS password_hash,
+          u.role, u.blocked,
           u.email_verified, u.email_verified_at,
-          u.email_verification_token_hash, u.email_verification_expires_at, u.verification_sent_at,
+          NULL::VARCHAR     AS email_verification_token_hash,
+          NULL::TIMESTAMP   AS email_verification_expires_at,
+          NULL::TIMESTAMP   AS verification_sent_at,
           NULL::UUID        AS supabase_user_id,
-          'legacy'::VARCHAR AS auth_provider,
+          'supabase'::VARCHAR AS auth_provider,
           NULL::TIMESTAMP   AS last_identity_sync_at,
           b.plan, NULL::VARCHAR AS desired_plan, b.name AS barbershop_name, b.id AS barbershop_id,
           b.subscription_status, b.subscription_current_period_end
