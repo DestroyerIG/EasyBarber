@@ -351,17 +351,30 @@ model WhatsappSession {
 }
 
 model WhatsappBotConfig {
-  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  barbershopId          String   @unique @map("barbershop_id") @db.Uuid
-  welcomeMessage        String?  @map("welcome_message") @db.Text
-  askNameMessage        String?  @map("ask_name_message") @db.Text
-  attendantMessage      String?  @map("attendant_message") @db.Text
-  confirmationMessage   String?  @map("confirmation_message") @db.Text
-  reminderMessage       String?  @map("reminder_message") @db.Text
-  invalidOptionMessage  String?  @map("invalid_option_message") @db.Text
-  sessionExpiredMessage String?  @map("session_expired_message") @db.Text
-  createdAt             DateTime @default(now()) @map("created_at")
-  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at")
+  id                               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  barbershopId                     String   @unique @map("barbershop_id") @db.Uuid
+  welcomeHeader                    String?  @map("welcome_header") @db.Text
+  askNameMessage                   String?  @map("ask_name_message") @db.Text
+  attendantMessage                 String?  @map("attendant_message") @db.Text
+  confirmationMessage              String?  @map("confirmation_message") @db.Text
+  reminderMessage                  String?  @map("reminder_message") @db.Text
+  invalidOptionMessage             String?  @map("invalid_option_message") @db.Text
+  sessionExpiredMessage            String?  @map("session_expired_message") @db.Text
+  endSessionMessage                String?  @map("end_session_message") @db.Text
+  nameValidationMessage            String?  @map("name_validation_message") @db.Text
+  noSlotsMessage                   String?  @map("no_slots_message") @db.Text
+  cancelNoAppointmentsMessage      String?  @map("cancel_no_appointments_message") @db.Text
+  cancelListMessage                String?  @map("cancel_list_message") @db.Text
+  cancelSuccessMessage             String?  @map("cancel_success_message") @db.Text
+  rescheduleNoAppointmentsMessage  String?  @map("reschedule_no_appointments_message") @db.Text
+  rescheduleListMessage            String?  @map("reschedule_list_message") @db.Text
+  noPreviousAppointmentsMessage    String?  @map("no_previous_appointments_message") @db.Text
+  ratingQuestionMessage            String?  @map("rating_question_message") @db.Text
+  ratingConfirmationMessage        String?  @map("rating_confirmation_message") @db.Text
+  promotionsMessage                String?  @map("promotions_message") @db.Text
+  instagramMessage                 String?  @map("instagram_message") @db.Text
+  createdAt                        DateTime @default(now()) @map("created_at")
+  updatedAt                        DateTime @default(now()) @updatedAt @map("updated_at")
 
   barbershop Barbershop @relation(fields: [barbershopId], references: [id], onDelete: Cascade)
 
