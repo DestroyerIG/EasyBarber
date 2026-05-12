@@ -1050,7 +1050,7 @@ const hasTrustedLidAuthorSource = (sourcePath = '') => {
 
 export const resolveSafeReplyDestination = ({
   phone,
-  fromMe = false,
+  fromMe = undefined,
   remoteJidOriginal = null,
   connectedNumber = null,
   knownInstanceNumbers = [] as string[],
@@ -1068,6 +1068,8 @@ export const resolveSafeReplyDestination = ({
   if (normalizeWebhookBoolean(fromMe)) {
     return { ok: false, destination: null, reason: 'from_me', conversationKind: resolveIncomingConversationKind(remoteJidOriginal) };
   }
+  // fromMe===false = Evolution API explicitly confirmed NOT from bot — skip phone-based self-target
+  const fromMeExplicitlyFalse = fromMe === false;
 
   const conversationKind = resolveIncomingConversationKind(remoteJidOriginal);
 
@@ -1111,13 +1113,15 @@ export const resolveSafeReplyDestination = ({
     if (normalized) instanceNumbers.add(normalized);
   }
 
-  if (normalizedConnectedNumber && isSelfMessage({ authorPhone: destination, connectedNumber: normalizedConnectedNumber })) {
+  if (!fromMeExplicitlyFalse && normalizedConnectedNumber && isSelfMessage({ authorPhone: destination, connectedNumber: normalizedConnectedNumber })) {
     return { ok: false, destination, reason: 'connected_number_match', conversationKind };
   }
 
-  for (const inst of instanceNumbers) {
-    if (isSelfMessage({ authorPhone: destination, connectedNumber: inst })) {
-      return { ok: false, destination, reason: 'self_target', conversationKind };
+  if (!fromMeExplicitlyFalse) {
+    for (const inst of instanceNumbers) {
+      if (isSelfMessage({ authorPhone: destination, connectedNumber: inst })) {
+        return { ok: false, destination, reason: 'self_target', conversationKind };
+      }
     }
   }
 

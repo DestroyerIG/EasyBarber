@@ -168,19 +168,51 @@ describe('whatsappSelfReplyGuard — bot nao deve responder a si proprio', () =>
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
   });
 
-  it('ignora quando sender extraído é igual ao numero da instancia', async () => {
+  it('ignora quando sender extraído é igual ao numero da instancia (fromMe ausente)', async () => {
+    // fromMe absent → heuristic runs → phone match → blocked
     const payload = {
-      key: { remoteJid: `${INSTANCE_NUMBER}@s.whatsapp.net`, fromMe: false },
+      key: { remoteJid: `${INSTANCE_NUMBER}@s.whatsapp.net` },
       message: { conversation: 'oi' },
     };
 
     const result = await handleIncomingMessage(payload, 'oi', {
       eventName: 'messages-upsert',
       preExtractedPhone: INSTANCE_NUMBER,
+      preExtractedInstanceNumbers: [INSTANCE_NUMBER],
     });
 
     expect(result).toMatchObject({ ok: false, ignored: true, reason: 'self_reply_blocked' });
     expect(mockSendWhatsAppMessage).not.toHaveBeenCalled();
+  });
+
+  it('nao bloqueia cliente com numero antigo (9-digito) quando fromMe=false explicito', async () => {
+    // Cenário real: bot = 5583996311811 (13d), cliente = 558396311811 (12d, variante sem 9)
+    // expandBrazilMobileVariants expande o numero do bot incluindo 558396311811 como variante
+    // → colisão falsa. fromMe=false (Evolution API) é definitivo: mensagem NÃO veio do bot.
+    const BOT_NUMBER_13D = '5583996311811';
+    const CLIENT_NUMBER_12D = '558396311811';
+
+    mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: 'tenant-1' }] });
+    mockPoolQuery.mockResolvedValueOnce({ rows: [{ name: 'Barber Prime' }] });
+
+    const payload = {
+      key: {
+        remoteJid: `${CLIENT_NUMBER_12D}@s.whatsapp.net`,
+        fromMe: false,
+      },
+      message: { conversation: 'quero agendar' },
+    };
+
+    const result = await handleIncomingMessage(payload, 'quero agendar', {
+      barbershopId: 'tenant-1',
+      eventName: 'messages-upsert',
+      preExtractedPhone: CLIENT_NUMBER_12D,
+      preExtractedInstanceNumbers: [BOT_NUMBER_13D],
+    });
+
+    // fromMe=false → heurística de número ignorada → mensagem processada normalmente
+    expect(result).not.toMatchObject({ reason: 'self_reply_blocked' });
+    expect(result.ok).toBe(true);
   });
 
   it('ignora quando preExtractedPhone bate com preExtractedInstanceNumbers', async () => {
@@ -200,9 +232,6 @@ describe('whatsappSelfReplyGuard — bot nao deve responder a si proprio', () =>
   it('processa corretamente payload Evolution API messages.upsert de cliente externo', async () => {
     const CLIENT_NUMBER = '5583999999999';
 
-    mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: 'tenant-1' }] });
-    mockPoolQuery.mockResolvedValueOnce({ rows: [{ name: 'Barber Prime' }] });
-
     const payload = {
       event: 'messages.upsert',
       data: {
@@ -221,8 +250,10 @@ describe('whatsappSelfReplyGuard — bot nao deve responder a si proprio', () =>
     };
 
     const result = await handleIncomingMessage(payload, 'oi', {
+      barbershopId: 'tenant-1',
       eventName: 'messages-upsert',
       preExtractedPhone: CLIENT_NUMBER,
+      preExtractedInstanceNumbers: [INSTANCE_NUMBER],
     });
 
     expect(result).toMatchObject({ ok: true, ignored: false });

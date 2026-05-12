@@ -169,6 +169,12 @@ const isWebhookBooleanTrue = (value: unknown): boolean => {
   return value.trim().toLowerCase() === 'true' || value.trim().toLowerCase() === '1';
 };
 
+const isWebhookBooleanFalse = (value: unknown): boolean => {
+  if (value === false || value === 0) return true;
+  if (typeof value !== 'string') return false;
+  return value.trim().toLowerCase() === 'false' || value.trim().toLowerCase() === '0';
+};
+
 /**
  * FIX Bug 2 — set sincronizado com INCOMING_WEBHOOK_EVENTS de whatsapp.js.
  * Removidos "messages-set" e "messageset": existiam aqui mas não no router,
@@ -215,6 +221,32 @@ const isFromMe = (payload: Record<string, unknown> = {}): boolean => {
     msgs?.[0]?.fromMe,
   ];
   return candidates.some((v) => isWebhookBooleanTrue(v));
+};
+
+/**
+ * Returns true if fromMe is explicitly true, false if explicitly false, undefined if field absent.
+ * Distinguishes "not from me" from "unknown" to avoid false-positive self-reply blocks.
+ */
+const isFromMeExplicit = (payload: Record<string, unknown> = {}): boolean | undefined => {
+  const data = payload?.data as Record<string, unknown> | undefined;
+  const dataMsgs = data?.messages as Record<string, unknown>[] | undefined;
+  const msgs = payload?.messages as Record<string, unknown>[] | undefined;
+
+  const candidates: unknown[] = [
+    payload?.fromMe,
+    (payload?.key as Record<string, unknown>)?.fromMe,
+    data?.fromMe,
+    (data?.key as Record<string, unknown>)?.fromMe,
+    (dataMsgs?.[0]?.key as Record<string, unknown>)?.fromMe,       // Evolution API: data.messages[0].key.fromMe
+    dataMsgs?.[0]?.fromMe,
+    ((dataMsgs?.[0]?.message as Record<string, unknown>)?.key as Record<string, unknown>)?.fromMe,
+    (msgs?.[0]?.key as Record<string, unknown>)?.fromMe,           // messages[0].key.fromMe
+    msgs?.[0]?.fromMe,
+    ((msgs?.[0]?.message as Record<string, unknown>)?.key as Record<string, unknown>)?.fromMe,
+  ];
+  if (candidates.some(isWebhookBooleanTrue)) return true;
+  if (candidates.some(isWebhookBooleanFalse)) return false;
+  return undefined;
 };
 
 const isIncomingMessageEvent = (payload: Record<string, unknown> = {}): boolean => {
@@ -1691,8 +1723,13 @@ export const handleIncomingMessage = async (
   text: unknown,
   options: HandleIncomingMessageOptions = {}
 ): Promise<FlowResult> => {
-  const payloadFromMe = phoneOrPayload && typeof phoneOrPayload === 'object' && !Array.isArray(phoneOrPayload) && isFromMe(phoneOrPayload as Record<string, unknown>);
-  const isPayloadInput = phoneOrPayload && typeof phoneOrPayload === 'object' && !Array.isArray(phoneOrPayload);
+  const isPayloadInput = Boolean(phoneOrPayload && typeof phoneOrPayload === 'object' && !Array.isArray(phoneOrPayload));
+  // Three-state: true=explicitly from bot, false=explicitly NOT from bot, undefined=field absent
+  const payloadFromMeExplicit: boolean | undefined = isPayloadInput
+    ? isFromMeExplicit(phoneOrPayload as Record<string, unknown>)
+    : undefined;
+  // Keep legacy boolean for backward-compat with isFromMe-based call at line below
+  const payloadFromMe = payloadFromMeExplicit === true;
 
   const {
     normalizedPhone,
@@ -1803,7 +1840,12 @@ export const handleIncomingMessage = async (
   );
 
   try {
-    const fromMe = payloadFromMe || phoneExtraction?.fromMe;
+    // Three-state fromMe: payload is primary source of truth; extraction is fallback for string inputs.
+    // extractWebhookFromMe uses normalizeWebhookBoolean which returns false for absent fields —
+    // can't distinguish absent vs explicit false. Only propagate extraction's true; treat false as uncertain.
+    const fromMe: boolean | undefined =
+      payloadFromMeExplicit !== undefined ? payloadFromMeExplicit
+      : (phoneExtraction?.fromMe === true ? true : undefined);
     const authorPhone = normalizedPhone;
 
     // REGRA 1: Bloqueio por fromMe
@@ -1833,44 +1875,65 @@ export const handleIncomingMessage = async (
       return { ok: false, ignored: true, reason: 'ambiguous_phone' };
     }
 
-    // REGRA 1: Bloqueio de auto-resposta — comparação normalizada + variantes BR
-    if (connectedNumber && isSelfMessage({ authorPhone, connectedNumber })) {
-      const normalizedAuth = normalizeWhatsAppNumber(authorPhone);
-      const normalizedConn = normalizeWhatsAppNumber(connectedNumber);
-      logger.warn(
-        {
-          ...flowDebugBase,
-          fromMe,
-          authorPhone,
-          normalizedAuthor: normalizedAuth,
-          connectedNumber,
-          normalizedConnected: normalizedConn,
-          reason: 'self_reply_blocked',
-        },
-        'Bloqueado: tentativa de auto-resposta (authorPhone === connectedNumber)'
-      );
-      return { ok: false, ignored: true, reason: 'self_reply_blocked' };
-    }
+    // REGRA 1: Bloqueio de auto-resposta — heurística de número (skipped quando fromMe===false)
+    // fromMe===false é sinal definitivo da Evolution API: mensagem NÃO veio do bot.
+    // Só executar comparação de números quando fromMe é desconhecido (undefined) ou true.
+    if (fromMe !== false) {
+      if (connectedNumber && isSelfMessage({ authorPhone, connectedNumber })) {
+        const normalizedAuth = normalizeWhatsAppNumber(authorPhone);
+        const normalizedConn = normalizeWhatsAppNumber(connectedNumber);
+        logger.warn(
+          {
+            ...flowDebugBase,
+            fromMe,
+            authorPhone,
+            normalizedAuthor: normalizedAuth,
+            connectedNumber,
+            normalizedConnected: normalizedConn,
+            remoteJid: remoteJidOriginal,
+            reason: 'self_reply_blocked',
+            decisionReason: 'phone_match_with_unknown_fromMe',
+          },
+          'Bloqueado: auto-resposta por comparação de número (fromMe desconhecido)'
+        );
+        return { ok: false, ignored: true, reason: 'self_reply_blocked' };
+      }
 
-    // REGRA 1: Bloqueio de auto-resposta — authorPhone em knownInstanceNumbers (normalizado)
-    if (
-      Array.isArray(knownInstanceNumbers) &&
-      knownInstanceNumbers.some((n) => isSelfMessage({ authorPhone, connectedNumber: n }))
-    ) {
-      const normalizedAuth = normalizeWhatsAppNumber(authorPhone);
-      logger.warn(
+      if (
+        Array.isArray(knownInstanceNumbers) &&
+        knownInstanceNumbers.some((n) => isSelfMessage({ authorPhone, connectedNumber: n }))
+      ) {
+        const normalizedAuth = normalizeWhatsAppNumber(authorPhone);
+        logger.warn(
+          {
+            ...flowDebugBase,
+            fromMe,
+            authorPhone,
+            normalizedAuthor: normalizedAuth,
+            connectedNumber,
+            knownInstanceNumbers,
+            remoteJid: remoteJidOriginal,
+            reason: 'self_reply_instance_number',
+            decisionReason: 'instance_number_match_with_unknown_fromMe',
+          },
+          'Bloqueado: auto-resposta (authorPhone em knownInstanceNumbers)'
+        );
+        return { ok: false, ignored: true, reason: 'self_reply_blocked' };
+      }
+    } else {
+      logger.debug(
         {
           ...flowDebugBase,
           fromMe,
           authorPhone,
-          normalizedAuthor: normalizedAuth,
+          normalizedAuthor: normalizeWhatsAppNumber(authorPhone),
           connectedNumber,
-          knownInstanceNumbers,
-          reason: 'self_reply_instance_number',
+          normalizedConnected: normalizeWhatsAppNumber(connectedNumber),
+          remoteJid: remoteJidOriginal,
+          decisionReason: 'from_me_false_heuristic_skipped',
         },
-        'Bloqueado: tentativa de auto-resposta (authorPhone em knownInstanceNumbers)'
+        'Auto-reply heuristic skipped: fromMe=false (Evolution API authoritative)'
       );
-      return { ok: false, ignored: true, reason: 'self_reply_blocked' };
     }
 
     // REGRA 3: Sanitização do número — validar formato E.164
