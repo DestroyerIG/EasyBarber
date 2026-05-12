@@ -1,39 +1,59 @@
 import type { Request, Response, NextFunction } from 'express';
+import type { Coupon } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
 import { AppError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 
+// Prisma returns camelCase; frontend AdminCoupon type expects snake_case.
+const toCouponResponse = (c: Coupon) => ({
+  id: c.id,
+  code: c.code,
+  description: c.description,
+  discount_type: c.discountType,
+  discount_value: c.discountValue,
+  max_uses: c.maxUses,
+  current_uses: c.currentUses,
+  valid_until: c.validUntil,
+  active: c.active,
+  created_at: c.createdAt,
+  updated_at: c.updatedAt,
+});
+
 export const listCoupons = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const coupons = await prisma.coupon.findMany({ orderBy: { createdAt: 'desc' } });
-    res.json({ data: coupons });
+    res.json({ data: coupons.map(toCouponResponse) });
   } catch (err) { next(err); }
 };
 
 export const createCoupon = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const body = req.body as Record<string, unknown>;
-    const { code, description, discount_type, discount_value, max_uses } = body;
+    const { code, description } = body;
 
-    // Accept valid_until (snake), validUntil (camel), or expiresAt (legacy) for compatibility
+    // Normalize: accept snake_case, camelCase, or legacy aliases
+    const discountType = String(body.discount_type ?? body.discountType ?? body.type ?? 'percent');
+    const discountValue = Number(body.discount_value ?? body.discountValue ?? body.value ?? 0);
+    const maxUses = (body.max_uses ?? body.maxUses) ? Number(body.max_uses ?? body.maxUses) : null;
     const rawValidUntil = body.valid_until ?? body.validUntil ?? body.expiresAt ?? null;
-    const parsedValidUntil = rawValidUntil ? new Date(String(rawValidUntil)) : null;
+    const validUntil = rawValidUntil ? new Date(String(rawValidUntil)) : null;
 
-    if (!code || !discount_type || discount_value === undefined || discount_value === null)
+    if (!code || !discountType || discountValue === undefined || discountValue === null)
       throw new AppError('Campos obrigatórios: code, discount_type, discount_value', 400, 'INVALID_COUPON_PAYLOAD');
 
-    if (!['percent', 'fixed'].includes(String(discount_type)))
+    if (!['percent', 'fixed'].includes(discountType))
       throw new AppError('discount_type deve ser "percent" ou "fixed"', 400, 'INVALID_DISCOUNT_TYPE');
 
-    if (Number(discount_value) <= 0)
+    if (discountValue <= 0)
       throw new AppError('discount_value deve ser maior que zero', 400, 'INVALID_DISCOUNT_VALUE');
 
     logger.info({
       event: 'coupon_create_attempt',
       code,
-      validUntil: parsedValidUntil,
-      discountType: discount_type,
-      discountValue: discount_value,
+      discountType,
+      discountValue,
+      maxUses,
+      validUntil,
     });
 
     try {
@@ -41,15 +61,15 @@ export const createCoupon = async (req: Request, res: Response, next: NextFuncti
         data: {
           code: String(code).trim().toUpperCase(),
           description: description ? String(description).trim() : null,
-          discountType: String(discount_type),
-          discountValue: Number(discount_value),
-          maxUses: max_uses ? Number(max_uses) : null,
-          validUntil: parsedValidUntil,
+          discountType,
+          discountValue,
+          maxUses,
+          validUntil,
         },
       });
 
       logger.info({ event: 'coupon_created', couponId: coupon.id, code: coupon.code });
-      res.status(201).json({ data: coupon });
+      res.status(201).json({ data: toCouponResponse(coupon) });
     } catch (err: unknown) {
       if ((err as { code?: string }).code === 'P2002')
         return next(new AppError('Já existe um cupom com esse código.', 409, 'COUPON_CODE_DUPLICATE'));
@@ -62,14 +82,16 @@ export const updateCoupon = async (req: Request, res: Response, next: NextFuncti
   try {
     const { id } = req.params as { id: string };
     const body = req.body as Record<string, unknown>;
-    const { description, discount_type, discount_value, max_uses, active } = body;
 
-    // Accept valid_until (snake), validUntil (camel), or expiresAt (legacy) for compatibility
+    const discountType = body.discount_type ?? body.discountType;
+    const discountValue = body.discount_value ?? body.discountValue;
+    const maxUses = body.max_uses ?? body.maxUses;
     const hasValidUntil = 'valid_until' in body || 'validUntil' in body || 'expiresAt' in body;
     const rawValidUntil = body.valid_until ?? body.validUntil ?? body.expiresAt ?? null;
-    const parsedValidUntil = rawValidUntil ? new Date(String(rawValidUntil)) : null;
+    const validUntil = rawValidUntil ? new Date(String(rawValidUntil)) : null;
+    const { description, active } = body;
 
-    if (discount_type && !['percent', 'fixed'].includes(String(discount_type)))
+    if (discountType && !['percent', 'fixed'].includes(String(discountType)))
       throw new AppError('discount_type deve ser "percent" ou "fixed"', 400, 'INVALID_DISCOUNT_TYPE');
 
     const existing = await prisma.coupon.findFirst({ where: { id }, select: { id: true } });
@@ -79,14 +101,14 @@ export const updateCoupon = async (req: Request, res: Response, next: NextFuncti
       where: { id },
       data: {
         ...(description !== undefined && { description: description ? String(description).trim() : null }),
-        ...(discount_type !== undefined && { discountType: String(discount_type) }),
-        ...(discount_value !== undefined && { discountValue: Number(discount_value) }),
-        ...(max_uses !== undefined && { maxUses: max_uses ? Number(max_uses) : null }),
-        ...(hasValidUntil && { validUntil: parsedValidUntil }),
+        ...(discountType !== undefined && { discountType: String(discountType) }),
+        ...(discountValue !== undefined && { discountValue: Number(discountValue) }),
+        ...(maxUses !== undefined && { maxUses: maxUses ? Number(maxUses) : null }),
+        ...(hasValidUntil && { validUntil }),
         ...(active !== undefined && { active: Boolean(active) }),
       },
     });
-    res.json({ data: coupon });
+    res.json({ data: toCouponResponse(coupon) });
   } catch (err) { next(err); }
 };
 
