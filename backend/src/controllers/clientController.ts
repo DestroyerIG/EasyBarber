@@ -32,7 +32,7 @@ export const getClients = async (req: Request, res: Response, next: NextFunction
     if (result.meta) {
       sendSuccess(res, result.data, 200, result.meta);
     } else {
-      sendSuccess(res, result);
+      sendSuccess(res, result.data);
     }
   } catch (error) {
     next(error);
