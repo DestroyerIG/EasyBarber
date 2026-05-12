@@ -10,6 +10,7 @@ import { Modal } from '@/components/ui';
 import {
   billingApi,
   type CheckoutPaymentMethod,
+  type CouponValidationResponse,
   type PixCheckoutSessionResponse,
   type SubscriptionStatus,
 } from '@/lib/billing';
@@ -128,6 +129,11 @@ export function PricingPlansSection({
   const [cpfCnpjInput, setCpfCnpjInput] = useState('');
   const [cpfCnpjError, setCpfCnpjError] = useState<string | null>(null);
   const [cpfCnpjSaving, setCpfCnpjSaving] = useState(false);
+  const [pixCouponCode, setPixCouponCode] = useState('');
+  const [pixAppliedCoupon, setPixAppliedCoupon] = useState<CouponValidationResponse | null>(null);
+  const [pixValidatingCoupon, setPixValidatingCoupon] = useState(false);
+  const [pixCouponError, setPixCouponError] = useState<string | null>(null);
+  const [pixRegenerating, setPixRegenerating] = useState(false);
   const { user } = useAuth();
   const { showToast } = useToast();
   const router = useRouter();
@@ -241,6 +247,58 @@ export function PricingPlansSection({
       showToast(message, 'error');
     } finally {
       setPixStatusLoading(false);
+    }
+  };
+
+  const handleApplyPixCoupon = async () => {
+    const code = pixCouponCode.trim();
+    if (!code || !pixCheckoutPlanId) return;
+
+    setPixValidatingCoupon(true);
+    setPixCouponError(null);
+    setPixAppliedCoupon(null);
+
+    try {
+      const result = await billingApi.validateCoupon(pixCheckoutPlanId, code);
+      setPixAppliedCoupon(result);
+    } catch (error: unknown) {
+      const errorCode = getApiErrorCode(error);
+      const msg =
+        errorCode === 'INVALID_COUPON'
+          ? 'Cupom inválido ou expirado.'
+          : getApiErrorMessage(error, 'Falha ao validar cupom.');
+      setPixCouponError(msg);
+    } finally {
+      setPixValidatingCoupon(false);
+    }
+  };
+
+  const handleRegeneratePixWithCoupon = async () => {
+    if (!pixCheckoutPlanId || !pixAppliedCoupon) return;
+
+    setPixRegenerating(true);
+
+    try {
+      const hasCpfCnpj = await ensureCpfCnpjForPix(pixCheckoutPlanId);
+      if (!hasCpfCnpj) return;
+
+      const session = await billingApi.createCheckoutSession(
+        pixCheckoutPlanId,
+        'pix',
+        pixCouponCode.trim()
+      );
+
+      if ('provider' in session && session.provider === 'asaas') {
+        setPixCheckout(session);
+        persistPixCheckout(session, pixCheckoutPlanId);
+        setPixAppliedCoupon(null);
+        showToast('QR Code atualizado com desconto aplicado.', 'success');
+      }
+    } catch (error: unknown) {
+      const message = getApiErrorMessage(error, 'Não foi possível regenerar a cobrança.');
+      showToast(message, 'error');
+    } finally {
+      setPixRegenerating(false);
     }
   };
 
@@ -395,6 +453,9 @@ export function PricingPlansSection({
       setPixCheckout(session);
       setPixCheckoutPlanId(planId);
       persistPixCheckout(session, planId);
+      setPixAppliedCoupon(null);
+      setPixCouponCode('');
+      setPixCouponError(null);
       setIsPixModalOpen(true);
       showToast('Cobrança Pix criada. Escaneie o QR Code para concluir o pagamento.', 'success');
     } catch (error: unknown) {
@@ -555,6 +616,87 @@ export function PricingPlansSection({
             <p className="text-sm text-gray-300">
               Escaneie o QR Code no app do banco ou use o código copia e cola para concluir seu pagamento.
             </p>
+
+            {/* ── Cupom de desconto ── */}
+            <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">Cupom de desconto</p>
+
+              {pixCheckout.coupon ? (
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center gap-2 text-emerald-300">
+                    <CheckCircle2 size={14} />
+                    <span>Cupom aplicado: <strong>{pixCheckout.coupon.code}</strong></span>
+                  </div>
+                  {pixCheckout.discount !== undefined && pixCheckout.discount > 0 && (
+                    <p className="text-xs text-gray-400">
+                      Desconto: <span className="text-rose-300 font-semibold">-{formatCurrency(pixCheckout.discount)}</span>
+                    </p>
+                  )}
+                </div>
+              ) : pixAppliedCoupon ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-emerald-300 text-sm">
+                    <CheckCircle2 size={14} />
+                    <span>Cupom validado: <strong>{pixCouponCode.toUpperCase()}</strong></span>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 space-y-1 text-sm">
+                    <div className="flex justify-between text-gray-400">
+                      <span>Valor original</span>
+                      <span>{formatCurrency(pixAppliedCoupon.originalAmount)}</span>
+                    </div>
+                    <div className="flex justify-between text-rose-300">
+                      <span>Desconto</span>
+                      <span>-{formatCurrency(pixAppliedCoupon.discount)}</span>
+                    </div>
+                    <div className="flex justify-between text-white font-bold border-t border-white/10 pt-1 mt-1">
+                      <span>Total final</span>
+                      <span>{formatCurrency(pixAppliedCoupon.finalAmount)}</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleRegeneratePixWithCoupon}
+                      disabled={pixRegenerating}
+                      className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-500 disabled:opacity-70"
+                    >
+                      {pixRegenerating ? 'Gerando...' : 'Gerar QR Code com desconto'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setPixAppliedCoupon(null); setPixCouponCode(''); setPixCouponError(null); }}
+                      disabled={pixRegenerating}
+                      className="rounded-lg border border-white/15 px-3 py-2 text-xs text-gray-400 transition hover:text-white disabled:opacity-60"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      value={pixCouponCode}
+                      onChange={(e) => { setPixCouponCode(e.target.value.toUpperCase()); setPixCouponError(null); }}
+                      onKeyDown={(e) => e.key === 'Enter' && handleApplyPixCoupon()}
+                      placeholder="Código do cupom"
+                      className="flex-1 rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplyPixCoupon}
+                      disabled={pixValidatingCoupon || !pixCouponCode.trim()}
+                      className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-black transition hover:bg-orange-500 disabled:opacity-60"
+                    >
+                      {pixValidatingCoupon ? 'Validando...' : 'Aplicar'}
+                    </button>
+                  </div>
+                  {pixCouponError && (
+                    <p className="text-xs text-rose-300">{pixCouponError}</p>
+                  )}
+                </div>
+              )}
+            </div>
 
             <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-start">
               <div className="space-y-3">
