@@ -13,6 +13,7 @@ import {
   normalizeInternalSubscriptionStatus,
   resolveBillingProviderFromContext,
 } from '../services/billing/statusMapper.js';
+import { normalizePlan } from '../config/planPermissions.js';
 import logger from '../utils/logger.js';
 import type {
   JwtPayload,
@@ -142,6 +143,8 @@ const enforceActiveSubscription = async (req: Request): Promise<void> => {
 
   req.subscriptionAccess = decision;
   req.user.subscriptionStatus = decision.subscriptionStatus;
+  // Always sync plan from DB — JWT payload may be stale (e.g. activated via coupon after login)
+  req.user.plan = normalizePlan(context?.plan);
 
   logger[decision.granted ? 'info' : 'warn'](
     {

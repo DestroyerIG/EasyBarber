@@ -26,6 +26,8 @@ import {
   LogOut,
   RefreshCw,
   List,
+  Lock,
+  ArrowUpCircle,
 } from 'lucide-react';
 
 interface WhatsAppStatus {
@@ -119,6 +121,7 @@ export const WhatsAppModule = () => {
   const [configLoading, setConfigLoading] = useState(false);
   const [statusLoading, setStatusLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [featureBlocked, setFeatureBlocked] = useState(false);
   const { showToast } = useToast();
   const { user } = useAuth();
 
@@ -146,7 +149,13 @@ export const WhatsAppModule = () => {
       }
 
       setWaStatus(mergedStatus);
-    } catch {
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { status?: number; data?: { code?: string; error?: { code?: string } } } };
+      const errCode = axiosErr.response?.data?.code ?? axiosErr.response?.data?.error?.code;
+      if (axiosErr.response?.status === 403 && errCode === 'FEATURE_BLOCKED') {
+        setFeatureBlocked(true);
+        return;
+      }
       setWaStatus({
         ...DEFAULT_WA_STATUS,
         status: 'provider_unavailable',
@@ -355,6 +364,37 @@ export const WhatsAppModule = () => {
     { id: 'mensagens' as const, label: 'Mensagens', icon: Settings2 },
     { id: 'simulador' as const, label: 'Simulador', icon: Bot },
   ];
+
+  if (featureBlocked) {
+    return (
+      <div className="space-y-8 pb-10">
+        <PageHeader
+          title="WhatsApp Business Bot"
+          description="Automatize seus agendamentos e lembretes via WhatsApp."
+        />
+        <div className="card flex flex-col items-center gap-6 py-16 text-center">
+          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-amber-500/10">
+            <Lock size={36} className="text-amber-400" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold text-white">Recurso não disponível no seu plano</h2>
+            <p className="max-w-md text-gray-400">
+              Seu plano atual não inclui integração com WhatsApp. Faça upgrade para o plano{' '}
+              <span className="font-semibold text-white">Profissional</span> ou{' '}
+              <span className="font-semibold text-white">Premium</span> para automatizar seus agendamentos e lembretes via WhatsApp.
+            </p>
+          </div>
+          <a
+            href="/planos"
+            className="btn-primary flex items-center gap-2"
+          >
+            <ArrowUpCircle size={18} />
+            Ver planos disponíveis
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 pb-10">

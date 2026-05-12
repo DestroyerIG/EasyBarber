@@ -76,3 +76,19 @@ export const getRequiredPlanForFeature = (feature: string): PlanId | null =>
 
 export const hasFeature = (feature: string): boolean =>
   Boolean((FEATURE_REQUIREMENTS as Record<string, PlanId>)[feature]);
+
+export const SubscriptionFeature = Object.freeze({
+  DASHBOARD: 'dashboard',
+  APPOINTMENTS: 'appointments',
+  CLIENTS: 'clients',
+  SERVICES: 'services',
+  FINANCE: 'finance',
+  REPORTS: 'reports',
+  EXPORTS: 'exports',
+  WHATSAPP: 'whatsapp_automation',
+  ADVANCED_ADMIN: 'advanced_admin',
+  BILLING: 'billing',
+  SUBSCRIPTION_STATUS: 'subscription_status',
+} as const) satisfies Record<string, Feature>;
+
+export type SubscriptionFeatureValue = typeof SubscriptionFeature[keyof typeof SubscriptionFeature];

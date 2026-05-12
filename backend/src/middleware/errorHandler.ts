@@ -1,5 +1,5 @@
 import { ZodError } from 'zod';
-import { AppError } from '../utils/errors.js';
+import { AppError, FeatureAccessError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 import type { Request, Response, NextFunction } from 'express';
 
@@ -66,6 +66,37 @@ export const errorHandler = (
       success: false,
       message: 'Dados inválidos',
       error: { code: 'VALIDATION_ERROR', message: 'Dados inválidos', details },
+    });
+    return;
+  }
+
+  if (err instanceof FeatureAccessError) {
+    logger.warn(
+      {
+        code: err.code,
+        feature: err.feature,
+        reason: err.reason,
+        requiredPlan: err.requiredPlan,
+        path: req.path,
+        requestId: req.requestId,
+        barbershopId: req.user?.barbershopId,
+      },
+      err.message
+    );
+    res.status(err.statusCode).json({
+      success: false,
+      code: err.code,
+      message: err.message,
+      required_plan: err.requiredPlan ?? null,
+      error: {
+        code: err.code,
+        message: err.message,
+        feature: err.feature,
+        reason: err.reason,
+        requiredPlan: err.requiredPlan ?? null,
+        upgradeRequired: err.upgradeRequired,
+        billingActionRequired: err.billingActionRequired,
+      },
     });
     return;
   }
