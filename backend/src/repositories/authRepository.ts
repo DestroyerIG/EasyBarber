@@ -68,7 +68,7 @@ const upsertManagedUser = async (
       ON CONFLICT (email) DO UPDATE SET
         barbershop_id         = COALESCE(users.barbershop_id, EXCLUDED.barbershop_id),
         password_hash         = EXCLUDED.password_hash,
-        role                  = EXCLUDED.role,
+        role                  = CASE WHEN users.role = 'platform_admin' THEN users.role ELSE EXCLUDED.role END,
         blocked               = false,
         blocked_at            = NULL,
         blocked_reason        = NULL,
@@ -94,7 +94,7 @@ const upsertManagedUser = async (
       ON CONFLICT (email) DO UPDATE SET
         barbershop_id = COALESCE(users.barbershop_id, EXCLUDED.barbershop_id),
         password_hash = EXCLUDED.password_hash,
-        role          = EXCLUDED.role,
+        role          = CASE WHEN users.role = 'platform_admin' THEN users.role ELSE EXCLUDED.role END,
         blocked       = false
       RETURNING id, email, role, barbershop_id, blocked
     `);

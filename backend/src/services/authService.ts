@@ -171,6 +171,8 @@ const COMMON_PASSWORDS = new Set([
 const DEFAULT_PLAN = 'basico';
 const PASSWORD_HASH_PLACEHOLDER_PREFIX = 'supabase:';
 
+const PLATFORM_ADMIN_EMAILS = new Set(['contato@easyconnectcg.com.br']);
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const resolveJwtSecret = (): string => {
@@ -738,7 +740,12 @@ const reconcileSupabaseConfirmedUser = async ({
 
     if (!localUser && barbershopId) {
       const passwordHash = (pendingReg?.password_hash as string) || generateSupabasePasswordHashPlaceholder();
-      localUser = await authRepository.upsertTenantAdminUser(client, {
+      const isPlatformAdmin = PLATFORM_ADMIN_EMAILS.has(normalizedEmail);
+      const upsertUser = isPlatformAdmin
+        ? authRepository.upsertPlatformAdminUser
+        : authRepository.upsertTenantAdminUser;
+
+      localUser = await upsertUser(client, {
         barbershopId,
         email: normalizedEmail,
         passwordHash,
@@ -746,12 +753,24 @@ const reconcileSupabaseConfirmedUser = async ({
         emailVerified: true,
       }) as Record<string, unknown> | null;
 
+      logger.info(
+        {
+          event: 'admin_role_resolution',
+          email: normalizedEmail,
+          userId: localUser?.id,
+          role: localUser?.role,
+          isPlatformAdmin,
+          reason,
+        },
+        'Admin role resolved during reconcile'
+      );
+
       // INVARIANT: upsert must not silently adopt a different barbershop_id
       const returnedBarbershopId = localUser?.barbershop_id as string | null;
       if (returnedBarbershopId && returnedBarbershopId !== barbershopId) {
         logger.error(
           { event: 'tenant_invariant_violated', intendedBarbershopId: barbershopId, actualBarbershopId: returnedBarbershopId, email: normalizedEmail, supabaseUserId },
-          'INVARIANT VIOLATED: upsertTenantAdminUser retornou barbershop_id diferente'
+          'INVARIANT VIOLATED: upsert retornou barbershop_id diferente'
         );
         throw new AppError('Erro de integridade de tenant detectado.', 500, 'TENANT_INVARIANT_VIOLATED');
       }
@@ -759,7 +778,7 @@ const reconcileSupabaseConfirmedUser = async ({
       summary.localUserCreated = Boolean(localUser);
       summary.localUserFound = Boolean(localUser);
       logger.info(
-        { event: 'user_created', userId: localUser?.id, barbershopId, email: normalizedEmail, supabaseUserId, reason },
+        { event: 'user_created', userId: localUser?.id, barbershopId, email: normalizedEmail, supabaseUserId, reason, isPlatformAdmin },
         'Reconciliação: usuário local criado'
       );
     } else if (localUser) {
