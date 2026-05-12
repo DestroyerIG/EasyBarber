@@ -1088,7 +1088,10 @@ export const resolveSafeReplyDestination = ({
 
   if (conversationKind === 'lid') {
     const sourcePath = extraction?.sourcePath || '';
-    const isLidFallback = extraction?.confidence === 'lid_fallback';
+    const isLidFallback =
+      extraction?.confidence === 'lid_fallback' ||
+      extraction?.resolutionRule === 'lid_sender_fallback_promoted' ||
+      extraction?.resolutionRule === 'lid_from_fallback_promoted';
     const lidTrustedByExtraction =
       isLidFallback ||
       (extraction?.confidence !== 'none' && hasTrustedLidAuthorSource(sourcePath));
