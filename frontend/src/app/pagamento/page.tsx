@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { CreditCard, Loader2, QrCode, RefreshCw, ShieldCheck } from 'lucide-react';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -60,6 +60,8 @@ function PagamentoContent() {
   const { user, loading: authLoading, logout } = useAuth();
   const { showToast } = useToast();
 
+  const redirectedToDashboardRef = useRef(false);
+
   const selectedPlan = useMemo(
     () => resolvePlan(searchParams.get('plan'), billingStatus),
     [billingStatus, searchParams]
@@ -82,7 +84,11 @@ function PagamentoContent() {
     setBillingStatus(status);
 
     if (ACTIVE_STATUSES.has(status.subscriptionStatus) && !status.paymentRequired) {
-      router.replace('/dashboard');
+      if (!redirectedToDashboardRef.current) {
+        redirectedToDashboardRef.current = true;
+        console.log('[pagamento] payment_redirect_reason: payment_confirmed → /dashboard');
+        router.replace('/dashboard');
+      }
       return status;
     }
 
@@ -106,15 +112,23 @@ function PagamentoContent() {
 
         setBillingStatus(status);
 
-        console.log('[pagamento] billing status loaded', {
+        const isActive = ACTIVE_STATUSES.has(status.subscriptionStatus) && !status.paymentRequired;
+        console.log('[pagamento] subscription_status_loaded', {
           subscription_status: status.subscriptionStatus,
           paymentRequired: status.paymentRequired,
           provider: status.provider,
           currentRoute: window.location.pathname,
-          redirecting: ACTIVE_STATUSES.has(status.subscriptionStatus) && !status.paymentRequired,
+          payment_redirect_reason: isActive ? 'already_active_redirect_to_dashboard' : 'payment_required_stay',
+          redirecting: isActive,
         });
 
-        if (ACTIVE_STATUSES.has(status.subscriptionStatus) && !status.paymentRequired) {
+        if (isActive) {
+          if (redirectedToDashboardRef.current) {
+            console.log('[pagamento] redirect skipped — already redirected this render cycle');
+            return;
+          }
+          redirectedToDashboardRef.current = true;
+          console.log('[pagamento] auth_guard_decision: active → /dashboard');
           router.replace('/dashboard');
         }
       } catch (error: unknown) {

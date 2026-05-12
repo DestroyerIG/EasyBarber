@@ -242,6 +242,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const postAuthRoute = userData.role === 'platform_admin'
           ? resolvePostAuthRoute(userData.role, options?.redirectTo)
           : await resolveTenantPostLoginRoute(options?.redirectTo);
+
+        const currentPath = typeof window !== 'undefined' ? window.location.pathname : null;
+        console.log('[auth] auth_guard_decision', {
+          resolved_route: postAuthRoute,
+          current_pathname: currentPath,
+        });
+
+        if (currentPath === postAuthRoute) {
+          console.log('[auth] redirect skipped same route', { route: postAuthRoute });
+          return;
+        }
+
+        console.log('[auth] redirect executing', { to: postAuthRoute });
         router.replace(postAuthRoute);
         router.refresh();
       } catch (error) {

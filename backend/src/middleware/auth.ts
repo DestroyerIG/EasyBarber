@@ -53,34 +53,16 @@ const isSubscriptionExemptRoute = (req: Request): boolean => {
 
 const hasActivePaymentEvidence = (
   context: BarbershopBillingContext,
-  provider: BillingProvider | null
+  _provider: BillingProvider | null
 ): boolean => {
-  const paymentMethod = String(context?.payment_method ?? '').toLowerCase();
   const status = normalizeInternalSubscriptionStatus(
     context?.subscription_status
   ) as SubscriptionStatus;
 
-  if (status !== 'active' && status !== 'trialing') return false;
-
-  if (provider === 'coupon' || paymentMethod === 'coupon') return true;
-
-  if (status === 'trialing') {
-    return Boolean(
-      context?.stripe_subscription_id ?? context?.provider_subscription_id
-    );
-  }
-
-  if (provider === 'asaas' || paymentMethod === 'pix') {
-    return Boolean(context?.provider_payment_id && context?.last_payment_date);
-  }
-
-  if (provider === 'stripe' || paymentMethod === 'card') {
-    return Boolean(
-      context?.stripe_subscription_id ?? context?.provider_subscription_id
-    );
-  }
-
-  return false;
+  // DB subscription_status is the source of truth.
+  // 'active' or 'trialing' in the database means the subscription is valid —
+  // webhook, admin activation, or coupon already confirmed it.
+  return status === 'active' || status === 'trialing';
 };
 
 const resolveSubscriptionAccess = (

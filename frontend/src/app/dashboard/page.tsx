@@ -38,8 +38,16 @@ export default function DashboardPage() {
       setData(response.data);
     } catch (error: unknown) {
       if (getApiErrorCode(error) === 'SUBSCRIPTION_REQUIRED') {
-        showToast('Finalize o pagamento para acessar o sistema.', 'info');
-        router.replace('/pagamento');
+        // Subscription inactive — redirect to login so AuthContext.login()
+        // re-evaluates billing/status and routes correctly (/pagamento or /dashboard).
+        // Never redirect directly to /pagamento here to avoid redirect loops.
+        console.log('[dashboard] billing_guard_decision', {
+          decision: 'SUBSCRIPTION_REQUIRED',
+          action: 'redirect_to_login',
+          reason: 'auth_context_is_single_routing_authority',
+        });
+        showToast('Sua assinatura requer atenção. Faça login novamente.', 'info');
+        router.replace('/login');
         return;
       }
 
