@@ -12,3 +12,4 @@ pnpm-lock.yaml
 .vercel
 .turbo
 .codex
+*.tsbuildinfo

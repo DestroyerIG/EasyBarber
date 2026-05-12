@@ -215,32 +215,14 @@ const isAsaasCustomerCreationFailure = (error: unknown): boolean => {
 
 const hasActivePaymentEvidence = (
   data: Record<string, unknown>,
-  provider: string | null
+  _provider: string | null
 ): boolean => {
   const status = normalizeInternalSubscriptionStatus(data?.subscription_status);
-  const paymentMethod = String(data?.payment_method || '').toLowerCase();
 
-  if (status !== 'active' && status !== 'trialing') {
-    return false;
-  }
-
-  if (provider === 'coupon' || paymentMethod === 'coupon') {
-    return true;
-  }
-
-  if (status === 'trialing') {
-    return Boolean(data?.provider_subscription_id || data?.stripe_subscription_id);
-  }
-
-  if (provider === 'asaas' || paymentMethod === 'pix') {
-    return Boolean(data?.provider_payment_id && data?.last_payment_date);
-  }
-
-  if (provider === 'stripe' || paymentMethod === 'card') {
-    return Boolean(data?.provider_subscription_id || data?.stripe_subscription_id);
-  }
-
-  return false;
+  // DB subscription_status is the source of truth.
+  // 'active' or 'trialing' in the database means the subscription is valid —
+  // webhook, admin activation, or coupon already confirmed it.
+  return status === 'active' || status === 'trialing';
 };
 
 const buildAsaasMetadata = (payload: {
