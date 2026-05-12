@@ -106,6 +106,14 @@ function PagamentoContent() {
 
         setBillingStatus(status);
 
+        console.log('[pagamento] billing status loaded', {
+          subscription_status: status.subscriptionStatus,
+          paymentRequired: status.paymentRequired,
+          provider: status.provider,
+          currentRoute: window.location.pathname,
+          redirecting: ACTIVE_STATUSES.has(status.subscriptionStatus) && !status.paymentRequired,
+        });
+
         if (ACTIVE_STATUSES.has(status.subscriptionStatus) && !status.paymentRequired) {
           router.replace('/dashboard');
         }

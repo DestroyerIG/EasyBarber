@@ -65,55 +65,62 @@ const resolvePostAuthRoute = (role: string | undefined, redirectTo?: string) => 
 
 const ACCESS_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing']);
 
-const hasPaymentEvidence = (billingStatus: Record<string, unknown>) => {
+const hasPaymentEvidence = (billingStatus: Record<string, unknown>): boolean => {
   const status = typeof billingStatus.subscriptionStatus === 'string'
     ? billingStatus.subscriptionStatus
     : null;
-  const provider = typeof billingStatus.provider === 'string' ? billingStatus.provider : null;
-  const paymentMethod = typeof billingStatus.paymentMethod === 'string'
-    ? billingStatus.paymentMethod
-    : null;
 
-  if (!ACCESS_SUBSCRIPTION_STATUSES.has(status || '')) {
+  // Backend explicitly says payment is required — respect it regardless of status
+  if (billingStatus.paymentRequired === true) {
     return false;
   }
 
-  if (status === 'trialing') {
-    return Boolean(billingStatus.providerSubscriptionId);
-  }
-
-  if (provider === 'coupon' || paymentMethod === 'coupon') {
-    return true;
-  }
-
-  if (provider === 'asaas' || paymentMethod === 'pix') {
-    return Boolean(billingStatus.providerPaymentId && billingStatus.lastPaymentDate);
-  }
-
-  if (provider === 'stripe' || paymentMethod === 'card') {
-    return Boolean(billingStatus.providerSubscriptionId);
-  }
-
-  return false;
+  // active or trialing without paymentRequired flag = access granted
+  return ACCESS_SUBSCRIPTION_STATUSES.has(status || '');
 };
 
 const resolveTenantPostLoginRoute = async (redirectTo?: string) => {
   try {
     const response = await api.get('/billing/status');
-    const desiredPlan = typeof response.data?.desiredPlan === 'string'
-      ? response.data.desiredPlan
+    const billingStatus = response.data as Record<string, unknown>;
+
+    const subscription_status = billingStatus?.subscriptionStatus;
+    const paymentRequired = billingStatus?.paymentRequired;
+    const evidence = billingStatus && typeof billingStatus === 'object'
+      ? hasPaymentEvidence(billingStatus)
+      : false;
+
+    console.log('[auth] post-login billing check', {
+      subscription_status,
+      paymentRequired,
+      hasPaymentEvidence: evidence,
+      redirectTo,
+      currentRoute: typeof window !== 'undefined' ? window.location.pathname : null,
+    });
+
+    const desiredPlan = typeof billingStatus?.desiredPlan === 'string'
+      ? billingStatus.desiredPlan
       : null;
     const paymentPath = desiredPlan
       ? `/pagamento?plan=${encodeURIComponent(desiredPlan)}`
       : '/pagamento';
 
-    if (!response.data || typeof response.data !== 'object' || !hasPaymentEvidence(response.data)) {
+    if (!billingStatus || typeof billingStatus !== 'object' || !evidence) {
+      console.log('[auth] redirecting to payment', {
+        paymentPath,
+        reason: !billingStatus ? 'no_billing_data' : 'no_payment_evidence',
+        subscription_status,
+        paymentRequired,
+      });
       return paymentPath;
     }
-  } catch {
-    return '/pagamento';
+  } catch (err) {
+    // Don't gate dashboard access on API failure — let /dashboard handle SUBSCRIPTION_REQUIRED
+    console.error('[auth] billing/status failed during post-login route resolution — falling through to dashboard', err);
+    return redirectTo || '/dashboard';
   }
 
+  console.log('[auth] redirecting to dashboard', { redirectTo });
   return redirectTo || '/dashboard';
 };
 
