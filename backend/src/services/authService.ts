@@ -622,18 +622,56 @@ const reconcileSupabaseConfirmedUser = async ({
     }
 
     let localUser: Record<string, unknown> | null = userBySupabaseIdRow || userByEmailRow || null;
+
+    // Broader fallback: targeted queries may return null if optional columns missing.
+    // findAnyUserByEmail has its own fallback and no b.active filter dependency.
+    if (!localUser) {
+      const anyUser = await authRepository.findAnyUserByEmail(normalizedEmail);
+      if (anyUser) {
+        localUser = anyUser as Record<string, unknown>;
+        logger.info(
+          { event: 'tenant_resolution_strategy', strategy: 'findAnyUserByEmail_fallback', email: normalizedEmail, supabaseUserId, reason },
+          'Reconciliação: usuário encontrado via fallback findAnyUserByEmail'
+        );
+      }
+    }
+
     summary.localUserFound = Boolean(localUser);
 
-    // barbershop_id from the user row — always prefer existing tenant
+    // INVARIANT: if user has barbershop_id, ALWAYS reuse — NEVER create new tenant
     let barbershopId: string | null = (localUser?.barbershop_id as string) || null;
 
     if (barbershopId) {
+      // User already has tenant — hard reuse, no further lookup needed
       summary.barbershopReused = true;
       logger.info(
-        { event: 'tenant_reused', barbershopId, email: normalizedEmail, supabaseUserId, reason },
+        { event: 'tenant_reused_existing_user', barbershopId, userId: localUser?.id, email: normalizedEmail, supabaseUserId, reason },
         'Reconciliação: tenant existente reutilizado via usuário local'
       );
+    } else if (localUser) {
+      // User exists but barbershop_id is null — data integrity issue, try email fallback
+      const reusableBarbershop = await authRepository.findBarbershopByEmailForUpdate(client, normalizedEmail);
+      if (reusableBarbershop) {
+        barbershopId = (reusableBarbershop as Record<string, unknown>).id as string;
+        summary.barbershopReused = true;
+        logger.info(
+          { event: 'tenant_reused_existing_barbershop', barbershopId, userId: localUser?.id, email: normalizedEmail, supabaseUserId, reason },
+          'Reconciliação: tenant existente reutilizado via email (usuário sem barbershop_id)'
+        );
+      } else {
+        // INVARIANT VIOLATION: user exists but no barbershop found — block creation
+        logger.error(
+          { event: 'tenant_integrity_error', userId: localUser.id, email: normalizedEmail, supabaseUserId, reason },
+          'INVARIANT: usuário local existe sem barbershop associado — criação de tenant bloqueada'
+        );
+        throw new AppError(
+          'Erro de integridade: usuário sem tenant associado. Contate o suporte.',
+          500,
+          'TENANT_INTEGRITY_ERROR'
+        );
+      }
     } else {
+      // No local user at all — check for existing barbershop by email before creating
       const lookupEmail = (pendingReg?.email as string) || normalizedEmail;
       const reusableBarbershop = await authRepository.findBarbershopByEmailForUpdate(client, lookupEmail);
 
@@ -641,8 +679,8 @@ const reconcileSupabaseConfirmedUser = async ({
         barbershopId = (reusableBarbershop as Record<string, unknown>).id as string;
         summary.barbershopReused = true;
         logger.info(
-          { event: 'tenant_reused', barbershopId, email: normalizedEmail, supabaseUserId, reason },
-          'Reconciliação: tenant existente reutilizado via email'
+          { event: 'tenant_reused_existing_barbershop', barbershopId, email: normalizedEmail, supabaseUserId, reason },
+          'Reconciliação: tenant existente reutilizado via email (sem usuário local)'
         );
       } else if (pendingReg) {
         const createdBarbershop = await authRepository.createBarbershop(client, {
@@ -657,7 +695,7 @@ const reconcileSupabaseConfirmedUser = async ({
         barbershopId = (createdBarbershop as Record<string, unknown>).id as string;
         summary.barbershopCreated = true;
         logger.info(
-          { event: 'tenant_created', barbershopId, email: normalizedEmail, supabaseUserId, reason, source: 'pending_registration' },
+          { event: 'tenant_created_new', barbershopId, email: normalizedEmail, supabaseUserId, reason, source: 'pending_registration' },
           'Reconciliação: novo tenant criado a partir de pending_registration'
         );
       } else {
@@ -675,14 +713,13 @@ const reconcileSupabaseConfirmedUser = async ({
         barbershopId = (createdBarbershop as Record<string, unknown>).id as string;
         summary.barbershopCreated = true;
         logger.info(
-          { event: 'tenant_created', barbershopId, email: normalizedEmail, supabaseUserId, reason, source: 'supabase_identity' },
+          { event: 'tenant_created_new', barbershopId, email: normalizedEmail, supabaseUserId, reason, source: 'supabase_identity' },
           'Reconciliação: novo tenant criado a partir de identidade Supabase'
         );
       }
     }
 
     summary.barbershopId = barbershopId;
-    summary.desiredPlan = (pendingReg?.desired_plan as string) || (localUser?.desired_plan as string) || DEFAULT_PLAN;
 
     // Get real subscription status from barbershop — never infer incomplete blindly
     if (barbershopId) {
@@ -694,9 +731,10 @@ const reconcileSupabaseConfirmedUser = async ({
         DEFAULT_PLAN;
     } else {
       summary.subscriptionStatus = 'incomplete';
+      summary.desiredPlan = (pendingReg?.desired_plan as string) || (localUser?.desired_plan as string) || DEFAULT_PLAN;
     }
 
-    summary.paymentRequired = !['active', 'trialing'].includes(summary.subscriptionStatus);
+    summary.paymentRequired = !['active', 'trialing'].includes(summary.subscriptionStatus || '');
 
     if (!localUser && barbershopId) {
       const passwordHash = (pendingReg?.password_hash as string) || generateSupabasePasswordHashPlaceholder();
@@ -707,6 +745,17 @@ const reconcileSupabaseConfirmedUser = async ({
         supabaseUserId,
         emailVerified: true,
       }) as Record<string, unknown> | null;
+
+      // INVARIANT: upsert must not silently adopt a different barbershop_id
+      const returnedBarbershopId = localUser?.barbershop_id as string | null;
+      if (returnedBarbershopId && returnedBarbershopId !== barbershopId) {
+        logger.error(
+          { event: 'tenant_invariant_violated', intendedBarbershopId: barbershopId, actualBarbershopId: returnedBarbershopId, email: normalizedEmail, supabaseUserId },
+          'INVARIANT VIOLATED: upsertTenantAdminUser retornou barbershop_id diferente'
+        );
+        throw new AppError('Erro de integridade de tenant detectado.', 500, 'TENANT_INVARIANT_VIOLATED');
+      }
+
       summary.localUserCreated = Boolean(localUser);
       summary.localUserFound = Boolean(localUser);
       logger.info(

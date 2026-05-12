@@ -385,14 +385,25 @@ export const authRepository = {
   // -------------------------------------------------------------------------
 
   async findUserByEmailForSync(_client: unknown = null, email: string): Promise<Record<string, unknown> | null> {
-    const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
-      SELECT id, email, barbershop_id
-      FROM users
-      WHERE LOWER(email) = LOWER(${email})
-      LIMIT 1
-      FOR UPDATE
-    `);
-    return result[0] ?? null;
+    try {
+      const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+        SELECT id, email, barbershop_id
+        FROM users
+        WHERE LOWER(email) = LOWER(${email})
+        LIMIT 1
+        FOR UPDATE
+      `);
+      return result[0] ?? null;
+    } catch (error: any) {
+      if (!isColumnMissingError(error)) throw error;
+      const fallback = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+        SELECT id, email, NULL::UUID AS barbershop_id
+        FROM users
+        WHERE LOWER(email) = LOWER(${email})
+        LIMIT 1
+      `).catch(() => [] as Array<Record<string, unknown>>);
+      return fallback[0] ?? null;
+    }
   },
 
   async findUserBySupabaseUserIdForUpdate(_client: unknown = null, supabaseUserId: string): Promise<Record<string, unknown> | null> {
@@ -783,26 +794,48 @@ export const authRepository = {
       if (error?.code === '42P01') return null;
       if (!isColumnMissingError(error)) throw error;
 
-      const fallback = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+      // Level 2: password_hash missing — try without it, keep status column
+      try {
+        const fallback = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+          SELECT
+            id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
+            NULL::VARCHAR AS cpf_cnpj,
+            NULL::VARCHAR AS desired_plan,
+            NULL::VARCHAR AS password_hash,
+            auth_provider, status,
+            verification_sent_at, confirmed_at
+          FROM pending_registrations
+          WHERE (${emailFilter} OR ${uuidFilter})
+            AND status <> 'canceled'
+          ORDER BY CASE status
+            WHEN 'pending'   THEN 0
+            WHEN 'completed' THEN 1
+            ELSE 2
+          END
+          LIMIT 1
+          FOR UPDATE
+        `);
+        return fallback[0] ?? null;
+      } catch (err2: any) {
+        if (!isColumnMissingError(err2)) throw err2;
+      }
+
+      // Level 3: status column also missing — minimal query, any row
+      const minimal = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT
           id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
           NULL::VARCHAR AS cpf_cnpj,
           NULL::VARCHAR AS desired_plan,
           NULL::VARCHAR AS password_hash,
-          auth_provider, status,
+          auth_provider,
+          NULL::VARCHAR AS status,
           verification_sent_at, confirmed_at
         FROM pending_registrations
         WHERE (${emailFilter} OR ${uuidFilter})
-          AND status <> 'canceled'
-        ORDER BY CASE status
-          WHEN 'pending'   THEN 0
-          WHEN 'completed' THEN 1
-          ELSE 2
-        END
         LIMIT 1
         FOR UPDATE
       `).catch(() => [] as Array<Record<string, unknown>>);
-      return fallback[0] ?? null;
+      return minimal[0] ?? null;
     }
   },
 
