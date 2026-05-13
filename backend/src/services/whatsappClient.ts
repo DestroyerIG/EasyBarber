@@ -1044,7 +1044,10 @@ export const sendWhatsAppText = async (
   const endpoint = `/message/sendText/${resolvedInstanceName}`;
   const connectedNumber = normalizeWhatsAppNumber(getWhatsAppStatusByInstance(resolvedInstanceName)?.connectedNumber);
 
-  if (connectedNumber && isSelfMessage({ authorPhone: normalizedAuthorPhone, connectedNumber })) {
+  // Exact match only — variant expansion causes false positives when user's 8-digit number
+  // equals the 9-digit bot number with the 9th-digit stripped (e.g. 558396311811 vs 5583996311811).
+  // fromMe===false is already guaranteed at this point by the isValidUserMessage gate above.
+  if (connectedNumber && normalizedAuthorPhone && normalizedAuthorPhone === connectedNumber) {
     logger.warn(
       {
         authorPhone: normalizedAuthorPhone,
@@ -1061,7 +1064,7 @@ export const sendWhatsAppText = async (
     ? context.knownInstanceNumbers
     : [];
 
-  if (knownInstanceNumbers.some((n) => isSelfMessage({ authorPhone: normalizedAuthorPhone, connectedNumber: n }))) {
+  if (knownInstanceNumbers.some((n) => normalizeWhatsAppNumber(n) === normalizedAuthorPhone)) {
     logger.warn(
       {
         authorPhone: normalizedAuthorPhone,
