@@ -959,6 +959,7 @@ export const createInstance = async ({ instanceName = null, webhookUrl = null }:
 
   const payload = await requestWithFallback(
     [
+      // Evolution API v1 flat format
       {
         method: 'POST',
         path: '/instance/create',
@@ -970,6 +971,27 @@ export const createInstance = async ({ instanceName = null, webhookUrl = null }:
           webhook_by_events: desiredWebhookConfig.webhook_by_events,
           webhook_base64: desiredWebhookConfig.webhook_base64,
           webhook_events: desiredWebhookConfig.events,
+        },
+        expectedStatuses: [200, 201, 403, 409],
+        instanceName: config.instanceName,
+      },
+      // Evolution API v2 nested webhook format
+      {
+        method: 'POST',
+        path: '/instance/create',
+        body: {
+          instanceName: config.instanceName,
+          integration: 'WHATSAPP-BAILEYS',
+          qrcode: true,
+          ...(desiredWebhookConfig.url ? {
+            webhook: {
+              enabled: true,
+              url: desiredWebhookConfig.url,
+              events: desiredWebhookConfig.events,
+              webhook_by_events: desiredWebhookConfig.webhook_by_events,
+              webhook_base64: desiredWebhookConfig.webhook_base64,
+            },
+          } : {}),
         },
         expectedStatuses: [200, 201, 403, 409],
         instanceName: config.instanceName,
@@ -1206,6 +1228,16 @@ export const sendTextMessage = async ({
   );
 
   const candidates: RequestCandidate[] = [
+    // Evolution API v2 format
+    {
+      method: 'POST',
+      path: `/message/sendText/${resolvedInstanceName}`,
+      body: {
+        number: normalizedPhone,
+        text: normalizedText,
+        delay: 1200,
+      },
+    },
     {
       method: 'POST',
       path: `/message/sendText/${resolvedInstanceName}`,

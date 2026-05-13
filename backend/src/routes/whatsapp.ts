@@ -697,12 +697,16 @@ const normalizeWebhookEventPayload = (payload: Record<string, unknown> = {}, for
 
   const resolvedInstanceName =
     payload['instanceName'] ??
+    // Evolution API v2: campo "instance" é string com o nome da instância (v1 usa objeto)
+    (typeof payload['instance'] === 'string' ? payload['instance'] : null) ??
     (payload['instance'] as Record<string, unknown> | undefined)?.['instanceName'] ??
     payload['owner'] ??
     dataNode?.['instanceName'] ??
+    (typeof dataNode?.['instance'] === 'string' ? dataNode['instance'] : null) ??
     (dataNode?.['instance'] as Record<string, unknown> | undefined)?.['instanceName'] ??
     dataNode?.['owner'] ??
     messageNode?.['instanceName'] ??
+    (typeof messageNode?.['instance'] === 'string' ? messageNode['instance'] : null) ??
     (messageNode?.['instance'] as Record<string, unknown> | undefined)?.['instanceName'] ??
     messageNode?.['owner'] ??
     null;
@@ -1025,6 +1029,8 @@ const mapWebhookIncomingMessage = async (payload: Record<string, unknown>): Prom
   const instanceName =
     (normalizedPayload['instanceName'] as string | null) ??
     (payload['instanceName'] as string | null) ??
+    // Evolution API v2: "instance" é string no root do payload
+    (typeof payload['instance'] === 'string' ? (payload['instance'] as string) : null) ??
     null;
 
   const connectedNumber = await resolveConnectedNumberForWebhook(instanceName, payload);
