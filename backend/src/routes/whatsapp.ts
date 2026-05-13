@@ -889,22 +889,41 @@ const isLidJid = (jid: unknown): boolean =>
   typeof jid === 'string' && jid.endsWith('@lid');
 
 const extractAuthorPhone = (payload: Record<string, unknown>, connectedNumber: string | null): AuthorExtraction => {
-  const dataMessages = Array.isArray((payload['data'] as Record<string, unknown> | undefined)?.['messages'])
-    ? ((payload['data'] as Record<string, unknown>)['messages'] as Record<string, unknown>[])
+  // Evolution API v1: message data is at payload.data (object), not payload.data.messages (array)
+  const dataObj = (payload['data'] as Record<string, unknown> | undefined) ?? {};
+  const dataMessages = Array.isArray(dataObj['messages'])
+    ? (dataObj['messages'] as Record<string, unknown>[])
     : [];
   const rootMessages = Array.isArray(payload['messages']) ? (payload['messages'] as Record<string, unknown>[]) : [];
   const msg = (dataMessages[0] ?? rootMessages[0] ?? payload) as Record<string, unknown>;
-  const key = (msg['key'] ?? payload['key'] ?? {}) as Record<string, unknown>;
-  const remoteJid = (key['remoteJid'] ?? (payload['key'] as Record<string, unknown> | undefined)?.['remoteJid'] ?? null) as string | null;
-  const participant = (key['participant'] ?? payload['participant'] ?? null) as string | null;
+
+  // Evolution API v1 puts key at payload.data.key; other formats at msg.key or payload.key
+  const dataKey = (dataObj['key'] as Record<string, unknown> | undefined) ?? {};
+  const key = (msg['key'] ?? payload['key'] ?? dataKey) as Record<string, unknown>;
+  const remoteJid = (
+    key['remoteJid'] ??
+    (payload['key'] as Record<string, unknown> | undefined)?.['remoteJid'] ??
+    dataKey['remoteJid'] ??
+    null
+  ) as string | null;
+  const participant = (key['participant'] ?? payload['participant'] ?? dataKey['participant'] ?? null) as string | null;
   const sender = (payload['sender'] ?? null) as string | null;
 
+  // participantPn is the WhatsApp field that maps @lid JIDs to real phone numbers.
+  // Evolution API v1 stores this at payload.data.message.messageContextInfo.participantPn.
+  const dataMessage = (dataObj['message'] as Record<string, unknown> | undefined) ?? {};
   const msgContextInfo = msg['messageContextInfo'] as Record<string, unknown> | undefined;
   const payloadContextInfo = payload['messageContextInfo'] as Record<string, unknown> | undefined;
   const msgMsgContextInfo = (msg['message'] as Record<string, unknown> | undefined)?.['messageContextInfo'] as Record<string, unknown> | undefined;
+  const dataMessageContextInfo = dataMessage['messageContextInfo'] as Record<string, unknown> | undefined;
 
-  const participantPn =
-    (msgContextInfo?.['participantPn'] ?? payloadContextInfo?.['participantPn'] ?? msgMsgContextInfo?.['participantPn'] ?? null) as string | null;
+  const participantPn = (
+    msgContextInfo?.['participantPn'] ??
+    payloadContextInfo?.['participantPn'] ??
+    msgMsgContextInfo?.['participantPn'] ??
+    dataMessageContextInfo?.['participantPn'] ??
+    null
+  ) as string | null;
 
   if (participantPn) {
     const phone = normalizePhone(participantPn);
