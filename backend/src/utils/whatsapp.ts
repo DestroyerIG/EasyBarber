@@ -1242,7 +1242,15 @@ const normalizeKnownConnectedNumbers = (options = {}) => {
   const normalized = new Set();
   for (const value of values) {
     const phone = normalizeWhatsAppNumber(value);
-    if (phone) normalized.add(phone);
+    if (phone) {
+      // Expand both 8-digit and 9-digit variants so instanceNumberMatches catches
+      // the bot's own number in either format (e.g. 5583996311811 ↔ 558396311811).
+      // expandBrazilMobileVariants("558396311811") only returns itself (charAt(2)='9'
+      // is misread as "9th digit present") — building both variants into the set fixes this.
+      for (const variant of expandBrazilMobileVariants(phone)) {
+        normalized.add(variant);
+      }
+    }
   }
   return normalized;
 };
@@ -1252,7 +1260,11 @@ export const extractWhatsAppInstanceNumbersFromWebhook = (payload = {}, options 
   for (const resolver of WEBHOOK_INSTANCE_NUMBER_CANDIDATES) {
     const value = resolver(payload);
     const normalized = normalizeWhatsAppNumber(value);
-    if (normalized) numbers.add(normalized);
+    if (normalized) {
+      for (const variant of expandBrazilMobileVariants(normalized)) {
+        numbers.add(variant);
+      }
+    }
   }
   return Array.from(numbers);
 };

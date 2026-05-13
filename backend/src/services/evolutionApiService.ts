@@ -810,6 +810,7 @@ export const setInstanceWebhook = async ({ instanceName = null, webhookUrl = nul
 
   const payload = await requestWithFallback(
     [
+      // Evolution API v1 flat format
       {
         method: 'POST',
         path: `/webhook/set/${desiredConfig.instanceName}`,
@@ -818,6 +819,22 @@ export const setInstanceWebhook = async ({ instanceName = null, webhookUrl = nul
           events: desiredConfig.events,
           webhook_by_events: desiredConfig.webhook_by_events,
           webhook_base64: desiredConfig.webhook_base64,
+        },
+        expectedStatuses: [200, 201],
+        instanceName: desiredConfig.instanceName,
+      },
+      // Evolution API v2 nested format
+      {
+        method: 'POST',
+        path: `/webhook/set/${desiredConfig.instanceName}`,
+        body: {
+          webhook: {
+            enabled: true,
+            url: desiredConfig.url,
+            events: desiredConfig.events,
+            webhook_by_events: desiredConfig.webhook_by_events,
+            webhook_base64: desiredConfig.webhook_base64,
+          },
         },
         expectedStatuses: [200, 201],
         instanceName: desiredConfig.instanceName,
