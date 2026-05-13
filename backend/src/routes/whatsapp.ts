@@ -934,6 +934,15 @@ const extractAuthorPhone = (payload: Record<string, unknown>, connectedNumber: s
         return { phone: senderPhone, source: 'sender_lid_fallback', isLid: true, lidJid: remoteJid };
       }
     }
+    // Evolution API v1 places the remote client's phone JID in payload.destination for incoming messages.
+    // normalizePhone returns null for @lid JIDs so this safely falls through when destination is @lid.
+    const destRaw = (payload['destination'] ?? null) as string | null;
+    if (destRaw) {
+      const destPhone = normalizePhone(destRaw);
+      if (destPhone && !isSelfMessage({ authorPhone: destPhone, connectedNumber })) {
+        return { phone: destPhone, source: 'destination_jid_fallback', isLid: true, lidJid: remoteJid };
+      }
+    }
     const lidDigits = remoteJid!.split('@')[0];
     if (lidDigits && lidDigits.length >= 10) {
       return { phone: lidDigits, source: 'lid_jid_direct', isLid: true, lidJid: remoteJid };
@@ -1007,7 +1016,16 @@ const mapWebhookIncomingMessage = async (payload: Record<string, unknown>): Prom
 
   const authorExtracted = extractAuthorPhone(payload, connectedNumber);
 
-  const authorPhone = resolvedExtraction.authorPhone ?? authorExtracted.phone ?? null;
+  // When resolvedExtraction fell back to lid_sender_fallback_promoted (sender = bot's own number
+  // in old 8-digit format), prefer the destination_jid_fallback result from extractAuthorPhone
+  // which reads the actual client phone from payload.destination.
+  const preferDestinationFallback =
+    resolvedExtraction.resolutionRule === 'lid_sender_fallback_promoted' &&
+    authorExtracted.source === 'destination_jid_fallback';
+  const authorPhone = (preferDestinationFallback ? authorExtracted.phone : null)
+    ?? resolvedExtraction.authorPhone
+    ?? authorExtracted.phone
+    ?? null;
 
   const effectiveLidJid = authorExtracted.lidJid ??
     (typeof resolvedExtraction.remoteJidOriginal === 'string' && resolvedExtraction.remoteJidOriginal.endsWith('@lid') ? resolvedExtraction.remoteJidOriginal : null);
