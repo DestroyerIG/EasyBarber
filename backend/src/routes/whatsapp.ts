@@ -17,6 +17,7 @@ import {
 } from '../services/whatsappClient.js';
 import { updateInstanceFromPayload } from '../services/whatsapp/whatsappInstanceCache.js';
 import { getBarbershopWhatsAppInstanceContext } from '../services/whatsapp/whatsappInstanceService.js';
+import { getBotConfig } from '../services/whatsapp/whatsappConfigService.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { requireTenantRoles } from '../middleware/rbac.js';
 import { requireFeature } from '../middleware/subscriptionGuard.js';
@@ -2140,20 +2141,8 @@ router.post('/restart', ...waProtected, async (req: Request, res: Response, next
 router.get('/config', ...waProtected, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { barbershopId } = req.user;
-
-    let rows = await prisma.$queryRaw<Record<string, unknown>[]>(
-      Prisma.sql`SELECT * FROM whatsapp_bot_config WHERE barbershop_id = ${barbershopId}::uuid`
-    );
-
-    if (rows.length === 0) {
-      rows = await prisma.$queryRaw<Record<string, unknown>[]>(
-        Prisma.sql`INSERT INTO whatsapp_bot_config (barbershop_id)
-         VALUES (${barbershopId}::uuid)
-         RETURNING *`
-      );
-    }
-
-    sendSuccess(res, rows[0]);
+    const config = await getBotConfig(barbershopId!);
+    sendSuccess(res, config);
   } catch (error) {
     next(error);
   }

@@ -58,7 +58,7 @@ export const getBotConfig = async (barbershopId: string): Promise<BotConfig> => 
     return DEFAULT_BOT_CONFIG;
   } catch (error) {
     logger.error({ err: error, barbershopId }, 'Erro ao buscar config do bot');
-    return FALLBACK_BOT_CONFIG;
+    return DEFAULT_BOT_CONFIG;
   }
 };
 

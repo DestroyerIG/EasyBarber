@@ -556,6 +556,15 @@ const start = async (): Promise<void> => {
 
     await prisma.$queryRaw`SELECT 1`;
 
+    // Run pending migrations on startup so Render deploys auto-migrate
+    try {
+      const { execSync } = await import('child_process');
+      execSync('npx prisma migrate deploy', { stdio: 'inherit' });
+      logger.info('Migrations aplicadas');
+    } catch (migrateErr) {
+      logger.warn({ err: (migrateErr as Error)?.message }, 'prisma migrate deploy falhou — continuando');
+    }
+
     logger.info(
       'Conexão com banco de dados verificada'
     );
