@@ -830,7 +830,7 @@ const pruneLidCache = () => {
   }
 };
 
-const cacheLidToPhone = (lidJid, phone) => {
+export const cacheLidToPhone = (lidJid, phone) => {
   if (
     typeof lidJid !== 'string' ||
     !lidJid.trim().toLowerCase().endsWith('@lid') ||
@@ -840,7 +840,7 @@ const cacheLidToPhone = (lidJid, phone) => {
   pruneLidCache();
 };
 
-const getPhoneFromLidCache = (lidJid) => {
+export const getPhoneFromLidCache = (lidJid) => {
   if (typeof lidJid !== 'string') return null;
   return LID_TO_PHONE_CACHE.get(lidJid.trim()) || null;
 };

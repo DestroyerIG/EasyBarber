@@ -32,7 +32,10 @@ import {
   extractPayloadDestination,
   extractWhatsAppRemoteJidFromWebhook,
   resolveIncomingAuthor,
+  cacheLidToPhone,
+  getPhoneFromLidCache,
 } from '../utils/whatsapp.js';
+import { resolvePhoneFromLidJid } from '../services/evolutionApiService.js';
 
 const router = Router();
 const waProtected = [authMiddleware, requireTenantRoles, requireFeature('whatsapp_automation')];
@@ -1031,13 +1034,39 @@ const mapWebhookIncomingMessage = async (payload: Record<string, unknown>): Prom
     (typeof resolvedExtraction.remoteJidOriginal === 'string' && resolvedExtraction.remoteJidOriginal.endsWith('@lid') ? resolvedExtraction.remoteJidOriginal : null);
   const authorIsLidDirect = authorExtracted.source === 'lid_jid_direct';
 
-  const normalizedAuthor = authorPhone ? normalizePhone(authorPhone) : null;
+  // When the extracted phone is the @lid digit string (not a real phone) or we have no usable phone
+  // for an @lid message, try to resolve the real customer phone from the Evolution API contact store.
+  // For Evolution API v1.7.x, @lid JIDs map to real @s.whatsapp.net JIDs in the Baileys contact store.
+  let resolvedAuthorPhone = authorPhone;
+  if (effectiveLidJid && (authorIsLidDirect || !authorPhone)) {
+    const cachedPhone = getPhoneFromLidCache(effectiveLidJid);
+    if (cachedPhone) {
+      resolvedAuthorPhone = cachedPhone;
+      logger.info(
+        { lidJid: effectiveLidJid, phone: cachedPhone },
+        'Resolved @lid author phone from cache'
+      );
+    } else {
+      try {
+        const apiPhone = await resolvePhoneFromLidJid({ lidJid: effectiveLidJid, instanceName });
+        if (apiPhone) {
+          cacheLidToPhone(effectiveLidJid, apiPhone);
+          resolvedAuthorPhone = apiPhone;
+        }
+      } catch (err) {
+        logger.warn({ lidJid: effectiveLidJid, err }, '@lid phone resolution via Evolution API failed');
+      }
+    }
+  }
+
+  const normalizedAuthor = resolvedAuthorPhone ? normalizePhone(resolvedAuthorPhone) : null;
   const normalizedConnected = connectedNumber ? normalizePhone(connectedNumber) : null;
 
   logger.info(
     {
       instanceName,
-      authorPhone,
+      authorPhone: resolvedAuthorPhone,
+      authorPhoneRaw: authorPhone,
       connectedNumber,
       normalizedAuthor,
       normalizedConnected,
@@ -1053,7 +1082,7 @@ const mapWebhookIncomingMessage = async (payload: Record<string, unknown>): Prom
     'DEBUG WHATSAPP - AUTOR E NUMERO IDENTIFICADOS'
   );
 
-  if (!authorPhone) {
+  if (!resolvedAuthorPhone) {
     logger.warn(
       {
         event: eventName,
@@ -1072,7 +1101,7 @@ const mapWebhookIncomingMessage = async (payload: Record<string, unknown>): Prom
 
   if (!text) {
     logger.debug(
-      { event: eventName, authorPhone, instanceName },
+      { event: eventName, authorPhone: resolvedAuthorPhone, instanceName },
       'Webhook ignorado: mensagem sem texto'
     );
     return null;
@@ -1081,7 +1110,7 @@ const mapWebhookIncomingMessage = async (payload: Record<string, unknown>): Prom
   logger.info(
     {
       event: eventName,
-      authorPhone,
+      authorPhone: resolvedAuthorPhone,
       instanceName,
       connectedNumber: connectedNumber ?? null,
       textPreview: text.slice(0, 60),
@@ -1096,13 +1125,13 @@ const mapWebhookIncomingMessage = async (payload: Record<string, unknown>): Prom
   return {
     payload: normalizedPayload,
     eventName,
-    extractedPhone: authorPhone,
+    extractedPhone: resolvedAuthorPhone,
     extractedText: text,
     lidJid: effectiveLidJid ?? null,
     allowLidDirect: authorIsLidDirect ?? false,
     extraction: {
       ...resolvedExtraction,
-      authorPhone,
+      authorPhone: resolvedAuthorPhone,
       instanceName,
       lidJid: effectiveLidJid ?? null,
       allowLidDirect: authorIsLidDirect ?? false,

@@ -1287,3 +1287,85 @@ export const sendTextMessage = async ({
     },
   };
 };
+
+// Resolve a WhatsApp @lid JID to an actual customer phone number via Evolution API contact store.
+// @lid JIDs (linked device identifiers) appear as remoteJid in Evolution API v1.7.x webhooks
+// when the sender is using a linked device. The actual customer phone is NOT in the webhook payload
+// for these messages — we must query the contact store to resolve it.
+export const resolvePhoneFromLidJid = async ({
+  lidJid,
+  instanceName = null,
+}: {
+  lidJid: string;
+  instanceName?: string | null;
+}): Promise<string | null> => {
+  if (!lidJid || typeof lidJid !== 'string' || !lidJid.trim().toLowerCase().endsWith('@lid')) {
+    return null;
+  }
+
+  const { instanceName: resolvedInstanceName } = getConfig({ instanceName });
+  const encodedLid = encodeURIComponent(lidJid.trim());
+
+  const tryExtractPhone = (data: unknown): string | null => {
+    const items: unknown[] = Array.isArray(data)
+      ? data
+      : data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>)['contacts'])
+        ? (data as Record<string, unknown>)['contacts'] as unknown[]
+        : data ? [data] : [];
+
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue;
+      const c = item as Record<string, unknown>;
+      for (const field of ['phoneJid', 'remoteJid', 'number', 'jid', 'phone']) {
+        const val = c[field];
+        if (typeof val !== 'string' || !val) continue;
+        const digits = val.includes('@') ? val.split('@')[0] : val;
+        if (/^\d{10,}$/.test(digits)) return digits;
+      }
+    }
+    return null;
+  };
+
+  const endpoints: Array<{ method: 'GET' | 'POST'; path: string; body?: Record<string, unknown> }> = [
+    {
+      method: 'POST',
+      path: `/contact/findContacts/${resolvedInstanceName}`,
+      body: { where: { id: lidJid.trim() } },
+    },
+    {
+      method: 'GET',
+      path: `/contact/findContacts/${resolvedInstanceName}?id=${encodedLid}`,
+    },
+    {
+      method: 'POST',
+      path: `/chat/findChats/${resolvedInstanceName}`,
+      body: { where: { id: lidJid.trim() } },
+    },
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      const result = await request({
+        ...endpoint,
+        expectedStatuses: [200, 404],
+        instanceName: resolvedInstanceName,
+      });
+      const phone = tryExtractPhone(result);
+      if (phone) {
+        logger.info(
+          { lidJid, phone, endpoint: endpoint.path },
+          'Resolved @lid JID to phone via Evolution API contact store'
+        );
+        return phone;
+      }
+    } catch {
+      // Try next endpoint
+    }
+  }
+
+  logger.warn(
+    { lidJid, instanceName: resolvedInstanceName },
+    'Could not resolve @lid JID to phone via Evolution API — contact store lookup exhausted'
+  );
+  return null;
+};
