@@ -1044,10 +1044,10 @@ export const sendWhatsAppText = async (
   const endpoint = `/message/sendText/${resolvedInstanceName}`;
   const connectedNumber = normalizeWhatsAppNumber(getWhatsAppStatusByInstance(resolvedInstanceName)?.connectedNumber);
 
-  // Exact match only — variant expansion causes false positives when user's 8-digit number
-  // equals the 9-digit bot number with the 9th-digit stripped (e.g. 558396311811 vs 5583996311811).
-  // fromMe===false is already guaranteed at this point by the isValidUserMessage gate above.
-  if (connectedNumber && normalizedAuthorPhone && normalizedAuthorPhone === connectedNumber) {
+  // Use isSelfMessage (with Brazilian variant expansion) to catch both 8-digit and 9-digit formats.
+  // Evolution API v1.7.x @lid webhooks put the bot's 8-digit old-format number (e.g. 558396311811)
+  // in sender, which must match the bot's 9-digit connected number (e.g. 5583996311811).
+  if (connectedNumber && normalizedAuthorPhone && isSelfMessage({ authorPhone: normalizedAuthorPhone, connectedNumber })) {
     logger.warn(
       {
         authorPhone: normalizedAuthorPhone,
@@ -1055,7 +1055,7 @@ export const sendWhatsAppText = async (
         sourcePath,
         reason: 'self_reply_blocked',
       },
-      'BLOQUEADO: auto-resposta (authorPhone === connectedNumber)'
+      'BLOQUEADO: auto-resposta (authorPhone === connectedNumber via variant expansion)'
     );
     return false;
   }

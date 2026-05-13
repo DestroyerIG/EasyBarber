@@ -1034,11 +1034,14 @@ const mapWebhookIncomingMessage = async (payload: Record<string, unknown>): Prom
     (typeof resolvedExtraction.remoteJidOriginal === 'string' && resolvedExtraction.remoteJidOriginal.endsWith('@lid') ? resolvedExtraction.remoteJidOriginal : null);
   const authorIsLidDirect = authorExtracted.source === 'lid_jid_direct';
 
-  // When the extracted phone is the @lid digit string (not a real phone) or we have no usable phone
-  // for an @lid message, try to resolve the real customer phone from the Evolution API contact store.
-  // For Evolution API v1.7.x, @lid JIDs map to real @s.whatsapp.net JIDs in the Baileys contact store.
+  // For @lid messages, Evolution API v1.7.x puts the bot's own number (old 8-digit format) in
+  // sender/destination — the customer's real phone is absent from the payload.
+  // Try to resolve via the Evolution API contact store. If resolution fails and the extracted phone
+  // matches the bot's own number (any format), null it out so the message is dropped rather than
+  // replied to ourselves.
   let resolvedAuthorPhone = authorPhone;
-  if (effectiveLidJid && (authorIsLidDirect || !authorPhone)) {
+  if (effectiveLidJid) {
+    // Check cache first
     const cachedPhone = getPhoneFromLidCache(effectiveLidJid);
     if (cachedPhone) {
       resolvedAuthorPhone = cachedPhone;
@@ -1046,7 +1049,8 @@ const mapWebhookIncomingMessage = async (payload: Record<string, unknown>): Prom
         { lidJid: effectiveLidJid, phone: cachedPhone },
         'Resolved @lid author phone from cache'
       );
-    } else {
+    } else if (authorIsLidDirect || !authorPhone) {
+      // Only hit the API when we don't have a usable non-bot phone
       try {
         const apiPhone = await resolvePhoneFromLidJid({ lidJid: effectiveLidJid, instanceName });
         if (apiPhone) {
@@ -1056,6 +1060,23 @@ const mapWebhookIncomingMessage = async (payload: Record<string, unknown>): Prom
       } catch (err) {
         logger.warn({ lidJid: effectiveLidJid, err }, '@lid phone resolution via Evolution API failed');
       }
+    }
+
+    // After all attempts: if the resolved phone is the bot's own number (in any format),
+    // null it out — better to drop the message than to reply to ourselves.
+    if (resolvedAuthorPhone && connectedNumber &&
+        isSelfMessage({ authorPhone: resolvedAuthorPhone, connectedNumber })) {
+      logger.warn(
+        {
+          lidJid: effectiveLidJid,
+          resolvedAuthorPhone,
+          connectedNumber,
+          authorIsLidDirect,
+          reason: 'lid_author_resolved_to_bot_number',
+        },
+        'Webhook @lid: telefone resolvido é o número do bot — mensagem descartada (sem auto-resposta)'
+      );
+      resolvedAuthorPhone = null;
     }
   }
 
