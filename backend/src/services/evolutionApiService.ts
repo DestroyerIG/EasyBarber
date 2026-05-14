@@ -808,22 +808,9 @@ export const getInstanceWebhook = async ({ instanceName = null }: { instanceName
 export const setInstanceWebhook = async ({ instanceName = null, webhookUrl = null }: { instanceName?: string | null; webhookUrl?: string | null } = {}): Promise<WebhookConfigSnapshot> => {
   const desiredConfig = buildDesiredWebhookConfig({ instanceName, webhookUrl });
 
-  const payload = await requestWithFallback(
+  const payload = await requestTryingPayloads(
     [
-      // Evolution API v1 flat format
-      {
-        method: 'POST',
-        path: `/webhook/set/${desiredConfig.instanceName}`,
-        body: {
-          url: desiredConfig.url,
-          events: desiredConfig.events,
-          webhook_by_events: desiredConfig.webhook_by_events,
-          webhook_base64: desiredConfig.webhook_base64,
-        },
-        expectedStatuses: [200, 201],
-        instanceName: desiredConfig.instanceName,
-      },
-      // Evolution API v2 nested format
+      // Evolution API v2 nested format (FIRST)
       {
         method: 'POST',
         path: `/webhook/set/${desiredConfig.instanceName}`,
@@ -835,6 +822,19 @@ export const setInstanceWebhook = async ({ instanceName = null, webhookUrl = nul
             webhook_by_events: desiredConfig.webhook_by_events,
             webhook_base64: desiredConfig.webhook_base64,
           },
+        },
+        expectedStatuses: [200, 201],
+        instanceName: desiredConfig.instanceName,
+      },
+      // Evolution API v1 flat format (FALLBACK)
+      {
+        method: 'POST',
+        path: `/webhook/set/${desiredConfig.instanceName}`,
+        body: {
+          url: desiredConfig.url,
+          events: desiredConfig.events,
+          webhook_by_events: desiredConfig.webhook_by_events,
+          webhook_base64: desiredConfig.webhook_base64,
         },
         expectedStatuses: [200, 201],
         instanceName: desiredConfig.instanceName,
