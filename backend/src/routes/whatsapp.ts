@@ -37,6 +37,7 @@ import {
 } from '../utils/whatsapp.js';
 import { resolvePhoneFromLidJid } from '../services/evolutionApiService.js';
 import { handleQrcodeUpdated } from '../services/whatsapp/handlers/qrcodeUpdatedHandler.js';
+import { handleConnectionUpdate } from '../services/whatsapp/handlers/connectionUpdateHandler.js';
 
 const router = Router();
 const waProtected = [authMiddleware, requireTenantRoles, requireFeature('whatsapp_automation')];
@@ -1530,6 +1531,12 @@ router.post('/webhook/:event', async (req: Request, res: Response, next: NextFun
 
     if (eventName === 'qrcode-updated') {
       handleQrcodeUpdated(payload);
+      sendSuccess(res, { received: true, processed: true });
+      return;
+    }
+
+    if (eventName === 'connection-update') {
+      await handleConnectionUpdate(payload);
       sendSuccess(res, { received: true, processed: true });
       return;
     }

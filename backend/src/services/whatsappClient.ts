@@ -707,6 +707,16 @@ export const connectWhatsApp = async (context: ConnectWhatsAppContext = {}): Pro
     }
 
     await createInstance({ instanceName: resolvedInstanceName });
+
+    // Clear any corrupted Baileys session so Evolution API generates a fresh QR.
+    // Suppress errors: new instances won't have a session to logout.
+    try {
+      await logoutInstance({ instanceName: resolvedInstanceName });
+      logger.debug({ instanceName: resolvedInstanceName }, 'connectWhatsApp: sessao anterior limpa antes de reconectar');
+    } catch {
+      logger.debug({ instanceName: resolvedInstanceName }, 'connectWhatsApp: logoutInstance ignorado (instancia nova ou sem sessao)');
+    }
+
     await connectInstance({ instanceName: resolvedInstanceName });
 
     let qrPayload: unknown = null;
