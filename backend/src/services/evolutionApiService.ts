@@ -1167,6 +1167,18 @@ export const logoutInstance = async ({ instanceName = null }: { instanceName?: s
   );
 };
 
+export const deleteInstance = async ({ instanceName = null }: { instanceName?: string | null } = {}): Promise<unknown> => {
+  const { instanceName: resolvedInstanceName } = getConfig({ instanceName });
+
+  return requestWithFallback(
+    [
+      { method: 'DELETE', path: `/instance/delete/${resolvedInstanceName}`, expectedStatuses: [200, 202, 204], instanceName: resolvedInstanceName },
+      { method: 'DELETE', path: `/instance/${resolvedInstanceName}`, expectedStatuses: [200, 202, 204], instanceName: resolvedInstanceName },
+    ],
+    'deleteInstance'
+  );
+};
+
 export const sendTextMessage = async ({
   phone,
   text,

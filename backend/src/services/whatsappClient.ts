@@ -6,6 +6,7 @@ import {
   connectInstance,
   getQrCode,
   logoutInstance,
+  deleteInstance,
   sendTextMessage,
   getEvolutionConfig,
   EvolutionApiError,
@@ -706,16 +707,16 @@ export const connectWhatsApp = async (context: ConnectWhatsAppContext = {}): Pro
       return false;
     }
 
-    await createInstance({ instanceName: resolvedInstanceName });
-
-    // Clear any corrupted Baileys session so Evolution API generates a fresh QR.
-    // Suppress errors: new instances won't have a session to logout.
+    // Deletar instância existente para limpar TODA sessão Baileys do Redis.
+    // Sem isso, sessão corrompida causa cycling connecting→close sem gerar QR.
     try {
-      await logoutInstance({ instanceName: resolvedInstanceName });
-      logger.debug({ instanceName: resolvedInstanceName }, 'connectWhatsApp: sessao anterior limpa antes de reconectar');
+      await deleteInstance({ instanceName: resolvedInstanceName });
+      logger.info({ instanceName: resolvedInstanceName }, 'connectWhatsApp: instancia deletada para reset completo da sessao');
     } catch {
-      logger.debug({ instanceName: resolvedInstanceName }, 'connectWhatsApp: logoutInstance ignorado (instancia nova ou sem sessao)');
+      logger.debug({ instanceName: resolvedInstanceName }, 'connectWhatsApp: deleteInstance ignorado (instancia nao existe)');
     }
+
+    await createInstance({ instanceName: resolvedInstanceName });
 
     await connectInstance({ instanceName: resolvedInstanceName });
 
