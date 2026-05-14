@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import logger from '../../utils/logger.js';
 import { handleMessagesUpsert } from '../../services/whatsapp/handlers/messagesUpsertHandler.js';
 import { handleConnectionUpdate } from '../../services/whatsapp/handlers/connectionUpdateHandler.js';
+import { handleQrcodeUpdated } from '../../services/whatsapp/handlers/qrcodeUpdatedHandler.js';
 
 /**
  * POST /api/v1/whatsapp/webhook/:event
@@ -20,6 +21,10 @@ export const webhookController = async (req: Request, res: Response): Promise<vo
 
       case 'connection-update':
         await handleConnectionUpdate(body);
+        break;
+
+      case 'qrcode-updated':
+        handleQrcodeUpdated(body);
         break;
 
       default:

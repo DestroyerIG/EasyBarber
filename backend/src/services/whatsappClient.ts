@@ -13,6 +13,7 @@ import {
   getProviderErrorMessage,
   isInstanceNotFoundError,
 } from './evolutionApiService.js';
+import { getCachedQrCode } from './whatsapp/handlers/qrcodeUpdatedHandler.js';
 import {
   getConnectedNumber as getCachedConnectedNumber,
   updateInstanceDirect,
@@ -769,6 +770,15 @@ export const getWhatsAppQrCode = async (context: ConnectWhatsAppContext = {}): P
       createIfMissing: true,
     });
     const resolvedInstanceName = instanceContext.instanceName;
+
+    if (resolvedInstanceName) {
+      const cached = getCachedQrCode(resolvedInstanceName);
+      if (cached) {
+        logger.debug({ instanceName: resolvedInstanceName }, 'QR Code retornado do cache QRCODE_UPDATED');
+        return cached;
+      }
+    }
+
     const payload = await getQrCode({ instanceName: resolvedInstanceName });
     logger.debug({ payload }, 'Payload bruto de QR recebido em getWhatsAppQrCode');
 
@@ -776,7 +786,7 @@ export const getWhatsAppQrCode = async (context: ConnectWhatsAppContext = {}): P
 
     if (!qrCode) {
       const syncedState = await syncStateFromEvolution({ includeQr: true, instanceName: resolvedInstanceName });
-      return syncedState.qrCode;
+      return syncedState.qrCode ?? (resolvedInstanceName ? getCachedQrCode(resolvedInstanceName) : null);
     }
 
     updateState({

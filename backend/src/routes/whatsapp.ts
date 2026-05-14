@@ -36,6 +36,7 @@ import {
   getPhoneFromLidCache,
 } from '../utils/whatsapp.js';
 import { resolvePhoneFromLidJid } from '../services/evolutionApiService.js';
+import { handleQrcodeUpdated } from '../services/whatsapp/handlers/qrcodeUpdatedHandler.js';
 
 const router = Router();
 const waProtected = [authMiddleware, requireTenantRoles, requireFeature('whatsapp_automation')];
@@ -1526,6 +1527,12 @@ router.post('/webhook/:event', async (req: Request, res: Response, next: NextFun
       parseError,
       bodyType,
     });
+
+    if (eventName === 'qrcode-updated') {
+      handleQrcodeUpdated(payload);
+      sendSuccess(res, { received: true, processed: true });
+      return;
+    }
 
     if (!isIncomingWebhookEvent(eventName, { allowEmpty: false })) {
       logger.debug({ event: eventName }, 'Webhook Evolution sub-rota ignorada (nao e mensagem)');
