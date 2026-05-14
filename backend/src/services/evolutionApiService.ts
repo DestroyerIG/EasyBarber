@@ -957,24 +957,8 @@ export const createInstance = async ({ instanceName = null, webhookUrl = null }:
   const config = getConfig({ instanceName, webhookUrl });
   const desiredWebhookConfig = buildDesiredWebhookConfig({ instanceName, webhookUrl });
 
-  const payload = await requestWithFallback(
+  const payload = await requestTryingPayloads(
     [
-      // Evolution API v1 flat format
-      {
-        method: 'POST',
-        path: '/instance/create',
-        body: {
-          instanceName: config.instanceName,
-          integration: 'WHATSAPP-BAILEYS',
-          qrcode: true,
-          webhook: desiredWebhookConfig.url || undefined,
-          webhook_by_events: desiredWebhookConfig.webhook_by_events,
-          webhook_base64: desiredWebhookConfig.webhook_base64,
-          webhook_events: desiredWebhookConfig.events,
-        },
-        expectedStatuses: [200, 201, 403, 409],
-        instanceName: config.instanceName,
-      },
       // Evolution API v2 nested webhook format
       {
         method: 'POST',
@@ -992,6 +976,22 @@ export const createInstance = async ({ instanceName = null, webhookUrl = null }:
               webhook_base64: desiredWebhookConfig.webhook_base64,
             },
           } : {}),
+        },
+        expectedStatuses: [200, 201, 403, 409],
+        instanceName: config.instanceName,
+      },
+      // Evolution API v1 flat format
+      {
+        method: 'POST',
+        path: '/instance/create',
+        body: {
+          instanceName: config.instanceName,
+          integration: 'WHATSAPP-BAILEYS',
+          qrcode: true,
+          webhook: desiredWebhookConfig.url || undefined,
+          webhook_by_events: desiredWebhookConfig.webhook_by_events,
+          webhook_base64: desiredWebhookConfig.webhook_base64,
+          webhook_events: desiredWebhookConfig.events,
         },
         expectedStatuses: [200, 201, 403, 409],
         instanceName: config.instanceName,
