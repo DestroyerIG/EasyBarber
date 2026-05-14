@@ -1399,6 +1399,21 @@ router.post('/webhook', async (req: Request, res: Response, next: NextFunction):
       'Webhook legado recebido. Recomenda-se migrar para /api/v1/whatsapp/webhook/messages-upsert'
     );
 
+    // Tratar eventos de controle mesmo na rota legada
+    const legacyEventName = normalizeWebhookEventName(String(payload['event'] ?? payload['type'] ?? ''));
+
+    if (legacyEventName === 'qrcode-updated') {
+      handleQrcodeUpdated(payload);
+      sendSuccess(res, { received: true, processed: true });
+      return;
+    }
+
+    if (legacyEventName === 'connection-update') {
+      await handleConnectionUpdate(payload);
+      sendSuccess(res, { received: true, processed: true });
+      return;
+    }
+
     const incoming = await mapWebhookIncomingMessage(payload);
 
     if (!incoming) {
