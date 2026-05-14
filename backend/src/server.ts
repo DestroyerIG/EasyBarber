@@ -331,6 +331,7 @@ const webhookPaths = [
   `${API_V1}/billing/webhooks/stripe`,
   `${API_V1}/billing/webhooks/asaas`,
   `${API_V1}/billing/webhook/asaas`,
+  `${API_V1}/whatsapp/webhook`,
 ];
 
 const apiLimiter = rateLimit({
