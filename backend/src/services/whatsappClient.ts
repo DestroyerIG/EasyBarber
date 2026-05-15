@@ -101,6 +101,45 @@ interface SessionRecoveryResult {
   error?: string;
 }
 
+// ── State Machine ─────────────────────────────────────────────────────────────
+
+export type WhatsAppInstanceState =
+  | 'not_created'
+  | 'creating'
+  | 'initializing'
+  | 'pairing'
+  | 'qr_ready'
+  | 'connecting'
+  | 'connected'
+  | 'disconnected'
+  | 'reconnecting'
+  | 'failed'
+  | 'destroyed';
+
+const VALID_TRANSITIONS: Record<WhatsAppInstanceState, WhatsAppInstanceState[]> = {
+  not_created:   ['creating', 'failed'],
+  creating:      ['initializing', 'failed', 'not_created'],
+  initializing:  ['pairing', 'qr_ready', 'connecting', 'connected', 'failed'],
+  pairing:       ['qr_ready', 'connecting', 'connected', 'failed', 'disconnected'],
+  qr_ready:      ['connecting', 'connected', 'pairing', 'failed', 'disconnected'],
+  connecting:    ['connected', 'pairing', 'qr_ready', 'failed', 'disconnected'],
+  connected:     ['disconnected', 'reconnecting', 'failed', 'destroyed'],
+  disconnected:  ['reconnecting', 'creating', 'pairing', 'connecting', 'not_created', 'destroyed'],
+  reconnecting:  ['connected', 'pairing', 'qr_ready', 'failed', 'disconnected'],
+  failed:        ['creating', 'reconnecting', 'destroyed', 'not_created'],
+  destroyed:     ['creating', 'not_created'],
+};
+
+export const instanceStateTransition = (
+  from: WhatsAppInstanceState,
+  to: WhatsAppInstanceState,
+): WhatsAppInstanceState => {
+  if (!VALID_TRANSITIONS[from]?.includes(to)) {
+    throw new Error(`Invalid state transition: ${from} → ${to}`);
+  }
+  return to;
+};
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const STATUS = {
@@ -140,6 +179,25 @@ const getNested = (obj: unknown, path: string[]): unknown =>
 
 const resolveStateKey = (instanceName: string | null = null): string =>
   normalizeWhatsAppInstanceName(instanceName) || '__default__';
+
+// In-process Promise-chaining mutex — single-process safe (Render free tier).
+// Migrar para Redlock quando Redis estiver disponível (multi-pod).
+const instanceLocks = new Map<string, Promise<void>>();
+
+const withInstanceLock = async <T>(instanceName: string | null, fn: () => Promise<T>): Promise<T> => {
+  const key = resolveStateKey(instanceName);
+  const current = instanceLocks.get(key) ?? Promise.resolve();
+  let releaseLock!: () => void;
+  const next = new Promise<void>((resolve) => { releaseLock = resolve; });
+  instanceLocks.set(key, current.then(() => next));
+  await current;
+  try {
+    return await fn();
+  } finally {
+    releaseLock();
+    if (instanceLocks.get(key) === next) instanceLocks.delete(key);
+  }
+};
 
 const getOrCreateState = (instanceName: string | null = null): WhatsAppState => {
   const stateKey = resolveStateKey(instanceName);
@@ -692,7 +750,69 @@ export const getConnectedNumberCached = (instanceName: string | null = null): st
 
 export const getWhatsAppClient = (): null => null;
 
+export const getWhatsAppHealthStats = (): {
+  totalInstances: number;
+  connected: number;
+  pairing: number;
+  other: number;
+} => {
+  let connected = 0;
+  let pairing = 0;
+  let other = 0;
+  for (const state of waStateByInstance.values()) {
+    if (state.status === STATUS.CONNECTED) connected++;
+    else if (state.status === STATUS.PAIRING) pairing++;
+    else other++;
+  }
+  return { totalInstances: waStateByInstance.size, connected, pairing, other };
+};
+
+/**
+ * Garante que a instância Evolution existe sem destruir sessão saudável.
+ * Retorna { existed: true } se a instância já existe com estado aceitável.
+ * Retorna { existed: false } se criou uma nova instância.
+ */
+export const ensureInstance = async (
+  context: ConnectWhatsAppContext = {},
+): Promise<{ existed: boolean; evolutionState: string | null }> => {
+  const instanceContext = await resolveClientInstanceContext({
+    instanceName: context?.instanceName,
+    barbershopId: context?.barbershopId,
+    createIfMissing: true,
+  });
+  const resolvedInstanceName = instanceContext.instanceName;
+
+  try {
+    const statusPayload = await getInstanceStatus({ instanceName: resolvedInstanceName });
+    const statusObj = statusPayload as Record<string, unknown>;
+    const instanceObj = statusObj?.instance as Record<string, unknown> | undefined;
+    const dataObj = statusObj?.data as Record<string, unknown> | undefined;
+    const evolutionState = (
+      (instanceObj?.state as string | undefined)
+      ?? (dataObj?.state as string | undefined)
+      ?? (statusObj?.state as string | undefined)
+      ?? null
+    );
+
+    logger.info({ instanceName: resolvedInstanceName, evolutionState }, 'ensureInstance: instance already exists');
+    return { existed: true, evolutionState };
+  } catch (err) {
+    if (isInstanceNotFoundError(err, { instanceName: resolvedInstanceName })) {
+      logger.info({ instanceName: resolvedInstanceName }, 'ensureInstance: instance not found, creating');
+      await createInstance({ instanceName: resolvedInstanceName });
+      return { existed: false, evolutionState: 'creating' };
+    }
+    // On other errors (network, circuit open) re-throw so caller can handle
+    throw err;
+  }
+};
+
 export const connectWhatsApp = async (context: ConnectWhatsAppContext = {}): Promise<boolean> => {
+  const resolvedLockKey = context?.instanceName ?? context?.barbershopId ?? '__default__';
+  return withInstanceLock(resolvedLockKey, async () => connectWhatsAppInner(context));
+};
+
+const connectWhatsAppInner = async (context: ConnectWhatsAppContext = {}): Promise<boolean> => {
   try {
     const instanceContext = await resolveClientInstanceContext({
       instanceName: context?.instanceName,

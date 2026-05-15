@@ -14,6 +14,7 @@ import {
   logoutWhatsApp,
   restartWhatsApp,
   initializeWhatsAppInstance,
+  getWhatsAppHealthStats,
 } from '../services/whatsappClient.js';
 import { updateInstanceFromPayload } from '../services/whatsapp/whatsappInstanceCache.js';
 import { getBarbershopWhatsAppInstanceContext } from '../services/whatsapp/whatsappInstanceService.js';
@@ -36,8 +37,10 @@ import {
   getPhoneFromLidCache,
 } from '../utils/whatsapp.js';
 import { resolvePhoneFromLidJid } from '../services/evolutionApiService.js';
-import { handleQrcodeUpdated } from '../services/whatsapp/handlers/qrcodeUpdatedHandler.js';
+import { handleQrcodeUpdated, getQrCacheSize } from '../services/whatsapp/handlers/qrcodeUpdatedHandler.js';
 import { handleConnectionUpdate } from '../services/whatsapp/handlers/connectionUpdateHandler.js';
+import { evolutionCircuitBreaker } from '../utils/circuitBreaker.js';
+import { healthCheck } from '../services/evolutionApiService.js';
 
 const router = Router();
 const waProtected = [authMiddleware, requireTenantRoles, requireFeature('whatsapp_automation')];
@@ -2597,6 +2600,46 @@ router.post('/config/menu/reset', ...waProtected, async (req: Request, res: Resp
     );
 
     sendSuccess(res, rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─── Internal Health Check ───────────────────────────────────────────────────
+
+router.get('/internal/health', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const cbStats = evolutionCircuitBreaker.getStats();
+    const instanceStats = getWhatsAppHealthStats();
+    const qrCacheEntries = getQrCacheSize();
+
+    let evolutionStatus: 'ok' | 'degraded' | 'down' = 'ok';
+    if (cbStats.state === 'open') {
+      evolutionStatus = 'down';
+    } else if (cbStats.state === 'half-open' || cbStats.failures > 0) {
+      evolutionStatus = 'degraded';
+    } else {
+      try {
+        const hc = await healthCheck();
+        evolutionStatus = (hc as Record<string, unknown>).ok ? 'ok' : 'degraded';
+      } catch {
+        evolutionStatus = 'down';
+      }
+    }
+
+    res.json({
+      evolution: evolutionStatus,
+      circuitBreaker: cbStats.state,
+      circuitBreakerFailures: cbStats.failures,
+      instances: {
+        total: instanceStats.totalInstances,
+        connected: instanceStats.connected,
+        pairing: instanceStats.pairing,
+        other: instanceStats.other,
+      },
+      qrCacheEntries,
+      checkedAt: new Date().toISOString(),
+    });
   } catch (error) {
     next(error);
   }

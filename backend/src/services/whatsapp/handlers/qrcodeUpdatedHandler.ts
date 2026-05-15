@@ -9,6 +9,8 @@ interface QrEntry {
 
 const qrCache = new Map<string, QrEntry>();
 
+export const getQrCacheSize = (): number => qrCache.size;
+
 export const getCachedQrCode = (instanceName: string): string | null => {
   const entry = qrCache.get(instanceName.toLowerCase());
   if (!entry) return null;

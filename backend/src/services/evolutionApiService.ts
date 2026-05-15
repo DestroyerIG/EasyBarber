@@ -1,5 +1,6 @@
 import logger from '../utils/logger.js';
 import { normalizePhoneForSend } from '../utils/whatsapp.js';
+import { evolutionCircuitBreaker } from '../utils/circuitBreaker.js';
 
 const DEFAULT_TIMEOUT_MS = 10000;
 const DEFAULT_RETRY_ATTEMPTS = 1;
@@ -516,7 +517,7 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
             'Erro transiente na Evolution API, tentando novamente'
           );
           lastError = apiError;
-          await sleep(250 * attempt);
+          await sleep(Math.min(1_000 * Math.pow(2, attempt - 1), 8_000));
           continue;
         }
 
@@ -571,7 +572,7 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
           'Falha transiente ao chamar Evolution API, tentando novamente'
         );
         lastError = normalizedError;
-        await sleep(250 * attempt);
+        await sleep(Math.min(1_000 * Math.pow(2, attempt - 1), 8_000));
         continue;
       }
 
@@ -587,32 +588,34 @@ const request = async ({ method, path, body = undefined, expectedStatuses = [200
 };
 
 const requestWithFallback = async (candidates: RequestCandidate[], operationName: string, fallbackStatuses: number[] = [404, 405, 501]): Promise<unknown> => {
-  let lastError: unknown = null;
+  return evolutionCircuitBreaker.execute(async () => {
+    let lastError: unknown = null;
 
-  for (const candidate of candidates) {
-    try {
-      return await request(candidate);
-    } catch (error) {
-      lastError = error;
+    for (const candidate of candidates) {
+      try {
+        return await request(candidate);
+      } catch (error) {
+        lastError = error;
 
-      if (error instanceof EvolutionApiError && fallbackStatuses.includes(error.status || 0)) {
-        logger.debug(
-          {
-            operationName,
-            method: candidate.method,
-            path: candidate.path,
-            status: error.status,
-          },
-          'Endpoint fallback da Evolution API'
-        );
-        continue;
+        if (error instanceof EvolutionApiError && fallbackStatuses.includes(error.status || 0)) {
+          logger.debug(
+            {
+              operationName,
+              method: candidate.method,
+              path: candidate.path,
+              status: error.status,
+            },
+            'Endpoint fallback da Evolution API'
+          );
+          continue;
+        }
+
+        throw error;
       }
-
-      throw error;
     }
-  }
 
-  throw lastError || new EvolutionApiError(`${operationName} indisponivel`);
+    throw lastError || new EvolutionApiError(`${operationName} indisponivel`);
+  });
 };
 
 const requestTryingPayloads = async (
@@ -622,51 +625,54 @@ const requestTryingPayloads = async (
   options: { includeMeta?: boolean } = {}
 ): Promise<unknown> => {
   const includeMeta = Boolean(options?.includeMeta);
-  let lastError: unknown = null;
 
-  for (let index = 0; index < candidates.length; index += 1) {
-    const candidate = candidates[index]!;
-    const payloadShape = describePayloadShape(candidate?.body);
+  return evolutionCircuitBreaker.execute(async () => {
+    let lastError: unknown = null;
 
-    try {
-      const payload = await request(candidate);
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index]!;
+      const payloadShape = describePayloadShape(candidate?.body);
 
-      if (includeMeta) {
-        return {
-          payload,
-          payloadShape,
-          candidate,
-          candidateIndex: index,
-        } as RequestWithPayloadResult;
-      }
+      try {
+        const payload = await request(candidate);
 
-      return payload;
-    } catch (error) {
-      lastError = error;
-
-      if (
-        error instanceof EvolutionApiError &&
-        fallbackStatuses.includes(error.status || 0)
-      ) {
-        logger.debug(
-          {
-            operationName,
-            method: candidate.method,
-            path: candidate.path,
-            status: error.status,
-            bodyKeys: candidate?.body ? Object.keys(candidate.body) : [],
+        if (includeMeta) {
+          return {
+            payload,
             payloadShape,
-          },
-          'Tentando proximo payload da Evolution API'
-        );
-        continue;
+            candidate,
+            candidateIndex: index,
+          } as RequestWithPayloadResult;
+        }
+
+        return payload;
+      } catch (error) {
+        lastError = error;
+
+        if (
+          error instanceof EvolutionApiError &&
+          fallbackStatuses.includes(error.status || 0)
+        ) {
+          logger.debug(
+            {
+              operationName,
+              method: candidate.method,
+              path: candidate.path,
+              status: error.status,
+              bodyKeys: candidate?.body ? Object.keys(candidate.body) : [],
+              payloadShape,
+            },
+            'Tentando proximo payload da Evolution API'
+          );
+          continue;
+        }
+
+        throw error;
       }
-
-      throw error;
     }
-  }
 
-  throw lastError || new EvolutionApiError(`${operationName} indisponivel`);
+    throw lastError || new EvolutionApiError(`${operationName} indisponivel`);
+  });
 };
 
 const describePayloadShape = (body: unknown): string => {
