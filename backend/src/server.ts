@@ -557,28 +557,6 @@ const start = async (): Promise<void> => {
 
     await prisma.$queryRaw`SELECT 1`;
 
-    // Migrations no startup com retry — falha fatal se banco inacessível após 3 tentativas
-    let migrated = false;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const { execSync } = await import('child_process');
-        execSync('npx prisma migrate deploy', { stdio: 'inherit' });
-        logger.info('Migrations aplicadas com sucesso');
-        migrated = true;
-        break;
-      } catch (migrateErr) {
-        logger.warn(
-          { err: (migrateErr as Error)?.message, attempt },
-          `prisma migrate deploy falhou (tentativa ${attempt}/3)`,
-        );
-        if (attempt < 3) await new Promise((r) => setTimeout(r, 5_000));
-      }
-    }
-    if (!migrated) {
-      logger.fatal('prisma migrate deploy falhou após 3 tentativas — encerrando servidor');
-      process.exit(1);
-    }
-
     logger.info(
       'Conexão com banco de dados verificada'
     );
