@@ -1000,10 +1000,17 @@ export const createInstance = async ({ instanceName = null, webhookUrl = null }:
     'createInstance'
   );
 
-  await ensureInstanceWebhookConfig({
-    instanceName: config.instanceName,
-    webhookUrl: desiredWebhookConfig.url,
-  });
+  try {
+    await ensureInstanceWebhookConfig({
+      instanceName: config.instanceName,
+      webhookUrl: desiredWebhookConfig.url,
+    });
+  } catch (webhookErr) {
+    logger.warn(
+      { err: webhookErr, instanceName: config.instanceName },
+      'createInstance: falha ao configurar webhook pos-criacao; instancia criada mas webhook pode divergir'
+    );
+  }
 
   return payload;
 };
@@ -1013,8 +1020,8 @@ export const connectInstance = async ({ instanceName = null }: { instanceName?: 
 
   return requestWithFallback(
     [
-      { method: 'POST', path: `/instance/connect/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
       { method: 'GET', path: `/instance/connect/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
+      { method: 'POST', path: `/instance/connect/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
     ],
     'connectInstance'
   );
@@ -1024,14 +1031,12 @@ export const getInstanceStatus = async ({ instanceName = null }: { instanceName?
   const { instanceName: resolvedInstanceName, baseURL } = getConfig({ instanceName });
   const statusUrls = [
     `${baseURL}/instance/connectionState/${resolvedInstanceName}`,
-    `${baseURL}/instance/status/${resolvedInstanceName}`,
   ];
 
   try {
     const payload = await requestWithFallback(
       [
         { method: 'GET', path: `/instance/connectionState/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
-        { method: 'GET', path: `/instance/status/${resolvedInstanceName}` },
       ],
       'getInstanceStatus'
     );
@@ -1144,8 +1149,6 @@ export const getQrCode = async ({ instanceName = null }: { instanceName?: string
 
   return requestWithFallback(
     [
-      { method: 'GET', path: `/instance/qrcode/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
-      { method: 'GET', path: `/instance/qr/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
       { method: 'GET', path: `/instance/connect/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
       { method: 'POST', path: `/instance/connect/${resolvedInstanceName}`, instanceName: resolvedInstanceName },
     ],

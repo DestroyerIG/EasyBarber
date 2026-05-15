@@ -718,17 +718,31 @@ export const connectWhatsApp = async (context: ConnectWhatsAppContext = {}): Pro
 
     await createInstance({ instanceName: resolvedInstanceName });
 
-    await connectInstance({ instanceName: resolvedInstanceName });
+    // Aguardar Baileys inicializar antes de solicitar conexão/QR.
+    // Evolution API registra a instância internamente antes de aceitar connect.
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    let qrPayload: unknown = null;
+    let connectPayload: unknown = null;
     try {
-      qrPayload = await getQrCode({ instanceName: resolvedInstanceName });
-      logger.debug({ qrPayload }, 'Payload bruto de QR recebido apos connect');
+      connectPayload = await connectInstance({ instanceName: resolvedInstanceName });
+      logger.debug({ connectPayload }, 'connectWhatsApp: payload de connect recebido');
     } catch (error) {
-      logger.warn({ err: error, instanceName: resolvedInstanceName }, 'Nao foi possivel obter QR imediatamente apos connect');
+      logger.warn({ err: error, instanceName: resolvedInstanceName }, 'connectWhatsApp: connectInstance falhou, tentando getQrCode diretamente');
     }
 
-    const qrCode = extractQrCode(qrPayload);
+    let qrPayload: unknown = connectPayload;
+    const connectQr = connectPayload ? extractQrCode(connectPayload) : null;
+    if (!connectQr) {
+      try {
+        qrPayload = await getQrCode({ instanceName: resolvedInstanceName });
+        logger.debug({ qrPayload }, 'Payload bruto de QR recebido apos connect');
+      } catch (error) {
+        logger.warn({ err: error, instanceName: resolvedInstanceName }, 'Nao foi possivel obter QR imediatamente apos connect');
+        qrPayload = null;
+      }
+    }
+
+    const qrCode = connectQr ?? extractQrCode(qrPayload);
     const syncedState = await syncStateFromEvolution({
       includeQr: !qrCode,
       instanceName: resolvedInstanceName,
