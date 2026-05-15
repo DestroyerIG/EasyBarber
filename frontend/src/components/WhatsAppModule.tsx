@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '@/lib/api';
 import { useToast } from './Toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -124,10 +124,12 @@ export const WhatsAppModule = () => {
   const [featureBlocked, setFeatureBlocked] = useState(false);
   const { showToast } = useToast();
   const { user } = useAuth();
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const waStatusRef = useRef<WhatsAppStatus>(DEFAULT_WA_STATUS);
 
-  const fetchStatus = useCallback(async () => {
+  const fetchStatus = useCallback(async (signal?: AbortSignal) => {
     try {
-      const response = await api.get('/whatsapp/status');
+      const response = await api.get('/whatsapp/status', { signal });
       const mergedStatus: WhatsAppStatus = {
         ...DEFAULT_WA_STATUS,
         ...normalizeStatusPayload(response.data),
@@ -135,7 +137,7 @@ export const WhatsAppModule = () => {
 
       if (mergedStatus.status === 'pairing' && !mergedStatus.qrCode) {
         try {
-          const qrResponse = await api.get('/whatsapp/qrcode');
+          const qrResponse = await api.get('/whatsapp/qrcode', { signal });
           const qrNormalized = normalizeStatusPayload(qrResponse.data);
           const qrPayload = asObjectPayload(qrResponse.data);
 
@@ -148,8 +150,13 @@ export const WhatsAppModule = () => {
         }
       }
 
+      waStatusRef.current = mergedStatus;
       setWaStatus(mergedStatus);
     } catch (err: unknown) {
+      // Ignorar erros de requisições canceladas (AbortController)
+      if (err && typeof err === 'object' && 'name' in err && (err as { name: string }).name === 'CanceledError') return;
+      if (err && typeof err === 'object' && 'name' in err && (err as { name: string }).name === 'AbortError') return;
+
       const axiosErr = err as { response?: { status?: number; data?: { code?: string; error?: { code?: string } } } };
       const errCode = axiosErr.response?.data?.code ?? axiosErr.response?.data?.error?.code;
       if (axiosErr.response?.status === 403 && errCode === 'FEATURE_BLOCKED') {
@@ -190,18 +197,41 @@ export const WhatsAppModule = () => {
     }
   }, [showToast]);
 
-  // Status polling com backoff exponencial para evitar flood quando API cai
+  // Polling adaptativo: pausa quando connected, mais frequente quando pairing
   useEffect(() => {
-    const intervalMs = 3000;
     let timeoutId: ReturnType<typeof setTimeout>;
+    let active = true;
 
-    const poll = () => {
-      fetchStatus();
-      timeoutId = setTimeout(poll, intervalMs);
+    const getIntervalMs = (): number => {
+      const status = waStatusRef.current.status;
+      if (status === 'connected') return 60_000;        // conectado: checar minutamente (detecta desconexão inesperada)
+      if (status === 'pairing') return 5_000;           // QR expira a cada 60s, checar frequente
+      if (status === 'provider_unavailable') return 30_000;
+      if (status === 'instance_not_found') return 15_000;
+      return 8_000;                                     // outros estados (era 3s fixo)
     };
 
-    timeoutId = setTimeout(poll, 0);
-    return () => clearTimeout(timeoutId);
+    const poll = async () => {
+      if (!active) return;
+
+      // Cancelar request anterior
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      await fetchStatus(controller.signal);
+
+      if (!active) return;
+      timeoutId = setTimeout(poll, getIntervalMs());
+    };
+
+    poll();
+
+    return () => {
+      active = false;
+      clearTimeout(timeoutId);
+      abortControllerRef.current?.abort();
+    };
   }, [fetchStatus]);
 
   useEffect(() => {
