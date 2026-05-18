@@ -389,20 +389,43 @@ export const whatsappService = {
 
   /**
    * Re-applies the canonical webhook config (webhook_by_events=true, all
-   * expected events, our URL) to every Evolution instance that Evolution
-   * itself knows about. Used to migrate instances created before the v2
-   * webhook-by-events fix away from the legacy flat /webhook URL that
-   * triggers the 410 warnings.
+   * expected events, our URL) to every Evolution instance whose name is
+   * registered in the DB.
    *
-   * Safe to call repeatedly. Iterates Evolution's view of instances rather
-   * than the DB so it also catches orphaned ones.
+   * IMPORTANT: previously this iterated `fetchInstances()` and called
+   * setWebhook on whatever Evolution returned, which meant zombies (e.g.
+   * the underscore-less `itallobarbereacb8a07`) also received setWebhook
+   * calls — producing the double "setWebhook" log lines the operator saw.
+   * The DB is now the source of truth: only names present in
+   * barbershops.whatsapp_instance_name get reconfigured. Anything else in
+   * Evolution is treated as an orphan and surfaced for cleanupCorrupted.
+   *
+   * Safe to call repeatedly.
    */
-  async syncAllWebhooks(): Promise<{ total: number; fixed: number; failed: number; instances: Array<{ name: string; ok: boolean; error?: string }> }> {
+  async syncAllWebhooks(): Promise<{
+    total: number;
+    fixed: number;
+    failed: number;
+    skippedOrphans: string[];
+    instances: Array<{ name: string; ok: boolean; error?: string }>;
+  }> {
     const url = webhookUrl();
     if (!url) throw new Error('EVOLUTION_WEBHOOK_URL não configurado');
 
+    // Source of truth: DB. Anything not in here is NOT touched.
+    const rows = await prisma.$queryRaw<Array<{ whatsapp_instance_name: string | null }>>`
+      SELECT whatsapp_instance_name
+        FROM barbershops
+       WHERE active = true
+         AND NULLIF(btrim(whatsapp_instance_name), '') IS NOT NULL
+    `;
+    const canonicalSet = new Set(
+      rows.map((r) => (r.whatsapp_instance_name ?? '').trim().toLowerCase()).filter(Boolean),
+    );
+
     const list = await evolutionApi.fetchInstances();
     const instances: Array<{ name: string; ok: boolean; error?: string }> = [];
+    const skippedOrphans: string[] = [];
     let fixed = 0;
     let failed = 0;
 
@@ -419,6 +442,15 @@ export const whatsappService = {
       const name = String(candidate).trim();
       if (!name) continue;
 
+      if (!canonicalSet.has(name.toLowerCase())) {
+        skippedOrphans.push(name);
+        logger.warn(
+          { instanceName: name },
+          'whatsapp-service: instância órfã ignorada em syncAllWebhooks; rode admin/cleanup-corrupted',
+        );
+        continue;
+      }
+
       try {
         await verifyAndFixWebhook(name, url);
         fixed += 1;
@@ -431,7 +463,10 @@ export const whatsappService = {
       }
     }
 
-    logger.info({ total: instances.length, fixed, failed }, 'whatsapp-service: syncAllWebhooks concluído');
-    return { total: instances.length, fixed, failed, instances };
+    logger.info(
+      { total: instances.length, fixed, failed, skipped: skippedOrphans.length },
+      'whatsapp-service: syncAllWebhooks concluído',
+    );
+    return { total: instances.length, fixed, failed, skippedOrphans, instances };
   },
 };
