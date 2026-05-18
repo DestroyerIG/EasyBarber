@@ -24,7 +24,102 @@ function isAlreadyInUseError(err: unknown): boolean {
   );
 }
 
-const webhookUrl = (): string => process.env.EVOLUTION_WEBHOOK_URL ?? '';
+/**
+ * Event suffixes Evolution v2 may have appended already. If the env value
+ * accidentally includes one (or a chain of them), we strip back to the bare
+ * base — otherwise Evolution appends the event again and we end up with
+ * `.../connection-update/connection-update` 404s.
+ */
+const KNOWN_EVENT_SUFFIXES = [
+  '/connection-update',
+  '/qrcode-updated',
+  '/messages-upsert',
+  '/messages-update',
+  '/messages-set',
+  '/send-message',
+  '/contacts-update',
+  '/chats-update',
+  '/presence-update',
+];
+
+/**
+ * Hostnames we know belong to the frontend. The webhook MUST hit the backend
+ * Render service, never the Vercel frontend (which has no /api/v1/whatsapp/
+ * routes and returns 404). We fail loud on misconfiguration instead of
+ * silently registering an unreachable URL on the Evolution server.
+ */
+const FRONTEND_HOST_BLOCKLIST = [/\.vercel\.app$/i, /barberpro-saas/i];
+
+/**
+ * Returns the canonical webhook BASE url to register on Evolution v2.
+ *
+ * Resolution order:
+ *   1. BACKEND_WEBHOOK_BASE_URL (preferred, explicit)
+ *   2. EVOLUTION_WEBHOOK_URL    (legacy name)
+ *
+ * Then:
+ *   - Trims trailing slashes
+ *   - Strips any accidental event suffix(es) (handles single + chained)
+ *   - Refuses Vercel/frontend hosts (would 404 on every event)
+ *   - Returns '' if nothing is configured (callers throw with a clear msg)
+ */
+export const normalizeWebhookBaseUrl = (raw: string | null | undefined): string => {
+  let url = String(raw ?? '').trim();
+  if (!url) return '';
+
+  url = url.replace(/\/+$/, '');
+
+  // Strip any number of accidentally-chained event suffixes.
+  let stripped = true;
+  while (stripped) {
+    stripped = false;
+    for (const suffix of KNOWN_EVENT_SUFFIXES) {
+      if (url.toLowerCase().endsWith(suffix)) {
+        url = url.slice(0, -suffix.length);
+        stripped = true;
+      }
+    }
+  }
+
+  let host = '';
+  try {
+    host = new URL(url).host;
+  } catch {
+    throw new Error(`Webhook base URL inválida: "${raw}"`);
+  }
+
+  if (FRONTEND_HOST_BLOCKLIST.some((pattern) => pattern.test(host))) {
+    throw new Error(
+      `Webhook base URL aponta para o frontend (${host}). ` +
+        'Use a URL do backend (ex.: https://easybarber-backend.onrender.com/api/v1/whatsapp/webhook). ' +
+        'Configure BACKEND_WEBHOOK_BASE_URL no serviço backend (Render), não no Vercel.',
+    );
+  }
+
+  return url;
+};
+
+/**
+ * Builds the full per-event URL Evolution v2 would call (used in logs and to
+ * sanity-check the round trip). Evolution itself does the appending when
+ * webhook_by_events=true, so we never POST this URL to Evolution — we only
+ * register the base. Exposed for logs/tests.
+ */
+export const buildWebhookUrl = (baseUrl: string, event: string): string => {
+  const base = normalizeWebhookBaseUrl(baseUrl);
+  const slug = String(event)
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .toLowerCase()
+    .replace(/[._\s]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${base}/${slug}`;
+};
+
+const webhookUrl = (): string => {
+  const raw = process.env.BACKEND_WEBHOOK_BASE_URL ?? process.env.EVOLUTION_WEBHOOK_URL ?? '';
+  return normalizeWebhookBaseUrl(raw);
+};
 
 function normalizeState(instanceName: string, raw: ConnectionStateResponse): NormalizedStatus {
   const state = raw?.instance?.state ?? raw?.state ?? 'unknown';
