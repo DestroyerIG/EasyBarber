@@ -36,16 +36,22 @@ export const getCachedQrCode = (instanceName: string): string | null => {
   return entry.qrCode;
 };
 
-const extractQrBase64 = (rawPayload: unknown): string | null => {
+export const extractQrBase64 = (rawPayload: unknown): string | null => {
   const p = rawPayload as Record<string, unknown> | null;
   const data = p?.data as Record<string, unknown> | undefined;
   const qrcode = (data?.qrcode ?? p?.qrcode) as Record<string, unknown> | undefined;
 
+  // Evolution v2 has many shapes:
+  //   webhook QRCODE_UPDATED  → { data: { qrcode: { base64, code } } }
+  //   GET /instance/connect/X → { code, base64, pairingCode } at root
+  //   older                   → { qrcode: { base64 } }
   const candidates: unknown[] = [
     qrcode?.base64,
     qrcode?.code,
     data?.base64,
+    data?.code,
     p?.base64,
+    p?.code,
   ];
 
   for (const c of candidates) {
@@ -56,6 +62,10 @@ const extractQrBase64 = (rawPayload: unknown): string | null => {
     }
   }
   return null;
+};
+
+export const setCachedQrCode = (instanceName: string, qrCode: string): void => {
+  qrCache.set(instanceName.toLowerCase(), { qrCode, expiresAt: Date.now() + QR_TTL_MS });
 };
 
 const extractInstanceName = (rawPayload: unknown): string | null => {

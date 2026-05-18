@@ -2,12 +2,20 @@ import logger from '../../utils/logger.js';
 import { EvolutionApiError, InstanceNotFoundError } from './whatsapp.types.js';
 
 const TIMEOUT_MS = 15_000;
-const WEBHOOK_EVENTS = [
+
+// Canonical list of Evolution v2 webhook events we subscribe to.
+// CASE MATTERS: Evolution v2 expects SCREAMING_SNAKE_CASE on the wire.
+// Exported so the admin diagnostics endpoint can echo it back.
+export const WEBHOOK_EVENTS = [
+  'APPLICATION_STARTUP',
+  'QRCODE_UPDATED',
   'CONNECTION_UPDATE',
   'MESSAGES_UPSERT',
-  'QRCODE_UPDATED',
   'MESSAGES_UPDATE',
+  'MESSAGES_DELETE',
   'SEND_MESSAGE',
+  'CALL',
+  'NEW_JWT_TOKEN',
 ];
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -88,8 +96,7 @@ export interface ConnectionStateResponse {
 
 export const evolutionApi = {
   async createInstance(instanceName: string, webhookUrl: string): Promise<unknown> {
-    logger.info({ instanceName }, 'evolution-api: createInstance');
-    return request('POST', '/instance/create', {
+    const payload = {
       instanceName,
       integration: 'WHATSAPP-BAILEYS',
       webhook: {
@@ -98,7 +105,19 @@ export const evolutionApi = {
         webhook_base64: false,
         events: WEBHOOK_EVENTS,
       },
-    });
+    };
+    logger.info(
+      {
+        instanceName,
+        webhookUrl,
+        webhook_by_events: true,
+        events: WEBHOOK_EVENTS,
+        eventCount: WEBHOOK_EVENTS.length,
+        payload,
+      },
+      'evolution-api: createInstance — payload completo',
+    );
+    return request('POST', '/instance/create', payload);
   },
 
   async deleteInstance(instanceName: string): Promise<void> {
@@ -171,8 +190,7 @@ export const evolutionApi = {
   },
 
   async setWebhook(instanceName: string, webhookUrl: string): Promise<unknown> {
-    logger.info({ instanceName }, 'evolution-api: setWebhook');
-    return request('POST', `/webhook/set/${instanceName}`, {
+    const payload = {
       webhook: {
         enabled: true,
         url: webhookUrl,
@@ -180,7 +198,21 @@ export const evolutionApi = {
         webhook_by_events: true,
         webhook_base64: false,
       },
-    });
+    };
+    logger.info(
+      {
+        instanceName,
+        path: `/webhook/set/${instanceName}`,
+        webhookUrl,
+        webhook_by_events: true,
+        webhook_base64: false,
+        events: WEBHOOK_EVENTS,
+        eventCount: WEBHOOK_EVENTS.length,
+        payload,
+      },
+      'evolution-api: setWebhook — payload completo',
+    );
+    return request('POST', `/webhook/set/${instanceName}`, payload);
   },
 
   async getWebhook(instanceName: string): Promise<unknown> {

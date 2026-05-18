@@ -118,6 +118,15 @@ export const cleanupCorrupted = async (req: Request, res: Response, next: NextFu
   }
 };
 
+export const testWebhookConfig = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const data = await whatsappService.getWebhookConfig();
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const internalHealth = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     let evolution: 'ok' | 'down' = 'ok';

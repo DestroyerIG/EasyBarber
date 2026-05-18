@@ -11,6 +11,7 @@ import {
   sendMessage,
   syncWebhooks,
   cleanupCorrupted,
+  testWebhookConfig,
   internalHealth,
 } from './whatsapp.controller.js';
 import logger from '../../utils/logger.js';
@@ -80,6 +81,9 @@ router.post('/admin/sync-webhooks', authMiddleware, requireAdmin, syncWebhooks);
 // ─── Admin — remove instâncias órfãs (zumbis sem underscore, etc.) ────────────
 // Use ?dryRun=true para apenas listar sem deletar.
 router.post('/admin/cleanup-corrupted', authMiddleware, requireAdmin, cleanupCorrupted);
+
+// ─── Admin — diagnóstico do webhook (read-only, sem efeito colateral) ────────
+router.get('/admin/test-webhook-config', authMiddleware, requireAdmin, testWebhookConfig);
 
 // ─── Saúde interna — sem auth ─────────────────────────────────────────────────
 

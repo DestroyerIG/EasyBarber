@@ -7,7 +7,12 @@ import {
   ensureBarbershopWhatsAppInstanceName,
   getBarbershopWhatsAppInstanceContext,
 } from '../../services/whatsapp/whatsappInstanceService.js';
-import { getCachedQrCode } from '../../services/whatsapp/handlers/qrcodeUpdatedHandler.js';
+import {
+  extractQrBase64,
+  getCachedQrCode,
+  setCachedQrCode,
+} from '../../services/whatsapp/handlers/qrcodeUpdatedHandler.js';
+import { WEBHOOK_EVENTS } from './evolution-api.service.js';
 
 /**
  * True when Evolution returns 403 with a body indicating the instance name is
@@ -276,7 +281,43 @@ export const whatsappService = {
     const ctx = await getBarbershopWhatsAppInstanceContext(barbershopId);
     const instanceName = ctx.whatsappInstanceName;
     if (!instanceName) return null;
-    return getCachedQrCode(instanceName);
+
+    // 1. Cache (populated by QRCODE_UPDATED webhook).
+    const cached = getCachedQrCode(instanceName);
+    if (cached) return cached;
+
+    // 2. Fallback: pull from Evolution directly. Useful when the webhook
+    //    pipeline is broken (wrong WEBHOOK_GLOBAL_URL on Evolution side,
+    //    network drop, etc.) — Evolution exposes the current QR on
+    //    GET /instance/connect/{name} as long as the instance hasn't
+    //    paired yet.
+    try {
+      logger.info(
+        { instanceName, barbershopId },
+        'whatsapp-service: cache miss, buscando QR direto da Evolution',
+      );
+      const connectPayload = await evolutionApi.connectInstance(instanceName);
+      const qr = extractQrBase64(connectPayload);
+      if (qr) {
+        setCachedQrCode(instanceName, qr);
+        logger.info(
+          { instanceName, qrLength: qr.length },
+          'whatsapp-service: QR obtido via fallback connectInstance',
+        );
+        return qr;
+      }
+      logger.warn(
+        { instanceName, payloadKeys: Object.keys((connectPayload as Record<string, unknown>) ?? {}) },
+        'whatsapp-service: fallback connectInstance retornou payload sem QR extraível',
+      );
+      return null;
+    } catch (err) {
+      logger.warn(
+        { err, instanceName, barbershopId },
+        'whatsapp-service: fallback connectInstance falhou',
+      );
+      return null;
+    }
   },
 
   /**
@@ -288,6 +329,93 @@ export const whatsappService = {
     if (!instanceName) return;
     await evolutionApi.deleteInstance(instanceName);
     logger.info({ instanceName }, 'whatsapp-service: instância removida (disconnect)');
+  },
+
+  /**
+   * Diagnostic snapshot of what we would register on Evolution and whether
+   * our own webhook URL is reachable from this process. Read-only.
+   */
+  async getWebhookConfig(): Promise<{
+    backendWebhookBaseUrl: {
+      raw: string | null;
+      resolved: string | null;
+      source: 'BACKEND_WEBHOOK_BASE_URL' | 'EVOLUTION_WEBHOOK_URL' | 'none';
+    };
+    events: string[];
+    eventCount: number;
+    webhook_by_events: boolean;
+    selfPing: {
+      url: string | null;
+      ok: boolean;
+      status: number | null;
+      error: string | null;
+    };
+    evolution: {
+      apiUrl: string | null;
+      apiKeyPresent: boolean;
+    };
+  }> {
+    const rawCanonical = process.env.BACKEND_WEBHOOK_BASE_URL ?? null;
+    const rawLegacy = process.env.EVOLUTION_WEBHOOK_URL ?? null;
+    const source: 'BACKEND_WEBHOOK_BASE_URL' | 'EVOLUTION_WEBHOOK_URL' | 'none' =
+      rawCanonical ? 'BACKEND_WEBHOOK_BASE_URL' : rawLegacy ? 'EVOLUTION_WEBHOOK_URL' : 'none';
+
+    let resolved: string | null = null;
+    let resolveError: string | null = null;
+    try {
+      const url = webhookUrl();
+      resolved = url || null;
+    } catch (err) {
+      resolveError = err instanceof Error ? err.message : String(err);
+    }
+
+    // Self-ping: try a HEAD on the base URL. The route bundle responds 410
+    // for the legacy POST /webhook but does not have a HEAD handler — what
+    // we actually verify here is that the host is reachable and resolves.
+    const probeUrl = resolved ? `${resolved}/connection-update` : null;
+    let selfPing: { url: string | null; ok: boolean; status: number | null; error: string | null } = {
+      url: probeUrl,
+      ok: false,
+      status: null,
+      error: resolveError,
+    };
+    if (probeUrl) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5_000);
+        const res = await fetch(probeUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ diagnostic: true, ts: Date.now() }),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        selfPing = { url: probeUrl, ok: res.ok, status: res.status, error: null };
+      } catch (err) {
+        selfPing = {
+          url: probeUrl,
+          ok: false,
+          status: null,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }
+
+    return {
+      backendWebhookBaseUrl: {
+        raw: rawCanonical ?? rawLegacy,
+        resolved,
+        source,
+      },
+      events: WEBHOOK_EVENTS,
+      eventCount: WEBHOOK_EVENTS.length,
+      webhook_by_events: true,
+      selfPing,
+      evolution: {
+        apiUrl: process.env.EVOLUTION_API_URL ?? null,
+        apiKeyPresent: Boolean((process.env.EVOLUTION_API_KEY ?? '').trim()),
+      },
+    };
   },
 
   async sendText(barbershopId: string, number: string, text: string): Promise<unknown> {
