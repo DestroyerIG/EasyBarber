@@ -22,24 +22,89 @@ const waProtected = [authMiddleware, requireTenantRoles, requireFeature('whatsap
 
 const BLOCKED_EVENTS = new Set(['messages-set', 'messageset']);
 
-// ─── Webhook — sem auth, responde sempre 200 ─────────────────────────────────
-
-// Bloqueia rota legada sem :event — Evolution API deve usar webhook_by_events: true
-router.post('/webhook', (_req: Request, res: Response): void => {
-  logger.warn({ route: '/webhook' }, 'Rota legada /webhook recusada — configure webhook_by_events: true');
-  res.status(410).json({
-    success: false,
-    error: 'Rota removida. Configure webhook_by_events: true e use /webhook/:event',
-  });
-});
-
-router.post('/webhook/:event', async (req: Request, res: Response): Promise<void> => {
-  const rawEvent = String(req.params['event'] ?? '').trim();
-  const event = rawEvent
+const normalizeEventName = (raw: unknown): string =>
+  String(raw ?? '')
+    .trim()
     .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
     .toLowerCase()
     .replace(/[._\s]+/g, '-')
     .replace(/-+/g, '-');
+
+const extractInstanceFromBody = (body: Record<string, unknown>): string | null => {
+  const v =
+    body['instance'] ??
+    body['instanceName'] ??
+    (body['data'] as Record<string, unknown> | undefined)?.['instanceName'];
+  if (typeof v === 'string' && v.trim()) return v.trim();
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    const inner = o['instanceName'] ?? o['name'];
+    if (typeof inner === 'string' && inner.trim()) return inner.trim();
+  }
+  return null;
+};
+
+// ─── Webhook — sem auth, responde SEMPRE 200 ─────────────────────────────────
+//
+// Evolution v2 pode despachar de dois jeitos para o mesmo backend:
+//   1. webhook_by_events=true  → POST /webhook/{event-kebab}
+//   2. webhook_by_events=false → POST /webhook  (event vem no body)
+// Ambos caminhos abaixo respondem 200 em qualquer cenário (instance
+// desconhecida, evento ignorado, erro interno) — devolver 4xx/5xx faz a
+// Evolution retentar em loop e gera 410-spam nos logs dela.
+
+// Catch-all: Evolution global webhook (single endpoint) cai aqui.
+router.post('/webhook', async (req: Request, res: Response): Promise<void> => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const event = normalizeEventName(body['event'] ?? body['eventType'] ?? body['type']);
+  const instanceName = extractInstanceFromBody(body);
+
+  logger.info(
+    {
+      route: '/webhook',
+      method: 'POST',
+      event: event || null,
+      instanceName,
+      bodyKeys: Object.keys(body),
+    },
+    'webhook-controller: requisição recebida (global)',
+  );
+
+  // Responde 200 imediatamente — processamento real é fire-and-forget.
+  res.status(200).json({ received: true });
+
+  if (!event) {
+    logger.warn({ bodyKeys: Object.keys(body) }, 'webhook: payload global sem campo event, ignorado');
+    return;
+  }
+
+  if (BLOCKED_EVENTS.has(event)) {
+    logger.info({ event }, 'webhook: evento bloqueado (messages-set)');
+    return;
+  }
+
+  try {
+    await handleWebhookEvent(event, body);
+  } catch (err) {
+    logger.error({ err, event, instanceName }, 'webhook: erro inesperado no handler global');
+  }
+});
+
+router.post('/webhook/:event', async (req: Request, res: Response): Promise<void> => {
+  const event = normalizeEventName(req.params['event'] ?? '');
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const instanceName = extractInstanceFromBody(body);
+
+  logger.info(
+    {
+      route: `/webhook/${event}`,
+      method: 'POST',
+      event,
+      instanceName,
+      bodyKeys: Object.keys(body),
+    },
+    'webhook-controller: requisição recebida (per-event)',
+  );
 
   if (BLOCKED_EVENTS.has(event)) {
     logger.info({ event }, 'webhook: evento bloqueado (messages-set)');
@@ -47,12 +112,10 @@ router.post('/webhook/:event', async (req: Request, res: Response): Promise<void
     return;
   }
 
-  const body = (req.body ?? {}) as Record<string, unknown>;
-
   try {
     await handleWebhookEvent(event, body);
   } catch (err) {
-    logger.error({ err, event }, 'webhook: erro inesperado no handler');
+    logger.error({ err, event, instanceName }, 'webhook: erro inesperado no handler per-event');
   }
 
   res.status(200).json({ received: true });
