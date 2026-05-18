@@ -199,7 +199,13 @@ const normalizeInstanceName = (value: unknown): string => {
 const getConfig = (overrides: { instanceName?: string | null; webhookUrl?: string | null } = {}): EvolutionConfig => {
   const baseURL = (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
   const apiKey = process.env.EVOLUTION_API_KEY || '';
-  const fallbackInstanceName = process.env.EVOLUTION_INSTANCE_NAME || 'easybarber';
+  // Multi-tenant: callers MUST pass instanceName explicitly via overrides.
+  // EVOLUTION_INSTANCE_NAME exists only as a legacy/dev escape hatch — it is
+  // intentionally NOT a production default. If neither override nor env is
+  // present, instanceName is empty and any operation that needs it will
+  // surface a clear error via ensureConfigured() instead of silently
+  // misrouting calls to a hardcoded tenant (previously 'easybarber').
+  const fallbackInstanceName = process.env.EVOLUTION_INSTANCE_NAME || '';
   const instanceName = normalizeInstanceName(overrides.instanceName) || normalizeInstanceName(fallbackInstanceName);
   const webhookUrl = typeof overrides.webhookUrl === 'string'
     ? overrides.webhookUrl.trim()

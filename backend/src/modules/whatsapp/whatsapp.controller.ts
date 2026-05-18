@@ -99,6 +99,15 @@ export const sendMessage = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+export const syncWebhooks = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const result = await whatsappService.syncAllWebhooks();
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const internalHealth = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     let evolution: 'ok' | 'down' = 'ok';

@@ -1,6 +1,6 @@
 import express, { type Request, type Response } from 'express';
 import { authMiddleware } from '../../middleware/auth.js';
-import { requireTenantRoles } from '../../middleware/rbac.js';
+import { requireAdmin, requireTenantRoles } from '../../middleware/rbac.js';
 import { requireFeature } from '../../middleware/subscriptionGuard.js';
 import { handleWebhookEvent } from './webhook.handler.js';
 import {
@@ -9,6 +9,7 @@ import {
   getQrCode,
   disconnect,
   sendMessage,
+  syncWebhooks,
   internalHealth,
 } from './whatsapp.controller.js';
 import logger from '../../utils/logger.js';
@@ -69,6 +70,11 @@ router.post('/disconnect', ...waProtected, disconnect);
 router.post('/logout', ...waProtected, disconnect);     // alias
 
 router.post('/send', ...waProtected, sendMessage);
+
+// ─── Admin — reaplica webhook_by_events em instâncias antigas ─────────────────
+// Idempotente. Use para eliminar warnings "Rota legada /webhook" de instâncias
+// criadas antes do fix de webhook por eventos.
+router.post('/admin/sync-webhooks', authMiddleware, requireAdmin, syncWebhooks);
 
 // ─── Saúde interna — sem auth ─────────────────────────────────────────────────
 

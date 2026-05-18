@@ -200,4 +200,52 @@ export const whatsappService = {
     if (!instanceName) throw new Error('Instância WhatsApp não configurada para esta barbearia');
     return evolutionApi.sendText(instanceName, number, text);
   },
+
+  /**
+   * Re-applies the canonical webhook config (webhook_by_events=true, all
+   * expected events, our URL) to every Evolution instance that Evolution
+   * itself knows about. Used to migrate instances created before the v2
+   * webhook-by-events fix away from the legacy flat /webhook URL that
+   * triggers the 410 warnings.
+   *
+   * Safe to call repeatedly. Iterates Evolution's view of instances rather
+   * than the DB so it also catches orphaned ones.
+   */
+  async syncAllWebhooks(): Promise<{ total: number; fixed: number; failed: number; instances: Array<{ name: string; ok: boolean; error?: string }> }> {
+    const url = webhookUrl();
+    if (!url) throw new Error('EVOLUTION_WEBHOOK_URL não configurado');
+
+    const list = await evolutionApi.fetchInstances();
+    const instances: Array<{ name: string; ok: boolean; error?: string }> = [];
+    let fixed = 0;
+    let failed = 0;
+
+    for (const raw of Array.isArray(list) ? list : []) {
+      const item = raw as Record<string, unknown> | null;
+      if (!item || typeof item !== 'object') continue;
+      const inner = (item['instance'] as Record<string, unknown> | undefined) ?? null;
+      const candidate =
+        (typeof item['instanceName'] === 'string' && (item['instanceName'] as string)) ||
+        (typeof item['name'] === 'string' && (item['name'] as string)) ||
+        (inner && typeof inner['instanceName'] === 'string' && (inner['instanceName'] as string)) ||
+        (inner && typeof inner['name'] === 'string' && (inner['name'] as string)) ||
+        '';
+      const name = String(candidate).trim();
+      if (!name) continue;
+
+      try {
+        await verifyAndFixWebhook(name, url);
+        fixed += 1;
+        instances.push({ name, ok: true });
+      } catch (err) {
+        failed += 1;
+        const msg = err instanceof Error ? err.message : String(err);
+        instances.push({ name, ok: false, error: msg });
+        logger.warn({ err, instanceName: name }, 'whatsapp-service: falha ao sincronizar webhook');
+      }
+    }
+
+    logger.info({ total: instances.length, fixed, failed }, 'whatsapp-service: syncAllWebhooks concluído');
+    return { total: instances.length, fixed, failed, instances };
+  },
 };
