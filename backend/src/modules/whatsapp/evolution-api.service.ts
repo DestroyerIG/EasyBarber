@@ -15,7 +15,6 @@ export const WEBHOOK_EVENTS = [
   'MESSAGES_DELETE',
   'SEND_MESSAGE',
   'CALL',
-  'NEW_JWT_TOKEN',
 ];
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
