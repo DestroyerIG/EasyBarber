@@ -79,6 +79,21 @@ async function request<T = unknown>(
       await sleep(delay);
       return request<T>(method, path, body, attempt + 1);
     }
+    // Log the full response body for 4xx so we can read Evolution's own
+    // error message (e.g. "validation failed: webhookByEvents must be boolean").
+    logger.warn(
+      {
+        method,
+        path,
+        status: res.status,
+        responseBody,
+        requestBodyPreview:
+          body !== undefined
+            ? JSON.stringify(body).slice(0, 500)
+            : null,
+      },
+      'evolution-api: 4xx, body completo da resposta',
+    );
     throw new EvolutionApiError(
       `Evolution API ${method} ${path} → ${res.status}`,
       res.status,
@@ -96,11 +111,17 @@ export interface ConnectionStateResponse {
 
 export const evolutionApi = {
   async createInstance(instanceName: string, webhookUrl: string): Promise<unknown> {
+    // Evolution v2 uses camelCase (webhookByEvents / webhookBase64).
+    // Snake_case keys are also included for transient backward compatibility
+    // with older v2.x builds (Evolution ignores unknown keys).
     const payload = {
       instanceName,
       integration: 'WHATSAPP-BAILEYS',
       webhook: {
         url: webhookUrl,
+        enabled: true,
+        webhookByEvents: true,
+        webhookBase64: false,
         webhook_by_events: true,
         webhook_base64: false,
         events: WEBHOOK_EVENTS,
@@ -110,7 +131,7 @@ export const evolutionApi = {
       {
         instanceName,
         webhookUrl,
-        webhook_by_events: true,
+        webhookByEvents: true,
         events: WEBHOOK_EVENTS,
         eventCount: WEBHOOK_EVENTS.length,
         payload,
@@ -190,11 +211,16 @@ export const evolutionApi = {
   },
 
   async setWebhook(instanceName: string, webhookUrl: string): Promise<unknown> {
+    // Evolution v2 setWebhook expects the camelCase keys inside `webhook`.
+    // We send both camel and snake variants so the call also works on
+    // intermediate v2.x builds that haven't fully renamed the schema.
     const payload = {
       webhook: {
         enabled: true,
         url: webhookUrl,
         events: WEBHOOK_EVENTS,
+        webhookByEvents: true,
+        webhookBase64: false,
         webhook_by_events: true,
         webhook_base64: false,
       },
@@ -204,18 +230,81 @@ export const evolutionApi = {
         instanceName,
         path: `/webhook/set/${instanceName}`,
         webhookUrl,
-        webhook_by_events: true,
-        webhook_base64: false,
+        webhookByEvents: true,
+        webhookBase64: false,
         events: WEBHOOK_EVENTS,
         eventCount: WEBHOOK_EVENTS.length,
         payload,
       },
       'evolution-api: setWebhook — payload completo',
     );
-    return request('POST', `/webhook/set/${instanceName}`, payload);
+    try {
+      return await request('POST', `/webhook/set/${instanceName}`, payload);
+    } catch (err) {
+      // Some Evolution v2.x builds reject the dual-key payload with 400
+      // (strict schema). Retry once with only the camelCase keys.
+      if (err instanceof EvolutionApiError && err.status === 400) {
+        const v2OnlyPayload = {
+          webhook: {
+            enabled: true,
+            url: webhookUrl,
+            events: WEBHOOK_EVENTS,
+            webhookByEvents: true,
+            webhookBase64: false,
+          },
+        };
+        logger.warn(
+          { instanceName, retryPayload: v2OnlyPayload },
+          'evolution-api: setWebhook 400, retentando com payload v2 estrito (camelCase only)',
+        );
+        try {
+          return await request('POST', `/webhook/set/${instanceName}`, v2OnlyPayload);
+        } catch (err2) {
+          // Last-ditch retry with the v1 snake_case flat schema.
+          if (err2 instanceof EvolutionApiError && err2.status === 400) {
+            const v1FlatPayload = {
+              url: webhookUrl,
+              enabled: true,
+              webhook_by_events: true,
+              webhook_base64: false,
+              events: WEBHOOK_EVENTS,
+            };
+            logger.warn(
+              { instanceName, retryPayload: v1FlatPayload },
+              'evolution-api: setWebhook 400 v2-only, retentando com payload v1 flat (snake_case)',
+            );
+            return await request('POST', `/webhook/set/${instanceName}`, v1FlatPayload);
+          }
+          throw err2;
+        }
+      }
+      throw err;
+    }
   },
 
   async getWebhook(instanceName: string): Promise<unknown> {
     return request('GET', `/webhook/find/${instanceName}`);
+  },
+
+  /**
+   * Evolution exposes its build info at `GET /` (no auth).
+   * Useful for confirming v2 vs v1 schema expectations from diagnostics.
+   */
+  async getInfo(): Promise<unknown> {
+    const { baseUrl } = cfg();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const res = await fetch(`${baseUrl}/`, { signal: controller.signal });
+      clearTimeout(timer);
+      try {
+        return await res.json();
+      } catch {
+        return { status: res.status, body: null };
+      }
+    } catch (err) {
+      clearTimeout(timer);
+      throw err;
+    }
   },
 };

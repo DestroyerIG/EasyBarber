@@ -353,6 +353,8 @@ export const whatsappService = {
     evolution: {
       apiUrl: string | null;
       apiKeyPresent: boolean;
+      info: unknown;
+      infoError: string | null;
     };
   }> {
     const rawCanonical = process.env.BACKEND_WEBHOOK_BASE_URL ?? null;
@@ -401,6 +403,14 @@ export const whatsappService = {
       }
     }
 
+    let evolutionInfo: unknown = null;
+    let evolutionInfoError: string | null = null;
+    try {
+      evolutionInfo = await evolutionApi.getInfo();
+    } catch (err) {
+      evolutionInfoError = err instanceof Error ? err.message : String(err);
+    }
+
     return {
       backendWebhookBaseUrl: {
         raw: rawCanonical ?? rawLegacy,
@@ -414,6 +424,8 @@ export const whatsappService = {
       evolution: {
         apiUrl: process.env.EVOLUTION_API_URL ?? null,
         apiKeyPresent: Boolean((process.env.EVOLUTION_API_KEY ?? '').trim()),
+        info: evolutionInfo,
+        infoError: evolutionInfoError,
       },
     };
   },
