@@ -10,6 +10,7 @@ import {
   disconnect,
   sendMessage,
   syncWebhooks,
+  cleanupCorrupted,
   internalHealth,
 } from './whatsapp.controller.js';
 import logger from '../../utils/logger.js';
@@ -75,6 +76,10 @@ router.post('/send', ...waProtected, sendMessage);
 // Idempotente. Use para eliminar warnings "Rota legada /webhook" de instâncias
 // criadas antes do fix de webhook por eventos.
 router.post('/admin/sync-webhooks', authMiddleware, requireAdmin, syncWebhooks);
+
+// ─── Admin — remove instâncias órfãs (zumbis sem underscore, etc.) ────────────
+// Use ?dryRun=true para apenas listar sem deletar.
+router.post('/admin/cleanup-corrupted', authMiddleware, requireAdmin, cleanupCorrupted);
 
 // ─── Saúde interna — sem auth ─────────────────────────────────────────────────
 

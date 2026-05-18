@@ -108,6 +108,16 @@ export const syncWebhooks = async (_req: Request, res: Response, next: NextFunct
   }
 };
 
+export const cleanupCorrupted = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const dryRun = req.query['dryRun'] === 'true' || req.query['dry_run'] === 'true';
+    const result = await whatsappService.cleanupCorruptedInstances({ dryRun });
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const internalHealth = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     let evolution: 'ok' | 'down' = 'ok';

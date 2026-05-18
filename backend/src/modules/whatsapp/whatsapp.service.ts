@@ -1,4 +1,5 @@
 import logger from '../../utils/logger.js';
+import { prisma } from '../../config/prisma.js';
 import { evolutionApi, type ConnectionStateResponse } from './evolution-api.service.js';
 import { EvolutionApiError, InstanceNotFoundError } from './whatsapp.types.js';
 import type { NormalizedStatus } from './whatsapp.types.js';
@@ -294,6 +295,96 @@ export const whatsappService = {
     const instanceName = ctx.whatsappInstanceName;
     if (!instanceName) throw new Error('Instância WhatsApp não configurada para esta barbearia');
     return evolutionApi.sendText(instanceName, number, text);
+  },
+
+  /**
+   * Deletes Evolution instances whose names are NOT registered in our DB.
+   *
+   * Use case: legacy code paths or aborted onboardings can leave Evolution
+   * holding "zombie" instances whose names differ from the canonical
+   * deterministic name (e.g. `itallobarbereacb8a07` without the underscore
+   * versus the real `itallobarber_eacb8a07`). These zombies keep firing
+   * connection-update events, race with the real instance, and prevent the
+   * real one from ever reaching the `qrcode` state.
+   *
+   * The DB (barbershops.whatsapp_instance_name, UNIQUE per tenant) is the
+   * source of truth. Anything Evolution knows about that isn't in the DB
+   * is fair game to delete.
+   *
+   * Returns a structured result so callers can audit what was removed.
+   */
+  async cleanupCorruptedInstances(options: { dryRun?: boolean } = {}): Promise<{
+    canonical: string[];
+    evolutionInstances: string[];
+    orphans: string[];
+    deleted: string[];
+    failed: Array<{ name: string; error: string }>;
+    dryRun: boolean;
+  }> {
+    const dryRun = options.dryRun === true;
+
+    const rows = await prisma.$queryRaw<Array<{ whatsapp_instance_name: string | null }>>`
+      SELECT whatsapp_instance_name
+        FROM barbershops
+       WHERE active = true
+         AND NULLIF(btrim(whatsapp_instance_name), '') IS NOT NULL
+    `;
+    const canonical = rows
+      .map((r) => (r.whatsapp_instance_name ?? '').trim().toLowerCase())
+      .filter(Boolean);
+    const canonicalSet = new Set(canonical);
+
+    const list = await evolutionApi.fetchInstances();
+    const evolutionInstances: string[] = [];
+
+    for (const raw of Array.isArray(list) ? list : []) {
+      const item = raw as Record<string, unknown> | null;
+      if (!item || typeof item !== 'object') continue;
+      const inner = (item['instance'] as Record<string, unknown> | undefined) ?? null;
+      const candidate =
+        (typeof item['instanceName'] === 'string' && (item['instanceName'] as string)) ||
+        (typeof item['name'] === 'string' && (item['name'] as string)) ||
+        (inner && typeof inner['instanceName'] === 'string' && (inner['instanceName'] as string)) ||
+        (inner && typeof inner['name'] === 'string' && (inner['name'] as string)) ||
+        '';
+      const name = String(candidate).trim();
+      if (name) evolutionInstances.push(name);
+    }
+
+    const orphans = evolutionInstances.filter(
+      (name) => !canonicalSet.has(name.toLowerCase()),
+    );
+
+    const deleted: string[] = [];
+    const failed: Array<{ name: string; error: string }> = [];
+
+    if (!dryRun) {
+      for (const name of orphans) {
+        try {
+          await evolutionApi.deleteInstance(name);
+          deleted.push(name);
+          logger.info({ instanceName: name }, 'whatsapp-service: instância órfã removida');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          failed.push({ name, error: msg });
+          logger.warn({ err, instanceName: name }, 'whatsapp-service: falha ao remover instância órfã');
+        }
+      }
+    }
+
+    logger.info(
+      {
+        canonicalCount: canonical.length,
+        evolutionCount: evolutionInstances.length,
+        orphanCount: orphans.length,
+        deletedCount: deleted.length,
+        failedCount: failed.length,
+        dryRun,
+      },
+      'whatsapp-service: cleanupCorruptedInstances concluído',
+    );
+
+    return { canonical, evolutionInstances, orphans, deleted, failed, dryRun };
   },
 
   /**
