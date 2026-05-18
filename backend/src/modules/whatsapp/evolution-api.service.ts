@@ -153,6 +153,21 @@ export const evolutionApi = {
     }
   },
 
+  async logoutInstance(instanceName: string): Promise<void> {
+    logger.info({ instanceName }, 'evolution-api: logoutInstance — clearing WhatsApp session');
+    try {
+      await request('DELETE', `/instance/logout/${instanceName}`);
+    } catch (err) {
+      if (err instanceof InstanceNotFoundError) {
+        logger.debug({ instanceName }, 'evolution-api: logoutInstance → instância não encontrada');
+        return;
+      }
+      // Non-fatal: log and continue. A subsequent connectInstance will still
+      // attempt the connection; worst case it retries the old session.
+      logger.warn({ err, instanceName }, 'evolution-api: logoutInstance falhou (não fatal)');
+    }
+  },
+
   async getConnectionState(instanceName: string): Promise<ConnectionStateResponse> {
     return request<ConnectionStateResponse>('GET', `/instance/connectionState/${instanceName}`);
   },

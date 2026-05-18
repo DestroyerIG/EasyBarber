@@ -215,11 +215,32 @@ export const whatsappService = {
     if (exists) {
       logger.info({ instanceName }, 'whatsapp-service: instância já existe, reutilizando');
       await verifyAndFixWebhook(instanceName, url);
+
+      // Check current state: if already open, return connected without touching session.
+      // Otherwise, logout to clear stale credentials so connectInstance generates a fresh QR.
+      let currentState: string | null = null;
+      try {
+        const stateResp = await evolutionApi.getConnectionState(instanceName);
+        currentState = String(
+          (stateResp as Record<string, unknown>)['state'] ??
+          (stateResp as Record<string, unknown>)['instance']?.toString() ??
+          '',
+        ).toLowerCase();
+      } catch {
+        // ignore — proceed with logout+connect
+      }
+
+      if (currentState === 'open') {
+        logger.info({ instanceName, currentState }, 'whatsapp-service: instância já conectada, retornando connected');
+        return { status: 'connected', qrCode: null, connectedNumber: null, instanceName };
+      }
+
+      // Logout clears the old WhatsApp session so connectInstance generates a QR.
+      await evolutionApi.logoutInstance(instanceName);
+
       try {
         await evolutionApi.connectInstance(instanceName);
       } catch (err) {
-        // connect on an already-connected instance is harmless; only surface
-        // unexpected failures.
         if (!(err instanceof InstanceNotFoundError)) {
           logger.warn({ err, instanceName }, 'whatsapp-service: connectInstance falhou, seguindo mesmo assim');
         }
