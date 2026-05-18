@@ -1,12 +1,28 @@
 import logger from '../../utils/logger.js';
 import { evolutionApi, type ConnectionStateResponse } from './evolution-api.service.js';
-import { InstanceNotFoundError } from './whatsapp.types.js';
+import { EvolutionApiError, InstanceNotFoundError } from './whatsapp.types.js';
 import type { NormalizedStatus } from './whatsapp.types.js';
 import {
   ensureBarbershopWhatsAppInstanceName,
   getBarbershopWhatsAppInstanceContext,
 } from '../../services/whatsapp/whatsappInstanceService.js';
 import { getCachedQrCode } from '../../services/whatsapp/handlers/qrcodeUpdatedHandler.js';
+
+/**
+ * True when Evolution returns 403 with a body indicating the instance name is
+ * already taken. The exact shape is `{ status: 403, error: 'Forbidden',
+ * response: { message: ['This name "..." is already in use.'] } }`.
+ */
+function isAlreadyInUseError(err: unknown): boolean {
+  if (!(err instanceof EvolutionApiError) || err.status !== 403) return false;
+  const body = err.body as { response?: { message?: unknown } } | null;
+  const messages = Array.isArray(body?.response?.message)
+    ? (body?.response?.message as unknown[])
+    : [];
+  return messages.some(
+    (m) => typeof m === 'string' && m.toLowerCase().includes('already in use'),
+  );
+}
 
 const webhookUrl = (): string => process.env.EVOLUTION_WEBHOOK_URL ?? '';
 
@@ -68,8 +84,19 @@ export const whatsappService = {
   },
 
   /**
-   * Reinicia a instância do zero: deleta sessão Baileys + recria + verifica webhook.
-   * Necessário quando a sessão está corrompida ou o usuário quer novo QR.
+   * Idempotent connect flow.
+   *
+   * 1. Probe Evolution via fetchInstances (or getConnectionState fallback).
+   * 2. If the instance already exists, do NOT delete/recreate — that races
+   *    with Evolution's internal state and returns 403 "already in use".
+   *    Instead reuse it: ensure the webhook is correct and ask Evolution for
+   *    a fresh QR via GET /instance/connect/{name}.
+   * 3. If it does not exist, create it from scratch.
+   * 4. If create still returns 403 "already in use" (race window between the
+   *    probe and the create), fall back to the reuse path.
+   *
+   * This eliminates the previous bug where deleteInstance + createInstance
+   * ran back-to-back and Evolution had not yet propagated the delete.
    */
   async connectWhatsApp(barbershopId: string): Promise<NormalizedStatus> {
     const ctx = await ensureBarbershopWhatsAppInstanceName(barbershopId);
@@ -82,15 +109,46 @@ export const whatsappService = {
     const url = webhookUrl();
     if (!url) throw new Error('EVOLUTION_WEBHOOK_URL não configurado');
 
-    // Reset completo: remove sessão Baileys corrompida
-    await evolutionApi.deleteInstance(instanceName);
-    await evolutionApi.createInstance(instanceName, url);
+    const exists = await evolutionApi.instanceExists(instanceName);
 
-    // Garantir que webhook_by_events persiste após criação
-    await verifyAndFixWebhook(instanceName, url);
+    if (exists) {
+      logger.info({ instanceName }, 'whatsapp-service: instância já existe, reutilizando');
+      await verifyAndFixWebhook(instanceName, url);
+      try {
+        await evolutionApi.connectInstance(instanceName);
+      } catch (err) {
+        // connect on an already-connected instance is harmless; only surface
+        // unexpected failures.
+        if (!(err instanceof InstanceNotFoundError)) {
+          logger.warn({ err, instanceName }, 'whatsapp-service: connectInstance falhou, seguindo mesmo assim');
+        }
+      }
+      return { status: 'connecting', qrCode: null, connectedNumber: null, instanceName };
+    }
 
-    logger.info({ instanceName }, 'whatsapp-service: instância recriada, aguardando QRCODE_UPDATED');
-    return { status: 'connecting', qrCode: null, connectedNumber: null, instanceName };
+    try {
+      await evolutionApi.createInstance(instanceName, url);
+      await verifyAndFixWebhook(instanceName, url);
+      logger.info({ instanceName }, 'whatsapp-service: instância criada, aguardando QRCODE_UPDATED');
+      return { status: 'connecting', qrCode: null, connectedNumber: null, instanceName };
+    } catch (err) {
+      // Race fallback: another caller (or a stale Evolution cache) created
+      // the instance between our probe and our create. Treat as success.
+      if (isAlreadyInUseError(err)) {
+        logger.warn(
+          { instanceName },
+          'whatsapp-service: createInstance retornou 403 already-in-use, tratando como existente',
+        );
+        await verifyAndFixWebhook(instanceName, url);
+        try {
+          await evolutionApi.connectInstance(instanceName);
+        } catch (connectErr) {
+          logger.warn({ err: connectErr, instanceName }, 'whatsapp-service: connectInstance fallback falhou');
+        }
+        return { status: 'connecting', qrCode: null, connectedNumber: null, instanceName };
+      }
+      throw err;
+    }
   },
 
   /**

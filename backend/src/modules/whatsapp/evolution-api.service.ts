@@ -126,6 +126,46 @@ export const evolutionApi = {
     return request<unknown[]>('GET', '/instance/fetchInstances');
   },
 
+  /**
+   * Returns true when Evolution already has an instance with the given name.
+   * Tolerates the multiple shapes the v1/v2 fetchInstances response can take:
+   *   - [{ instance: { instanceName: 'x' } }, ...]
+   *   - [{ name: 'x' }, ...]
+   *   - [{ instanceName: 'x' }, ...]
+   */
+  async instanceExists(instanceName: string): Promise<boolean> {
+    const target = instanceName.trim().toLowerCase();
+    if (!target) return false;
+    try {
+      const list = await this.fetchInstances();
+      if (!Array.isArray(list)) return false;
+      return list.some((raw) => {
+        const item = raw as Record<string, unknown> | null;
+        if (!item || typeof item !== 'object') return false;
+        const inner = (item['instance'] as Record<string, unknown> | undefined) ?? null;
+        const candidate =
+          (typeof item['instanceName'] === 'string' && (item['instanceName'] as string)) ||
+          (typeof item['name'] === 'string' && (item['name'] as string)) ||
+          (inner && typeof inner['instanceName'] === 'string' && (inner['instanceName'] as string)) ||
+          (inner && typeof inner['name'] === 'string' && (inner['name'] as string)) ||
+          '';
+        return String(candidate).trim().toLowerCase() === target;
+      });
+    } catch (err) {
+      logger.warn({ err, instanceName }, 'evolution-api: instanceExists check failed, assuming false');
+      return false;
+    }
+  },
+
+  /**
+   * GET /instance/connect/{instanceName} — requests a fresh QR code for an
+   * existing instance without destroying its session (idempotent).
+   */
+  async connectInstance(instanceName: string): Promise<unknown> {
+    logger.info({ instanceName }, 'evolution-api: connectInstance');
+    return request('GET', `/instance/connect/${instanceName}`);
+  },
+
   async sendText(instanceName: string, number: string, text: string): Promise<unknown> {
     return request('POST', `/message/sendText/${instanceName}`, { number, text });
   },
