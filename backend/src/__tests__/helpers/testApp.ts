@@ -7,7 +7,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
 import { errorHandler } from '../../middleware/errorHandler.js';
 import authRoutes from '../../routes/auth.js';
-import appointmentRoutes from '../../routes/appointments.js';
+import appointmentRoutes from '../../modules/appointments/appointments.routes.js';
 import clientRoutes from '../../routes/clients.js';
 import financeRoutes from '../../routes/finance.js';
 import dashboardRoutes from '../../routes/dashboard.js';

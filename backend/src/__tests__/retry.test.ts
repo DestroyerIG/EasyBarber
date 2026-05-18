@@ -31,6 +31,10 @@ describe('retryWithBackoff', () => {
     const fn = vi.fn().mockRejectedValue(err);
 
     const promise = retryWithBackoff(fn, { maxAttempts: 3, baseDelayMs: 100 });
+    // Pre-attach a noop handler so the rejection that fires during
+    // runAllTimersAsync isn't reported as unhandled by Node before the
+    // matcher below has a chance to attach its own handler.
+    promise.catch(() => {});
     await vi.runAllTimersAsync();
     await expect(promise).rejects.toMatchObject({ status: 404 });
     expect(fn).toHaveBeenCalledTimes(1);
@@ -41,6 +45,7 @@ describe('retryWithBackoff', () => {
     const fn = vi.fn().mockRejectedValue(err);
 
     const promise = retryWithBackoff(fn, { maxAttempts: 3, baseDelayMs: 100 });
+    promise.catch(() => {});
     await vi.runAllTimersAsync();
     await expect(promise).rejects.toMatchObject({ status: 401 });
     expect(fn).toHaveBeenCalledTimes(1);
@@ -64,6 +69,7 @@ describe('retryWithBackoff', () => {
     const fn = vi.fn().mockRejectedValue(err);
 
     const promise = retryWithBackoff(fn, { maxAttempts: 3, baseDelayMs: 100 });
+    promise.catch(() => {});
     await vi.runAllTimersAsync();
     await expect(promise).rejects.toMatchObject({ code: 'ETIMEDOUT' });
     expect(fn).toHaveBeenCalledTimes(3);

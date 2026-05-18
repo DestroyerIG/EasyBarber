@@ -165,6 +165,9 @@ describe('billingService', () => {
       qrCode: 'data:image/png;base64,abc',
       pixCopyPaste: '000201...',
       expiresAt: '2026-04-20T23:59:00.000Z',
+      // Coupon support added later — no coupon applied in this scenario.
+      coupon: null,
+      discount: 0,
     });
 
     expect(mockSubscriptionRepository.updateSubscriptionState).toHaveBeenCalledWith(

@@ -83,6 +83,51 @@ vi.mock('../repositories/authRepository.js', () => ({
   },
 }));
 
+const mockBillingContext = vi.hoisted(() => ({
+  current: {
+    barbershop_id: 'bbshop-uuid',
+    subscription_status: 'active' as string,
+    plan: 'profissional' as string,
+    payment_method: 'card',
+    stripe_subscription_id: 'sub_test',
+    stripe_customer_id: 'cus_test',
+  },
+}));
+
+vi.mock('../repositories/subscriptionRepository.js', () => ({
+  subscriptionRepository: {
+    getBarbershopBillingContext: vi.fn(async () => ({ ...mockBillingContext.current })),
+  },
+}));
+
+const mockAppointmentFindMany = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+const mockAppointmentFindFirst = vi.hoisted(() => vi.fn().mockResolvedValue(null));
+const mockAppointmentCreate = vi.hoisted(() => vi.fn().mockResolvedValue({ id: 'apt-uuid' }));
+const mockAppointmentUpdate = vi.hoisted(() => vi.fn().mockResolvedValue({ id: 'apt-uuid' }));
+
+vi.mock('../config/prisma.js', () => ({
+  prisma: {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    $executeRaw: vi.fn().mockResolvedValue(0),
+    $transaction: vi.fn(async (cb: unknown) => {
+      if (typeof cb === 'function') return (cb as (tx: unknown) => unknown)({});
+      return cb;
+    }),
+    $connect: vi.fn().mockResolvedValue(undefined),
+    $disconnect: vi.fn().mockResolvedValue(undefined),
+    appointment: {
+      findMany: mockAppointmentFindMany,
+      findFirst: mockAppointmentFindFirst,
+      create: mockAppointmentCreate,
+      update: mockAppointmentUpdate,
+    },
+    client: { findFirst: vi.fn().mockResolvedValue({ id: 'client-uuid' }) },
+    barber: { findFirst: vi.fn().mockResolvedValue({ id: 'barber-uuid' }) },
+    service: { findFirst: vi.fn().mockResolvedValue({ id: 'service-uuid', durationMinutes: 30, price: 30 }) },
+    earning: { create: vi.fn().mockResolvedValue({ id: 'earning-uuid' }) },
+  },
+}));
+
 // ===================== IMPORTS =====================
 
 const { ConflictError } = await import('../utils/errors.js');
@@ -101,6 +146,11 @@ const createAuthHeader = ({
   plan = 'basico',
   subscriptionStatus = 'active',
 }: { plan?: string; subscriptionStatus?: string } = {}) => {
+  // Middleware reads subscription_status from DB (mocked) — not JWT.
+  // Mutate the shared billing context so the same JWT shape works for both
+  // active and incomplete cases.
+  mockBillingContext.current.subscription_status = subscriptionStatus;
+  mockBillingContext.current.plan = plan;
   const authToken = jwt.sign(
     {
       userId: 'user-uuid',
@@ -122,6 +172,12 @@ const authHeader = createAuthHeader();
 const resetMocks = () => {
   vi.clearAllMocks();
   mockClientQuery.mockResolvedValue({ rows: [] });
+  mockBillingContext.current.subscription_status = 'active';
+  mockBillingContext.current.plan = 'profissional';
+  mockAppointmentFindMany.mockResolvedValue([]);
+  mockAppointmentFindFirst.mockResolvedValue(null);
+  mockAppointmentCreate.mockResolvedValue({ id: 'apt-uuid' });
+  mockAppointmentUpdate.mockResolvedValue({ id: 'apt-uuid' });
 };
 
 // ===================== TESTS =====================
@@ -154,8 +210,9 @@ describe('Appointments API — /api/v1/appointments', () => {
 
       expect(res.status).toBe(402);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.code).toBe('FEATURE_BLOCKED');
-      expect(res.body.error.reason).toBe('subscription_status_restricted');
+      // Auth middleware now returns SUBSCRIPTION_REQUIRED before reaching the
+      // feature guard when the underlying status is not active/trialing.
+      expect(res.body.error.code).toBe('SUBSCRIPTION_REQUIRED');
       expect(mockAppointmentRepo.findAll).not.toHaveBeenCalled();
     });
   });
@@ -209,6 +266,8 @@ describe('Appointments API — /api/v1/appointments', () => {
         { client_ok: '1', barber_ok: '1', service_ok: '1' }
       );
       mockAppointmentRepo.findConflict.mockResolvedValue({ id: 'existing-apt' });
+      // New module checks conflict via prisma.appointment.findFirst directly.
+      mockAppointmentFindFirst.mockResolvedValue({ id: 'existing-apt' });
       mockClientQuery.mockResolvedValue({ rows: [] });
 
       const res = await request.post('/api/v1/appointments').set(authHeader).send(validBody);
@@ -226,6 +285,18 @@ describe('Appointments API — /api/v1/appointments', () => {
       mockAppointmentRepo.updateStatus = vi.fn().mockResolvedValue(
         { id: '550e8400-e29b-41d4-a716-446655440001', status: 'concluido' }
       );
+      // New module reads/writes appointments via prisma directly.
+      mockAppointmentFindFirst.mockResolvedValue({
+        id: '550e8400-e29b-41d4-a716-446655440001',
+        status: 'confirmado',
+        serviceId: 's1',
+        clientId: 'c1',
+        date: '2026-04-15',
+      });
+      mockAppointmentUpdate.mockResolvedValue({
+        id: '550e8400-e29b-41d4-a716-446655440001',
+        status: 'concluido',
+      });
       mockClientQuery.mockResolvedValue({ rows: [] });
 
       const res = await request

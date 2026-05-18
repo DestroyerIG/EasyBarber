@@ -114,6 +114,8 @@ export const handleMessagesUpsert = async (
     text: parsed.text,
     messageId: parsed.messageId,
     instanceName: effectiveInstance,
+    rawPayload,
+    connectedNumber: tenant.connectedNumber,
   });
 
   // ── Passo 10: Retornar ──────────────────────────────────────────────────────

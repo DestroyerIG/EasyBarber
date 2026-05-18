@@ -68,6 +68,23 @@ vi.mock('../utils/logger.js', () => ({
   },
 }));
 
+vi.mock('../config/prisma.js', () => ({
+  prisma: {
+    $queryRaw: vi.fn().mockResolvedValue([{ id: 'tenant-1', name: 'Barber Test', whatsapp_instance_name: 'instance-1' }]),
+    $executeRaw: vi.fn().mockResolvedValue(0),
+    $transaction: vi.fn(async (cb: unknown) => {
+      if (typeof cb === 'function') return (cb as (tx: unknown) => unknown)({});
+      return cb;
+    }),
+    $connect: vi.fn().mockResolvedValue(undefined),
+    $disconnect: vi.fn().mockResolvedValue(undefined),
+    barbershop: {
+      findFirst: vi.fn().mockResolvedValue({ id: 'tenant-1', name: 'Barber Test', whatsappInstanceName: 'instance-1' }),
+      findUnique: vi.fn().mockResolvedValue({ id: 'tenant-1', name: 'Barber Test' }),
+    },
+  },
+}));
+
 const router = (await import('../routes/whatsapp.js')).default;
 const supertest = (await import('supertest')).default;
 

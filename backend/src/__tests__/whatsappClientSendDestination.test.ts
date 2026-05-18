@@ -189,9 +189,12 @@ describe('whatsappClient destination resolution', () => {
     });
 
     expect(sent).toBe(true);
+    // When allowLidDestination is enabled the client now sends to the @lid jid
+    // directly (flagged with allowLidPhone) rather than the resolved phone.
     expect(mockSendTextMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        phone: '558396311811',
+        phone: '236197968359561@lid',
+        allowLidPhone: true,
         text: 'Oi',
       })
     );

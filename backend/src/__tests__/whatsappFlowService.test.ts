@@ -23,6 +23,83 @@ vi.mock('../config/database.js', () => ({
   },
 }));
 
+// Shim Prisma so existing assertions on mockPoolQuery still match.
+// flowService + barbershopSettingsRepository moved from raw pool.query to
+// prisma.$queryRaw(Prisma.sql`…`); we proxy that through the same mock by
+// extracting the SQL text from the Prisma.Sql object.
+vi.mock('../config/prisma.js', () => {
+  const queryRaw = vi.fn(async (input: unknown) => {
+    const sqlObj = input as { text?: string; sql?: string; values?: unknown[] } | string;
+    const text =
+      typeof sqlObj === 'string'
+        ? sqlObj
+        : (sqlObj?.text ?? sqlObj?.sql ?? String(sqlObj));
+    const values =
+      typeof sqlObj === 'object' && sqlObj && Array.isArray((sqlObj as { values?: unknown[] }).values)
+        ? (sqlObj as { values: unknown[] }).values
+        : [];
+    const result = await mockPoolQuery(text, values);
+    if (Array.isArray(result)) return result;
+    if (result && typeof result === 'object' && 'rows' in result) {
+      return (result as { rows: unknown[] }).rows ?? [];
+    }
+    return [];
+  });
+
+  const stubResolveNull = () => vi.fn().mockResolvedValue(null);
+  const stubResolveEmpty = () => vi.fn().mockResolvedValue([]);
+  const stubResolveZero = () => vi.fn().mockResolvedValue(0);
+
+  return {
+    prisma: {
+      $queryRaw: queryRaw,
+      $executeRaw: queryRaw,
+      $queryRawUnsafe: queryRaw,
+      $executeRawUnsafe: queryRaw,
+      $transaction: vi.fn(async (cb: unknown) => {
+        if (typeof cb === 'function') return (cb as (tx: unknown) => unknown)({ $queryRaw: queryRaw });
+        return cb;
+      }),
+      $connect: vi.fn().mockResolvedValue(undefined),
+      $disconnect: vi.fn().mockResolvedValue(undefined),
+      barbershop: {
+        findFirst: stubResolveNull(),
+        findUnique: stubResolveNull(),
+        findMany: stubResolveEmpty(),
+      },
+      client: {
+        findFirst: stubResolveNull(),
+        findUnique: stubResolveNull(),
+        update: stubResolveNull(),
+        create: stubResolveNull(),
+        upsert: stubResolveNull(),
+      },
+      service: {
+        findFirst: stubResolveNull(),
+        findMany: stubResolveEmpty(),
+      },
+      barber: {
+        findFirst: stubResolveNull(),
+        findMany: stubResolveEmpty(),
+      },
+      appointment: {
+        findFirst: stubResolveNull(),
+        findMany: stubResolveEmpty(),
+        create: stubResolveNull(),
+        count: stubResolveZero(),
+      },
+      whatsappSession: {
+        findFirst: stubResolveNull(),
+        findMany: stubResolveEmpty(),
+        create: stubResolveNull(),
+        update: stubResolveNull(),
+        updateMany: stubResolveZero(),
+        deleteMany: stubResolveZero(),
+      },
+    },
+  };
+});
+
 vi.mock('../utils/logger.js', () => ({
   default: {
     info: vi.fn(),
@@ -83,6 +160,9 @@ const {
 describe('whatsappFlowService guards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset mockPoolQuery (clears the .mockResolvedValueOnce queue).
+    // Other mocks only need their call history cleared.
+    mockPoolQuery.mockReset();
     delete process.env.WHATSAPP_DEFAULT_BARBERSHOP_ID;
     delete process.env.WHATSAPP_INSTANCE_BARBERSHOP_MAP;
     mockPoolQuery.mockResolvedValue({ rows: [] });

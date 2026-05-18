@@ -52,6 +52,19 @@ vi.mock('../utils/logger.js', () => ({
   },
 }));
 
+vi.mock('../config/prisma.js', () => ({
+  prisma: {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    $executeRaw: vi.fn().mockResolvedValue(0),
+    $transaction: vi.fn(async (cb: unknown) => {
+      if (typeof cb === 'function') return (cb as (tx: unknown) => unknown)({});
+      return cb;
+    }),
+    $connect: vi.fn().mockResolvedValue(undefined),
+    $disconnect: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
 const { billingService } = await import('../services/billingService.js');
 
 describe('billing webhook idempotency', () => {

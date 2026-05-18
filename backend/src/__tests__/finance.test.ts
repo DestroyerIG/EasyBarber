@@ -61,6 +61,36 @@ vi.mock('../repositories/authRepository.js', () => ({
   },
 }));
 
+const mockBillingContext = vi.hoisted(() => ({
+  current: {
+    barbershop_id: 'bbshop-uuid',
+    subscription_status: 'active' as string,
+    plan: 'profissional' as string,
+    payment_method: 'card',
+    stripe_subscription_id: 'sub_test',
+    stripe_customer_id: 'cus_test',
+  },
+}));
+
+vi.mock('../repositories/subscriptionRepository.js', () => ({
+  subscriptionRepository: {
+    getBarbershopBillingContext: vi.fn(async () => ({ ...mockBillingContext.current })),
+  },
+}));
+
+vi.mock('../config/prisma.js', () => ({
+  prisma: {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    $executeRaw: vi.fn().mockResolvedValue(0),
+    $transaction: vi.fn(async (cb: unknown) => {
+      if (typeof cb === 'function') return (cb as (tx: unknown) => unknown)({});
+      return cb;
+    }),
+    $connect: vi.fn().mockResolvedValue(undefined),
+    $disconnect: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
 // ===================== IMPORTS =====================
 
 const jwt = (await import('jsonwebtoken')).default;
@@ -75,6 +105,10 @@ const createAuthHeader = ({
   plan = 'profissional',
   subscriptionStatus = 'active',
 }: { plan?: string; subscriptionStatus?: string } = {}) => {
+  // Mirror plan/status into the mocked billing context — middleware reads from
+  // the (mocked) repository, not from the JWT.
+  mockBillingContext.current.plan = plan;
+  mockBillingContext.current.subscription_status = subscriptionStatus;
   const authToken = jwt.sign(
     {
       userId: 'user-uuid',
@@ -114,6 +148,8 @@ describe('Finance API — /api/v1/finance', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockActiveSubscriptionContext();
+    mockBillingContext.current.plan = 'profissional';
+    mockBillingContext.current.subscription_status = 'active';
   });
 
   describe('GET /api/v1/finance/summary', () => {

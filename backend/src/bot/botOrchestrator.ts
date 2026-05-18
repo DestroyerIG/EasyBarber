@@ -1,48 +1,24 @@
 /**
- * botOrchestrator.ts — Orquestrador de respostas do bot por tenant.
+ * botOrchestrator.ts — Bridge between the webhook pipeline and the conversational flow.
  *
- * TODO: integrar com IA e sistema de agendamentos.
+ * Receives a message already validated by messagesUpsertHandler (tenant resolved,
+ * fromMe rejected, dedup applied, text non-empty) and delegates to
+ * whatsappFlowService.handleIncomingMessage which runs the booking state machine
+ * and sends responses via the Evolution API.
  *
- * Atualmente envia resposta de placeholder confirmando recebimento.
- * initBotOrchestrator() deve ser chamado no startup com a instância do EvolutionClient.
- * Se não inicializado, tenta criar o cliente a partir das variáveis de ambiente.
+ * initBotOrchestrator() is kept as a no-op for backward compatibility with
+ * server.ts startup wiring; the underlying client is created on demand by
+ * whatsappMessageService.
  */
 
 import logger from '../utils/logger.js';
-// @ts-ignore — evolutionClient is untyped JS module
-import { createEvolutionClient } from '../services/whatsapp/client/evolutionClient.js';
+import { handleIncomingMessage } from '../services/whatsapp/whatsappFlowService.js';
 
-// @ts-ignore — untyped JS class
-type EvolutionClient = {
-  sendText(params: { instanceName: string; to: string; text: string }): Promise<{
-    ok: boolean;
-    data?: unknown;
-    error?: unknown;
-  }>;
+type EvolutionClient = unknown;
+
+export const initBotOrchestrator = (_evolutionClient?: EvolutionClient): void => {
+  // no-op — flow service uses whatsappMessageService -> whatsappClient internally
 };
-
-let _client: EvolutionClient | null = null;
-
-/**
- * Injeta o EvolutionClient. Chamar no startup da aplicação.
- */
-export const initBotOrchestrator = (evolutionClient: EvolutionClient): void => {
-  _client = evolutionClient;
-};
-
-const getClient = (): EvolutionClient | null => {
-  if (_client) return _client;
-  try {
-    _client = createEvolutionClient() as EvolutionClient;
-    return _client;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.warn({ err: message }, 'botOrchestrator: evolutionClient não inicializado');
-    return null;
-  }
-};
-
-const PLACEHOLDER_REPLY = 'Olá! Recebi sua mensagem. O bot está em configuração.';
 
 interface BotProcessContext {
   barbershopId: string;
@@ -50,23 +26,27 @@ interface BotProcessContext {
   text: string;
   messageId: string | null;
   instanceName: string;
+  rawPayload?: unknown;
+  connectedNumber?: string | null;
 }
 
 interface BotProcessResult {
   ok: boolean;
   responseSent: boolean;
+  reason?: string | null;
 }
 
-/**
- * Processa uma mensagem recebida e envia resposta via WhatsApp.
- */
 export const process = async ({
   barbershopId,
   authorPhone,
   text,
   messageId,
   instanceName,
+  rawPayload,
+  connectedNumber,
 }: BotProcessContext): Promise<BotProcessResult> => {
+  const phoneOrPayload = rawPayload && typeof rawPayload === 'object' ? rawPayload : authorPhone;
+
   logger.info(
     {
       barbershopId,
@@ -74,34 +54,35 @@ export const process = async ({
       textPreview: text?.slice(0, 50),
       messageId,
       instanceName,
+      hasRawPayload: Boolean(rawPayload),
     },
-    'botOrchestrator: processing message',
+    'botOrchestrator: dispatching to flow',
   );
 
-  const client = getClient();
-  if (!client) {
-    logger.warn({ barbershopId, instanceName }, 'botOrchestrator: no client — response skipped');
-    return { ok: true, responseSent: false };
+  try {
+    const result = await handleIncomingMessage(phoneOrPayload, text, {
+      barbershopId,
+      preExtractedPhone: authorPhone,
+      preExtractedText: text,
+      preExtractedInstanceName: instanceName,
+      ...(messageId ? { messageId, dedupeKey: messageId } : {}),
+      eventName: 'messages-upsert',
+      ...(connectedNumber ? { connectedNumber } : {}),
+      instanceName,
+    });
+
+    if (!result?.ok) {
+      logger.info(
+        { barbershopId, instanceName, reason: result?.reason ?? null, ignored: result?.ignored ?? false },
+        'botOrchestrator: flow returned not-ok',
+      );
+      return { ok: true, responseSent: false, reason: result?.reason ?? null };
+    }
+
+    return { ok: true, responseSent: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error({ err: message, barbershopId, instanceName }, 'botOrchestrator: flow threw');
+    return { ok: false, responseSent: false, reason: 'flow_error' };
   }
-
-  const result = await client.sendText({
-    instanceName,
-    to: authorPhone,
-    text: PLACEHOLDER_REPLY,
-  });
-
-  if (!result.ok) {
-    logger.warn(
-      { barbershopId, instanceName, error: result.error },
-      'botOrchestrator: sendText failed',
-    );
-    return { ok: true, responseSent: false };
-  }
-
-  logger.info(
-    { barbershopId, instanceName, authorLast4: authorPhone?.slice(-4) },
-    'botOrchestrator: response sent',
-  );
-
-  return { ok: true, responseSent: true };
 };

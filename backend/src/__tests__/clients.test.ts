@@ -27,14 +27,21 @@ vi.mock('../services/cronService.js', () => ({
   startReminderCron: vi.fn(),
 }));
 
-// Mock clientRepository
+// Mock clientRepository — keep legacy names but also expose current API
+// (findMany / findManyPaginated). Each is wired to the same vi.fn so
+// existing test setups using `findAll.mockResolvedValue(...)` keep working.
+const mockFindAll = vi.fn();
+const mockFindAllPaginated = vi.fn();
 const mockClientRepo = {
-  findAll: vi.fn(),
-  findAllPaginated: vi.fn(),
+  findAll: mockFindAll,
+  findMany: mockFindAll,
+  findAllPaginated: mockFindAllPaginated,
+  findManyPaginated: mockFindAllPaginated,
   findByPhone: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   findById: vi.fn(),
+  getHistory: vi.fn().mockResolvedValue([]),
 };
 
 vi.mock('../repositories/clientRepository.js', () => ({
@@ -48,6 +55,32 @@ vi.mock('../repositories/authRepository.js', () => ({
     saveRefreshToken: vi.fn(),
     revokeUserRefreshTokens: vi.fn(),
     findValidRefreshToken: vi.fn(),
+  },
+}));
+
+vi.mock('../repositories/subscriptionRepository.js', () => ({
+  subscriptionRepository: {
+    getBarbershopBillingContext: vi.fn().mockResolvedValue({
+      barbershop_id: 'bbshop-uuid',
+      subscription_status: 'active',
+      plan: 'basico',
+      payment_method: 'card',
+      stripe_subscription_id: 'sub_test',
+      stripe_customer_id: 'cus_test',
+    }),
+  },
+}));
+
+vi.mock('../config/prisma.js', () => ({
+  prisma: {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    $executeRaw: vi.fn().mockResolvedValue(0),
+    $transaction: vi.fn(async (cb: unknown) => {
+      if (typeof cb === 'function') return (cb as (tx: unknown) => unknown)({});
+      return cb;
+    }),
+    $connect: vi.fn().mockResolvedValue(undefined),
+    $disconnect: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -127,7 +160,7 @@ describe('Clients API — /api/v1/clients', () => {
       expect(res.body.success).toBe(true);
       expect(mockClientRepo.create).toHaveBeenCalledWith(expect.objectContaining({
         email: null,
-        birth_date: null,
+        birthDate: null,
         address: null,
         notes: null,
       }));

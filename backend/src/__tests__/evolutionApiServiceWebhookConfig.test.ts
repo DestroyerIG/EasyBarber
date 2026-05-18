@@ -66,15 +66,19 @@ describe('evolutionApiService webhook configuration', () => {
     const parsedBody = JSON.parse(requestInit.body as string);
 
     expect(url).toBe('http://evolution.local/instance/create');
+    // Newer Evolution payload nests webhook config under a `webhook` object
+    // instead of flat top-level fields.
     expect(parsedBody).toMatchObject({
       instanceName: 'easybarber',
       integration: 'WHATSAPP-BAILEYS',
-      webhook: 'https://api.easybarber.test/api/v1/whatsapp/webhook/messages-upsert',
-      webhook_by_events: true,
-      webhook_base64: false,
+      webhook: {
+        url: 'https://api.easybarber.test/api/v1/whatsapp/webhook/messages-upsert',
+        webhook_by_events: true,
+        webhook_base64: false,
+      },
     });
-    expect(parsedBody.webhook_events).toEqual(['MESSAGES_UPSERT', 'CONNECTION_UPDATE']);
-    expect(parsedBody.webhook_events).not.toContain('MESSAGES_SET');
+    expect(parsedBody.webhook.events).toEqual(['MESSAGES_UPSERT', 'CONNECTION_UPDATE']);
+    expect(parsedBody.webhook.events).not.toContain('MESSAGES_SET');
   });
 
   it('reaplica webhook minimo seguro quando a instancia existente diverge da configuracao desejada', async () => {
@@ -124,10 +128,13 @@ describe('evolutionApiService webhook configuration', () => {
 
     const setWebhookBody = JSON.parse(calls[1][1].body as string);
     expect(setWebhookBody).toEqual({
-      url: 'https://api.easybarber.test/api/v1/whatsapp/webhook/messages-upsert',
-      events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'],
-      webhook_by_events: true,
-      webhook_base64: false,
+      webhook: {
+        enabled: true,
+        url: 'https://api.easybarber.test/api/v1/whatsapp/webhook/messages-upsert',
+        events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'],
+        webhook_by_events: true,
+        webhook_base64: false,
+      },
     });
   });
 });
