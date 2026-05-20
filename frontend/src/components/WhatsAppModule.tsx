@@ -66,8 +66,18 @@ const asObjectPayload = (value: unknown): Record<string, unknown> => {
 const normalizeStatusValue = (value: unknown): WhatsAppStatus['status'] => {
   const normalized = String(value || '').trim().toLowerCase();
 
-  if (normalized === 'unavailable') {
+  if (normalized === 'unavailable' || normalized === 'provider_unavailable') {
     return 'provider_unavailable';
+  }
+
+  // Backend returns 'qr_code' or 'connecting' — both map to the pairing UI
+  if (normalized === 'qr_code' || normalized === 'connecting') {
+    return 'pairing';
+  }
+
+  // Backend returns 'not_found' — map to instance_not_found UI
+  if (normalized === 'not_found') {
+    return 'instance_not_found';
   }
 
   if (SUPPORTED_STATUS.includes(normalized as (typeof SUPPORTED_STATUS)[number])) {

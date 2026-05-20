@@ -221,13 +221,12 @@ export const whatsappService = {
       let currentState: string | null = null;
       try {
         const stateResp = await evolutionApi.getConnectionState(instanceName);
-        currentState = String(
-          (stateResp as Record<string, unknown>)['state'] ??
-          (stateResp as Record<string, unknown>)['instance']?.toString() ??
-          '',
-        ).toLowerCase();
+        const raw = stateResp as Record<string, unknown>;
+        const instanceObj = raw['instance'] as Record<string, unknown> | undefined;
+        currentState = String(raw['state'] ?? instanceObj?.['state'] ?? '').toLowerCase();
+        logger.info({ instanceName, currentState }, 'whatsapp-service: estado atual da instância');
       } catch {
-        // ignore — proceed with logout+connect
+        // ignore — proceed with connect
       }
 
       if (currentState === 'open') {
@@ -235,8 +234,11 @@ export const whatsappService = {
         return { status: 'connected', qrCode: null, connectedNumber: null, instanceName };
       }
 
-      // Logout clears the old WhatsApp session so connectInstance generates a QR.
-      await evolutionApi.logoutInstance(instanceName);
+      // Only logout when there's an active session to clear (connecting = pairing in progress).
+      // For close/unknown Evolution returns 400 on logout — skip it.
+      if (currentState === 'connecting') {
+        await evolutionApi.logoutInstance(instanceName);
+      }
 
       try {
         await evolutionApi.connectInstance(instanceName);
