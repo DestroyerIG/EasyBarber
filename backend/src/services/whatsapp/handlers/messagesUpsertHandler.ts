@@ -39,6 +39,31 @@ export const handleMessagesUpsert = async (
     return { ok: false, reason: 'parse_failed' };
   }
 
+  // ── DIAGNÓSTICO TEMPORÁRIO: dump completo de data.key p/ mensagens @lid ──────
+  // Objetivo: descobrir em qual campo (senderPn/participantPn/etc) vem o telefone
+  // real do cliente em conversas @lid. REMOVER após mapeamento confirmado.
+  try {
+    const rb = (rawPayload ?? {}) as Record<string, unknown>;
+    const data = (rb['data'] ?? {}) as Record<string, unknown>;
+    const key = (data['key'] ?? {}) as Record<string, unknown>;
+    const remoteJid = String(key['remoteJid'] ?? '');
+    if (remoteJid.toLowerCase().endsWith('@lid')) {
+      logger.info(
+        {
+          instanceName,
+          keyFields: Object.keys(key),
+          key,
+          dataSender: data['sender'] ?? null,
+          rootSender: rb['sender'] ?? null,
+          participant: data['participant'] ?? key['participant'] ?? null,
+        },
+        'msg_handler: LID_KEY_DUMP (diagnostico temporario)',
+      );
+    }
+  } catch (err) {
+    logger.warn({ err: (err as Error)?.message }, 'msg_handler: LID_KEY_DUMP falhou');
+  }
+
   // ── Passo 2: fromMe check ───────────────────────────────────────────────────
   if (parsed.fromMe === true) {
     logger.info(
