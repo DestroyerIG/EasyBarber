@@ -120,7 +120,8 @@ const asaasWebhookMiddleware = (req: Request, res: Response, next: NextFunction)
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
-  } catch {
+  } catch (err) {
+    logger.error({ err, requestId: req.requestId }, 'Asaas webhook: erro ao validar token');
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }

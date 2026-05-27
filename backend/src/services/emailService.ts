@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 import type Mail from 'nodemailer/lib/mailer/index.js';
 import { AppError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
+import { maskEmail } from '../utils/mask.js';
 
 let transporter: Mail | null = null;
 
@@ -165,7 +166,7 @@ export const emailService = {
         { email: to },
         'SMTP não configurado em ambiente não produtivo. Link de verificação será apenas logado.'
       );
-      logger.info({ email: to, verificationUrl }, 'Link de verificação gerado (modo desenvolvimento)');
+      logger.info({ email: maskEmail(to), verificationUrl }, 'Link de verificação gerado (modo desenvolvimento)');
 
       return {
         delivered: false,
@@ -199,7 +200,7 @@ export const emailService = {
         mode: 'smtp',
       };
     } catch (error) {
-      logger.error({ err: error, email: to }, 'Falha ao enviar e-mail de verificação via SMTP');
+      logger.error({ err: error, email: maskEmail(to) }, 'Falha ao enviar e-mail de verificação via SMTP');
       throw new AppError(
         'Não foi possível enviar o e-mail de verificação no momento.',
         502,

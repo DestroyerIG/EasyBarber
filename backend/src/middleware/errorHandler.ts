@@ -62,6 +62,10 @@ export const errorHandler = (
         Array.isArray(e.path) && e.path.length > 0 ? `${e.path.join('.')}: ` : '';
       return `${path}${e.message}`;
     });
+    logger.info(
+      { code: 'VALIDATION_ERROR', path: req.path, method: req.method, requestId: req.requestId, details },
+      'Falha de validação na requisição'
+    );
     res.status(400).json({
       success: false,
       message: 'Dados inválidos',
@@ -109,7 +113,6 @@ export const errorHandler = (
         statusCode: appErr.statusCode,
         providerStatus: appErr.providerStatus,
         providerData: appErr.providerData,
-        providerHeaders: appErr.providerHeaders,
         path: req.path,
         requestId: req.requestId,
         barbershopId: req.user?.barbershopId,

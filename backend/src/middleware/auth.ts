@@ -15,6 +15,7 @@ import {
 } from '../services/billing/statusMapper.js';
 import { normalizePlan } from '../config/planPermissions.js';
 import logger from '../utils/logger.js';
+import { setRequestContext } from '../modules/core/middleware/requestContext.js';
 import type {
   JwtPayload,
   BarbershopBillingContext,
@@ -187,6 +188,7 @@ export const authMiddleware = async (
       role: normalizeRole(decoded.role) ?? decoded.role,
       subscriptionStatus: decoded.subscriptionStatus ?? 'incomplete',
     };
+    setRequestContext({ userId: req.user.userId, barbershopId: req.user.barbershopId ?? undefined });
     await enforceActiveSubscription(req);
     next();
   } catch (error) {

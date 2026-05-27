@@ -4,6 +4,7 @@ import { authRepository } from '../repositories/authRepository.js';
 import { refreshTokenRepository } from '../repositories/refreshTokenRepository.js';
 import { AppError, ConflictError, UnauthorizedError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
+import { maskEmail } from '../utils/mask.js';
 import { normalizeRole } from '../utils/roles.js';
 import { getAuthProviderMode } from '../config/authProviderMode.js';
 import { supabaseAuthService } from './supabaseAuthService.js';
@@ -880,7 +881,7 @@ const verifyEmailWithSupabaseToken = async ({
       throw error;
     }
 
-    logger.error({ err: error, email: verification.email }, 'Erro ao sincronizar confirmação de e-mail via token Supabase');
+    logger.error({ err: error, email: maskEmail(verification.email) }, 'Erro ao sincronizar confirmação de e-mail via token Supabase');
     throw new AppError('Não foi possível confirmar o e-mail. Tente novamente.', 500, 'VERIFY_EMAIL_ERROR');
   }
 
@@ -932,7 +933,7 @@ const verifyEmailWithSupabaseSession = async ({
       throw error;
     }
 
-    logger.error({ err: error, email: identity.email }, 'Erro ao sincronizar confirmação de e-mail via sessão Supabase');
+    logger.error({ err: error, email: maskEmail(identity.email) }, 'Erro ao sincronizar confirmação de e-mail via sessão Supabase');
     throw new AppError('Não foi possível confirmar o e-mail. Tente novamente.', 500, 'VERIFY_EMAIL_ERROR');
   }
 
@@ -1415,7 +1416,7 @@ export const authService = {
         throw error;
       }
 
-      logger.error({ err: error, email: identity.email }, 'Erro ao sincronizar cadastro confirmado');
+      logger.error({ err: error, email: maskEmail(identity.email) }, 'Erro ao sincronizar cadastro confirmado');
       throw new AppError('Não foi possível finalizar o cadastro. Tente novamente.', 500, 'CONFIRM_SIGNUP_ERROR');
     }
 
