@@ -41,7 +41,18 @@ export const handleMessagesUpsert = async (
 
   // ── Passo 2: fromMe check ───────────────────────────────────────────────────
   if (parsed.fromMe === true) {
-    logger.info({ instanceName, messageId: parsed.messageId }, 'msg_handler: from_me');
+    logger.info(
+      {
+        instanceName,
+        messageId: parsed.messageId,
+        remoteJid: parsed.remoteJid,
+        sender: parsed.sender,
+        destination: parsed.destination,
+        messageType: parsed.messageType,
+        textPreview: parsed.text?.slice(0, 30) ?? null,
+      },
+      'msg_handler: from_me',
+    );
     return { ok: false, reason: 'from_me' };
   }
 
