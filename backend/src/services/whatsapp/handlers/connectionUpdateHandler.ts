@@ -13,6 +13,7 @@ import logger from '../../../utils/logger.js';
 import { prisma } from '../../../config/prisma.js';
 import { invalidateTenant } from '../tenant/tenantCache.js';
 import { stripToDigits } from '../utils/phoneUtils.js';
+import { updateInstanceDirect } from '../whatsappInstanceCache.js';
 
 // ── Extração do estado ────────────────────────────────────────────────────────
 
@@ -103,12 +104,19 @@ export const handleConnectionUpdate = async (rawPayload: unknown): Promise<Conne
       return { ok: false, instanceName: null, state };
     }
 
+    if (state === 'connecting') {
+      updateInstanceDirect(instanceName, { status: 'connecting' });
+      logger.info({ instanceName }, 'connectionUpdateHandler: estado connecting — cache atualizado');
+    }
+
     if (state === 'close' || state === 'logout') {
       invalidateTenant(instanceName);
+      updateInstanceDirect(instanceName, { status: state });
       logger.info({ instanceName, state }, 'connectionUpdateHandler: tenant cache invalidated');
     }
 
     if (state === 'open') {
+      updateInstanceDirect(instanceName, { status: 'open' });
       const phone = extractConnectedPhone(rawPayload);
       if (phone) {
         await updateConnectedNumber(instanceName, phone);

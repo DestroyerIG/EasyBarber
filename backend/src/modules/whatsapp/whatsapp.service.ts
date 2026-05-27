@@ -141,6 +141,22 @@ function normalizeState(instanceName: string, raw: ConnectionStateResponse): Nor
   return { status: qrCode ? 'qr_code' : 'disconnected', qrCode, connectedNumber: null, instanceName };
 }
 
+/**
+ * Extracts a QR base64 from any Evolution response (create/connect) and caches
+ * it. Returns the QR string when one was present, else null. Centralizes the
+ * "capture QR wherever Evolution hands it to us" logic so we never depend on
+ * the QRCODE_UPDATED webhook (which Evolution does not reliably emit).
+ */
+function cacheQrFromPayload(instanceName: string, payload: unknown): string | null {
+  const qr = extractQrBase64(payload);
+  if (qr) {
+    setCachedQrCode(instanceName, qr);
+    logger.info({ instanceName, qrLength: qr.length }, 'whatsapp-service: QR capturado e cacheado');
+    return qr;
+  }
+  return null;
+}
+
 async function verifyAndFixWebhook(instanceName: string, url: string): Promise<void> {
   try {
     const res = await evolutionApi.getWebhook(instanceName);
@@ -213,11 +229,8 @@ export const whatsappService = {
     const exists = await evolutionApi.instanceExists(instanceName);
 
     if (exists) {
-      logger.info({ instanceName }, 'whatsapp-service: instância já existe, reutilizando');
-      await verifyAndFixWebhook(instanceName, url);
+      logger.info({ instanceName }, 'whatsapp-service: instância já existe, verificando estado');
 
-      // Check current state: if already open, return connected without touching session.
-      // Otherwise, logout to clear stale credentials so connectInstance generates a fresh QR.
       let currentState: string | null = null;
       try {
         const stateResp = await evolutionApi.getConnectionState(instanceName);
@@ -226,7 +239,7 @@ export const whatsappService = {
         currentState = String(raw['state'] ?? instanceObj?.['state'] ?? '').toLowerCase();
         logger.info({ instanceName, currentState }, 'whatsapp-service: estado atual da instância');
       } catch {
-        // ignore — proceed with connect
+        // ignore — proceed with reset below
       }
 
       if (currentState === 'open') {
@@ -234,42 +247,52 @@ export const whatsappService = {
         return { status: 'connected', qrCode: null, connectedNumber: null, instanceName };
       }
 
-      // Only logout when there's an active session to clear (connecting = pairing in progress).
-      // For close/unknown Evolution returns 400 on logout — skip it.
-      if (currentState === 'connecting') {
-        await evolutionApi.logoutInstance(instanceName);
-      }
-
-      try {
-        await evolutionApi.connectInstance(instanceName);
-      } catch (err) {
-        if (!(err instanceof InstanceNotFoundError)) {
-          logger.warn({ err, instanceName }, 'whatsapp-service: connectInstance falhou, seguindo mesmo assim');
-        }
-      }
-      return { status: 'connecting', qrCode: null, connectedNumber: null, instanceName };
+      // Any non-open state (connecting/close/unknown) means there is no live
+      // pairing we can reuse. A stale Baileys session makes Evolution try to
+      // RESUME instead of issuing a QR (connecting→close loop, no QRCODE_UPDATED).
+      // Delete + recreate with qrcode:true forces a clean QR returned inline.
+      logger.info({ instanceName, currentState }, 'whatsapp-service: sem sessão ativa, recriando para QR limpo');
+      await evolutionApi.deleteInstance(instanceName);
+      const createResp = await evolutionApi.createInstance(instanceName, url);
+      await verifyAndFixWebhook(instanceName, url);
+      const qr = cacheQrFromPayload(instanceName, createResp);
+      return {
+        status: qr ? 'qr_code' : 'connecting',
+        qrCode: qr,
+        connectedNumber: null,
+        instanceName,
+      };
     }
 
     try {
-      await evolutionApi.createInstance(instanceName, url);
+      const createResp = await evolutionApi.createInstance(instanceName, url);
       await verifyAndFixWebhook(instanceName, url);
-      logger.info({ instanceName }, 'whatsapp-service: instância criada, aguardando QRCODE_UPDATED');
-      return { status: 'connecting', qrCode: null, connectedNumber: null, instanceName };
+      const qr = cacheQrFromPayload(instanceName, createResp);
+      logger.info({ instanceName, hasQr: Boolean(qr) }, 'whatsapp-service: instância criada');
+      return {
+        status: qr ? 'qr_code' : 'connecting',
+        qrCode: qr,
+        connectedNumber: null,
+        instanceName,
+      };
     } catch (err) {
       // Race fallback: another caller (or a stale Evolution cache) created
-      // the instance between our probe and our create. Treat as success.
+      // the instance between our probe and our create. Recreate to force a QR.
       if (isAlreadyInUseError(err)) {
         logger.warn(
           { instanceName },
-          'whatsapp-service: createInstance retornou 403 already-in-use, tratando como existente',
+          'whatsapp-service: createInstance retornou 403 already-in-use, recriando para QR limpo',
         );
+        await evolutionApi.deleteInstance(instanceName);
+        const createResp = await evolutionApi.createInstance(instanceName, url);
         await verifyAndFixWebhook(instanceName, url);
-        try {
-          await evolutionApi.connectInstance(instanceName);
-        } catch (connectErr) {
-          logger.warn({ err: connectErr, instanceName }, 'whatsapp-service: connectInstance fallback falhou');
-        }
-        return { status: 'connecting', qrCode: null, connectedNumber: null, instanceName };
+        const qr = cacheQrFromPayload(instanceName, createResp);
+        return {
+          status: qr ? 'qr_code' : 'connecting',
+          qrCode: qr,
+          connectedNumber: null,
+          instanceName,
+        };
       }
       throw err;
     }
@@ -305,33 +328,27 @@ export const whatsappService = {
     const instanceName = ctx.whatsappInstanceName;
     if (!instanceName) return null;
 
-    // 1. Cache (populated by QRCODE_UPDATED webhook).
+    // 1. Cache — warmed synchronously by connectWhatsApp (create response) and
+    //    by the QRCODE_UPDATED webhook when Evolution does emit it.
     const cached = getCachedQrCode(instanceName);
     if (cached) return cached;
 
-    // 2. Fallback: pull from Evolution directly. Useful when the webhook
-    //    pipeline is broken (wrong WEBHOOK_GLOBAL_URL on Evolution side,
-    //    network drop, etc.) — Evolution exposes the current QR on
-    //    GET /instance/connect/{name} as long as the instance hasn't
-    //    paired yet.
+    // 2. Soft fallback: ask Evolution for the current QR. READ-ONLY — never
+    //    delete/recreate here. This endpoint is polled by the frontend; a
+    //    destructive action would restart the instance on every poll and the
+    //    QR would never stabilize. Recreate only happens on POST /connect.
     try {
       logger.info(
         { instanceName, barbershopId },
-        'whatsapp-service: cache miss, buscando QR direto da Evolution',
+        'whatsapp-service: cache miss, tentando connectInstance (read-only)',
       );
       const connectPayload = await evolutionApi.connectInstance(instanceName);
-      const qr = extractQrBase64(connectPayload);
-      if (qr) {
-        setCachedQrCode(instanceName, qr);
-        logger.info(
-          { instanceName, qrLength: qr.length },
-          'whatsapp-service: QR obtido via fallback connectInstance',
-        );
-        return qr;
-      }
+      const qr = cacheQrFromPayload(instanceName, connectPayload);
+      if (qr) return qr;
+
       logger.warn(
         { instanceName, payloadKeys: Object.keys((connectPayload as Record<string, unknown>) ?? {}) },
-        'whatsapp-service: fallback connectInstance retornou payload sem QR extraível',
+        'whatsapp-service: connectInstance sem QR — cliente deve chamar POST /connect para recriar',
       );
       return null;
     } catch (err) {

@@ -116,6 +116,10 @@ export const evolutionApi = {
     const payload = {
       instanceName,
       integration: 'WHATSAPP-BAILEYS',
+      // qrcode:true makes Evolution generate the first QR during creation and
+      // return its base64 in the response body — independent of the (flaky)
+      // QRCODE_UPDATED webhook and of any stale Baileys session.
+      qrcode: true,
       webhook: {
         url: webhookUrl,
         enabled: true,
