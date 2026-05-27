@@ -147,7 +147,7 @@ export const evolutionApi = {
   async deleteInstance(instanceName: string): Promise<void> {
     logger.info({ instanceName }, 'evolution-api: deleteInstance');
     try {
-      await request('DELETE', `/instance/${instanceName}/deleteInstance`);
+      await request('DELETE', `/instance/delete/${instanceName}`);
     } catch (err) {
       if (err instanceof InstanceNotFoundError) {
         logger.debug({ instanceName }, 'evolution-api: deleteInstance → instância já removida');
