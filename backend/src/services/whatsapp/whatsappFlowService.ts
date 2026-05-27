@@ -1758,6 +1758,7 @@ export const handleIncomingMessage = async (
     (
       phoneExtraction.sourcePath.includes('participant') ||
       phoneExtraction.resolutionRule === 'lid_from_fallback_promoted' ||
+      phoneExtraction.resolutionRule === 'lid_sender_fallback_promoted' ||
       phoneExtraction.resolutionRule === 'lid_cache' ||
       phoneExtraction.resolutionRule === 'lid_sender_fallback'
     )
