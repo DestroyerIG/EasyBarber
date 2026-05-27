@@ -68,8 +68,15 @@ export const ConnectionPanel = ({ onChanged }: ConnectionPanelProps) => {
       await fetchConfig();
       onChanged?.();
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { error?: string } } };
-      showToast(axiosErr.response?.data?.error || 'Falha ao salvar credenciais', 'error');
+      const axiosErr = err as {
+        response?: { status?: number; data?: { error?: string; message?: string } };
+        message?: string;
+      };
+      const serverMsg =
+        axiosErr.response?.data?.error ||
+        axiosErr.response?.data?.message ||
+        (axiosErr.response?.status ? `HTTP ${axiosErr.response.status}` : axiosErr.message);
+      showToast(serverMsg || 'Falha ao salvar credenciais', 'error');
     } finally {
       setSaving(false);
     }

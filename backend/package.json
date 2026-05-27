@@ -11,7 +11,7 @@
     "postinstall": "prisma generate",
     "build": "tsc --project tsconfig.json",
     "dev": "tsx watch src/server.ts",
-    "start": "node dist/server.js",
+    "start": "prisma migrate deploy && node dist/server.js",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
