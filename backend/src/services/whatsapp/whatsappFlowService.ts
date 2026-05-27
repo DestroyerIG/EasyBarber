@@ -2025,6 +2025,10 @@ export const handleIncomingMessage = async (
       return { ok: false, ignored: true, reason: 'barbershop_not_resolved' };
     }
 
+    // Carry the resolved tenant into the send context so the outbound layer
+    // (sendWhatsAppText) can pick the right provider/credentials per barbershop.
+    sendContext.barbershopId = barbershopId;
+
     logger.info({
       ...flowDebugBase,
       text: normalizedText,

@@ -4,6 +4,12 @@ import { whatsappService } from './whatsapp.service.js';
 import { evolutionApi } from './evolution-api.service.js';
 import { EvolutionApiError } from './whatsapp.types.js';
 import { getQrCacheSize } from '../../services/whatsapp/handlers/qrcodeUpdatedHandler.js';
+import {
+  getMetaConfigStatus,
+  saveMetaCredentials,
+  clearMetaCredentials,
+  verifyMetaCredentials,
+} from '../../services/whatsapp/metaWhatsappService.js';
 
 /**
  * Detects the Evolution-API 403 emitted when the instance name is taken.
@@ -122,6 +128,77 @@ export const testWebhookConfig = async (_req: Request, res: Response, next: Next
   try {
     const data = await whatsappService.getWebhookConfig();
     res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── Meta WhatsApp Cloud API — credenciais por barbearia ─────────────────────
+
+export const getMetaConfig = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const data = await getMetaConfigStatus(req.user.barbershopId!);
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const saveMetaConfig = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { phoneNumberId, accessToken, wabaId, displayNumber } = (req.body ?? {}) as {
+      phoneNumberId?: string;
+      accessToken?: string;
+      wabaId?: string;
+      displayNumber?: string;
+    };
+
+    if (!phoneNumberId?.trim() || !accessToken?.trim()) {
+      res.status(400).json({ success: false, error: 'phoneNumberId e accessToken são obrigatórios' });
+      return;
+    }
+
+    // Validate against the Graph API before persisting so the operator gets
+    // immediate feedback instead of a silently-broken bot.
+    const verification = await verifyMetaCredentials({
+      phoneNumberId: phoneNumberId.trim(),
+      accessToken: accessToken.trim(),
+      wabaId: wabaId?.trim() || null,
+    });
+
+    if (!verification.ok) {
+      res.status(422).json({
+        success: false,
+        error: `Credenciais rejeitadas pela Meta: ${verification.error ?? 'desconhecido'}`,
+      });
+      return;
+    }
+
+    await saveMetaCredentials(req.user.barbershopId!, {
+      phoneNumberId: phoneNumberId.trim(),
+      accessToken: accessToken.trim(),
+      wabaId: wabaId?.trim() || null,
+      displayNumber: displayNumber?.trim() || verification.displayPhoneNumber || null,
+    });
+
+    const status = await getMetaConfigStatus(req.user.barbershopId!);
+    res.json({
+      success: true,
+      data: {
+        ...status,
+        verifiedName: verification.verifiedName,
+        displayPhoneNumber: verification.displayPhoneNumber,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteMetaConfig = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    await clearMetaCredentials(req.user.barbershopId!);
+    res.json({ success: true, data: { disconnected: true } });
   } catch (err) {
     next(err);
   }

@@ -17,6 +17,11 @@ model Barbershop {
   email                        String    @unique @db.VarChar(255)
   whatsapp                     String    @db.VarChar(20)
   whatsappInstanceName         String?   @map("whatsapp_instance_name") @db.VarChar(255)
+  // Meta WhatsApp Cloud API (per-barbershop bot). When phoneNumberId is set,
+  // the Meta provider is used instead of Evolution.
+  whatsappPhoneNumberId        String?   @map("whatsapp_phone_number_id") @db.VarChar(64)
+  whatsappWabaId               String?   @map("whatsapp_waba_id") @db.VarChar(64)
+  whatsappAccessToken          String?   @map("whatsapp_access_token")
   cpfCnpj                      String?   @map("cpf_cnpj") @db.VarChar(20)
 
   // Plano e assinatura
@@ -74,6 +79,7 @@ model Barbershop {
   whatsappRatings      WhatsappRating[]
   settings             BarbershopSettings?
 
+  @@index([whatsappPhoneNumberId], map: "barbershops_whatsapp_phone_number_id_idx")
   @@map("barbershops")
 }
 

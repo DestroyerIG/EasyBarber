@@ -310,6 +310,18 @@ app.use(
   })
 );
 
+// Meta Cloud API webhook: capture the raw body so we can verify the
+// X-Hub-Signature-256 HMAC before trusting the payload.
+app.use(
+  `${API_V1}/whatsapp/meta/webhook`,
+  express.json({
+    limit: WHATSAPP_WEBHOOK_BODY_LIMIT,
+    verify: (req, _res, buf) => {
+      (req as typeof req & { rawBody?: Buffer }).rawBody = buf;
+    },
+  })
+);
+
 app.use(
   express.json({
     limit: API_JSON_BODY_LIMIT,
