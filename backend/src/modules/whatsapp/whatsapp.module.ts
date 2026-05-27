@@ -3,7 +3,6 @@ import { authMiddleware } from '../../middleware/auth.js';
 import { requireAdmin, requireTenantRoles } from '../../middleware/rbac.js';
 import { requireFeature } from '../../middleware/subscriptionGuard.js';
 import { handleWebhookEvent } from './webhook.handler.js';
-import { handleMetaVerification, handleMetaInbound } from './meta-webhook.handler.js';
 import {
   getStatus,
   initialize,
@@ -14,9 +13,6 @@ import {
   cleanupCorrupted,
   testWebhookConfig,
   internalHealth,
-  getMetaConfig,
-  saveMetaConfig,
-  deleteMetaConfig,
 } from './whatsapp.controller.js';
 import logger from '../../utils/logger.js';
 
@@ -47,12 +43,6 @@ const extractInstanceFromBody = (body: Record<string, unknown>): string | null =
   }
   return null;
 };
-
-// ─── Meta WhatsApp Cloud API webhook — sem auth ──────────────────────────────
-// GET: handshake de verificação (hub.challenge). POST: entrega de mensagens,
-// roteadas por phone_number_id. Único endpoint para todas as barbearias.
-router.get('/meta/webhook', handleMetaVerification);
-router.post('/meta/webhook', handleMetaInbound);
 
 // ─── Webhook — sem auth, responde SEMPRE 200 ─────────────────────────────────
 //
@@ -143,11 +133,6 @@ router.get('/qr', ...waProtected, getQrCode);           // alias
 
 router.post('/disconnect', ...waProtected, disconnect);
 router.post('/logout', ...waProtected, disconnect);     // alias
-
-// ─── Meta Cloud API — credenciais por barbearia ──────────────────────────────
-router.get('/meta/config', ...waProtected, getMetaConfig);
-router.put('/meta/config', ...waProtected, saveMetaConfig);
-router.delete('/meta/config', ...waProtected, deleteMetaConfig);
 
 router.post('/send', ...waProtected, sendMessage);
 

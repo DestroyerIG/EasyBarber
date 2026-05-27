@@ -36,7 +36,6 @@ import {
   normalizeWhatsAppInstanceName,
 } from './whatsapp/whatsappInstanceService.js';
 import { barbershopSettingsRepository } from '../repositories/barbershopSettingsRepository.js';
-import { getMetaCredentials, sendMetaText } from './whatsapp/metaWhatsappService.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1189,20 +1188,6 @@ export const sendWhatsAppText = async (
   }
 
   const normalizedAuthorPhone = normalizeWhatsAppNumber(authorPhone);
-
-  // ========== PROVIDER META (WhatsApp Cloud API) ==========
-  // When the barbershop has Meta credentials, route the reply through the
-  // Graph API and skip ALL Evolution-specific handling (instances, @lid,
-  // self-reply heuristics). Meta inbound never contains the bot's own
-  // messages, so the self-reply guards below are Evolution-only concerns.
-  const metaBarbershopId = (context?.barbershopId as string | null | undefined) ?? null;
-  if (metaBarbershopId) {
-    const metaCreds = await getMetaCredentials(metaBarbershopId);
-    if (metaCreds) {
-      const metaDestination = normalizedAuthorPhone || authorPhone;
-      return sendMetaText(metaCreds, metaDestination, normalizedMessage);
-    }
-  }
 
   // ========== REGRA 1: Bloqueio de auto-resposta ==========
   const instanceContext = await resolveClientInstanceContext({
