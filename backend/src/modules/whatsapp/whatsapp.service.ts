@@ -199,6 +199,28 @@ async function obtainQr(instanceName: string, createResp: unknown): Promise<stri
   return null;
 }
 
+/**
+ * Recovers a fresh QR from an instance that ALREADY exists on Evolution,
+ * without the delete+create dance.
+ *
+ * Why not delete+create: on Evolution v2.1.1 the delete does not propagate
+ * before the immediate create, so create returns 403 "already in use" and no
+ * QR is ever issued (the instance just loops connecting→close). logout clears
+ * the stale Baileys session WITHOUT removing the instance record, so the
+ * subsequent GET /instance/connect mints a brand-new QR instead of trying to
+ * resume the dead session.
+ *
+ * If this Evolution build removes the instance on logout (known behavior on
+ * some versions), the connect poll 404s and returns null — the caller then
+ * recreates from scratch.
+ */
+async function reuseExistingInstanceForQr(instanceName: string, url: string): Promise<string | null> {
+  logger.info({ instanceName }, 'whatsapp-service: logout para limpar sessão stale antes do connect');
+  await evolutionApi.logoutInstance(instanceName);
+  await verifyAndFixWebhook(instanceName, url);
+  return obtainQr(instanceName, null);
+}
+
 async function verifyAndFixWebhook(instanceName: string, url: string): Promise<void> {
   try {
     const res = await evolutionApi.getWebhook(instanceName);
@@ -292,12 +314,28 @@ export const whatsappService = {
       // Any non-open state (connecting/close/unknown) means there is no live
       // pairing we can reuse. A stale Baileys session makes Evolution try to
       // RESUME instead of issuing a QR (connecting→close loop, no QRCODE_UPDATED).
-      // Delete + recreate with qrcode:true forces a clean QR returned inline.
-      logger.info({ instanceName, currentState }, 'whatsapp-service: sem sessão ativa, recriando para QR limpo');
-      await evolutionApi.deleteInstance(instanceName);
-      const createResp = await evolutionApi.createInstance(instanceName, url);
-      await verifyAndFixWebhook(instanceName, url);
-      const qr = await obtainQr(instanceName, createResp);
+      // logout clears the session so connect mints a fresh QR — avoiding the
+      // delete+create 403 "already in use" race seen on Evolution v2.1.1.
+      logger.info({ instanceName, currentState }, 'whatsapp-service: sem sessão ativa, logout + connect para QR limpo');
+      let qr = await reuseExistingInstanceForQr(instanceName, url);
+
+      if (!qr) {
+        // logout removed the instance, or connect returned no QR (v2.1.1
+        // {count} bug). Recreate cleanly, with a teardown delay so the delete
+        // propagates before create (otherwise create 403s "already in use").
+        logger.warn({ instanceName }, 'whatsapp-service: connect sem QR após logout, recriando instância');
+        await evolutionApi.deleteInstance(instanceName);
+        await sleep(2_000);
+        try {
+          const createResp = await evolutionApi.createInstance(instanceName, url);
+          await verifyAndFixWebhook(instanceName, url);
+          qr = await obtainQr(instanceName, createResp);
+        } catch (err) {
+          if (!isAlreadyInUseError(err)) throw err;
+          logger.warn({ instanceName }, 'whatsapp-service: recreate ainda 403 após delete+sleep, cliente deve repolar');
+        }
+      }
+
       return {
         status: qr ? 'qr_code' : 'connecting',
         qrCode: qr,
@@ -323,12 +361,9 @@ export const whatsappService = {
       if (isAlreadyInUseError(err)) {
         logger.warn(
           { instanceName },
-          'whatsapp-service: createInstance retornou 403 already-in-use, recriando para QR limpo',
+          'whatsapp-service: createInstance retornou 403 already-in-use, logout + connect para QR limpo',
         );
-        await evolutionApi.deleteInstance(instanceName);
-        const createResp = await evolutionApi.createInstance(instanceName, url);
-        await verifyAndFixWebhook(instanceName, url);
-        const qr = await obtainQr(instanceName, createResp);
+        const qr = await reuseExistingInstanceForQr(instanceName, url);
         return {
           status: qr ? 'qr_code' : 'connecting',
           qrCode: qr,
