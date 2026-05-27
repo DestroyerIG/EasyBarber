@@ -157,6 +157,48 @@ function cacheQrFromPayload(instanceName: string, payload: unknown): string | nu
   return null;
 }
 
+const QR_POLL_ATTEMPTS = 5;
+const QR_POLL_DELAY_MS = 1_500;
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Obtains the first QR for a freshly-created instance WITHOUT depending on the
+ * QRCODE_UPDATED webhook (Evolution does not reliably emit it).
+ *
+ * Two Evolution v2 behaviors are covered:
+ *   1. create with qrcode:true → QR base64 inline in the create response.
+ *   2. create returns no QR (Baileys socket not up yet) → the QR appears a
+ *      beat later on GET /instance/connect. We poll connect a few times until
+ *      `base64` shows up; early calls return only `{ count }`.
+ *
+ * Only called from the user-initiated POST /connect path, so a short bounded
+ * poll (≤ ~7.5s) is acceptable. NEVER call from the read-only getQRCode poll.
+ */
+async function obtainQr(instanceName: string, createResp: unknown): Promise<string | null> {
+  const fromCreate = cacheQrFromPayload(instanceName, createResp);
+  if (fromCreate) return fromCreate;
+
+  for (let attempt = 1; attempt <= QR_POLL_ATTEMPTS; attempt += 1) {
+    await sleep(QR_POLL_DELAY_MS);
+    try {
+      const resp = await evolutionApi.connectInstance(instanceName);
+      const qr = cacheQrFromPayload(instanceName, resp);
+      if (qr) {
+        logger.info({ instanceName, attempt }, 'whatsapp-service: QR obtido via connect poll');
+        return qr;
+      }
+      logger.info(
+        { instanceName, attempt, payloadKeys: Object.keys((resp as Record<string, unknown>) ?? {}) },
+        'whatsapp-service: connect poll sem QR ainda',
+      );
+    } catch (err) {
+      logger.warn({ err, instanceName, attempt }, 'whatsapp-service: connect poll falhou');
+    }
+  }
+  logger.warn({ instanceName }, 'whatsapp-service: QR não disponível após poll — frontend deve repolar /qr');
+  return null;
+}
+
 async function verifyAndFixWebhook(instanceName: string, url: string): Promise<void> {
   try {
     const res = await evolutionApi.getWebhook(instanceName);
@@ -255,7 +297,7 @@ export const whatsappService = {
       await evolutionApi.deleteInstance(instanceName);
       const createResp = await evolutionApi.createInstance(instanceName, url);
       await verifyAndFixWebhook(instanceName, url);
-      const qr = cacheQrFromPayload(instanceName, createResp);
+      const qr = await obtainQr(instanceName, createResp);
       return {
         status: qr ? 'qr_code' : 'connecting',
         qrCode: qr,
@@ -267,7 +309,7 @@ export const whatsappService = {
     try {
       const createResp = await evolutionApi.createInstance(instanceName, url);
       await verifyAndFixWebhook(instanceName, url);
-      const qr = cacheQrFromPayload(instanceName, createResp);
+      const qr = await obtainQr(instanceName, createResp);
       logger.info({ instanceName, hasQr: Boolean(qr) }, 'whatsapp-service: instância criada');
       return {
         status: qr ? 'qr_code' : 'connecting',
@@ -286,7 +328,7 @@ export const whatsappService = {
         await evolutionApi.deleteInstance(instanceName);
         const createResp = await evolutionApi.createInstance(instanceName, url);
         await verifyAndFixWebhook(instanceName, url);
-        const qr = cacheQrFromPayload(instanceName, createResp);
+        const qr = await obtainQr(instanceName, createResp);
         return {
           status: qr ? 'qr_code' : 'connecting',
           qrCode: qr,
