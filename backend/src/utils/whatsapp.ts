@@ -1505,6 +1505,35 @@ export const resolveIncomingAuthor = (payload = {}, options = {}) => {
     };
   }
 
+  // FIX Evolution v2 @lid: key.remoteJidAlt carrega o telefone real (@s.whatsapp.net)
+  // do cliente. O campo raiz `sender` traz o número DONO da instância (bot), inútil
+  // como autor. Preferir remoteJidAlt antes de qualquer fallback por sender.
+  if (conversationKind === 'lid' && !fromMe) {
+    const altRaw = (() => {
+      const d = (payload?.data ?? payload ?? {});
+      const k = (d?.key ?? payload?.key ?? {});
+      const v = k?.remoteJidAlt;
+      return typeof v === 'string' && v.trim() ? v.trim() : null;
+    })();
+    if (altRaw && altRaw.toLowerCase().endsWith('@s.whatsapp.net')) {
+      const altDigits = altRaw.split('@')[0].replace(/\D/g, '');
+      const altCanon = normalizePhone(altRaw) || normalizePhone(altDigits);
+      if (
+        altCanon &&
+        !instanceNumbersSet.has(altCanon) &&
+        !senderMatchesPayloadInstanceIdentity(payload, altCanon, altRaw)
+      ) {
+        if (remoteJidOriginal) cacheLidToPhone(remoteJidOriginal, altCanon);
+        return {
+          authorPhone: altCanon, sourcePath: 'lid_remote_jid_alt', candidateType: 'remote_jid_alt',
+          confidence: 'high', resolutionRule: 'lid_remote_jid_alt', remoteJidOriginal,
+          sender, participant, pushName, fromMe, instanceNumbers: Array.from(instanceNumbersSet),
+          rejections, candidates: [],
+        };
+      }
+    }
+  }
+
   const primaryConnected =
     (Array.isArray(options?.connectedNumbers) && options.connectedNumbers[0]) ||
     options?.connectedNumber ||

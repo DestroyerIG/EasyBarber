@@ -111,6 +111,7 @@ export const resolveAuthorPhone = (payload: unknown): ResolvedAuthor => {
   }
 
   const remoteJid = (key?.remoteJid ?? null) as string | null;
+  const remoteJidAlt = (key?.remoteJidAlt ?? null) as string | null;
   const participant = (key?.participant ?? null) as string | null;
   const sender = (p?.sender ?? data?.sender ?? null) as string | null;
 
@@ -125,11 +126,18 @@ export const resolveAuthorPhone = (payload: unknown): ResolvedAuthor => {
     if (phone) return { phone, source: 'remoteJid', skip: false };
   }
 
-  // LID format: try participant first, then sender
+  // LID format: prefer participant, then remoteJidAlt (real @s.whatsapp.net),
+  // then sender. Evolution v2 puts the instance owner (bot) number in `sender`
+  // for @lid chats, so sender must be the last resort — the real customer phone
+  // arrives in key.remoteJidAlt.
   if (remoteJid?.endsWith('@lid')) {
     if (participant && !participant.endsWith('@lid')) {
       const phone = extractPhoneFromJid(participant);
       if (phone) return { phone, source: 'participant_lid', skip: false };
+    }
+    if (remoteJidAlt && remoteJidAlt.endsWith('@s.whatsapp.net')) {
+      const phone = extractPhoneFromJid(remoteJidAlt);
+      if (phone) return { phone, source: 'remote_jid_alt_lid', skip: false };
     }
     if (sender) {
       const phone = extractPhoneFromJid(sender);

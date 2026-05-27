@@ -1757,6 +1757,7 @@ export const handleIncomingMessage = async (
     phoneExtraction?.sourcePath &&
     (
       phoneExtraction.sourcePath.includes('participant') ||
+      phoneExtraction.resolutionRule === 'lid_remote_jid_alt' ||
       phoneExtraction.resolutionRule === 'lid_from_fallback_promoted' ||
       phoneExtraction.resolutionRule === 'lid_sender_fallback_promoted' ||
       phoneExtraction.resolutionRule === 'lid_cache' ||
