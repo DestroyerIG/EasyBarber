@@ -1,4 +1,5 @@
 import Image from 'next/image';
+import Link from 'next/link';
 import easyBarberLogo from '@/icons/easybarber.png';
 
 const defaultContactUrl =
@@ -62,8 +63,8 @@ export function PublicFooter() {
             .
           </p>
           <div className="flex items-center gap-4">
-            <a href="#" className="hover:text-gray-300">Termos</a>
-            <a href="#" className="hover:text-gray-300">Privacidade</a>
+            <Link href="/termos" className="hover:text-gray-300">Termos</Link>
+            <Link href="/privacidade" className="hover:text-gray-300">Privacidade</Link>
           </div>
         </div>
       </div>
