@@ -20,7 +20,9 @@ type StatusFilter = 'todos' | 'confirmado' | 'concluido' | 'cancelado';
 export function AppointmentModule() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState(getToday());
+  // Inicia vazio: getToday() depende da hora local e divergiria entre SSR (UTC)
+  // e cliente (BR), causando hydration mismatch (React #418). Definido no mount.
+  const [selectedDate, setSelectedDate] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('todos');
   const [showModal, setShowModal] = useState(false);
@@ -35,6 +37,7 @@ export function AppointmentModule() {
   const [slotsLoading, setSlotsLoading] = useState(false);
 
   const loadAppointments = useCallback(async () => {
+    if (!selectedDate) return;
     try {
       setLoading(true);
       const params: Record<string, string> = { date: selectedDate, view: viewMode };
@@ -46,6 +49,10 @@ export function AppointmentModule() {
       setLoading(false);
     }
   }, [selectedDate, showToast, viewMode]);
+
+  useEffect(() => {
+    setSelectedDate(getToday());
+  }, []);
 
   useEffect(() => {
     loadAppointments();
@@ -145,14 +152,16 @@ export function AppointmentModule() {
         <StatsCard label="Cancelados" value={stats.cancelados} icon={XCircle} color="text-red-400" />
       </div>
 
-      <DateNavigationBar
-        selectedDate={selectedDate}
-        viewMode={viewMode}
-        statusFilter={statusFilter}
-        onDateChange={setSelectedDate}
-        onViewModeChange={setViewMode}
-        onStatusFilterChange={setStatusFilter}
-      />
+      {selectedDate && (
+        <DateNavigationBar
+          selectedDate={selectedDate}
+          viewMode={viewMode}
+          statusFilter={statusFilter}
+          onDateChange={setSelectedDate}
+          onViewModeChange={setViewMode}
+          onStatusFilterChange={setStatusFilter}
+        />
+      )}
 
       {/* Appointments List */}
       {loading ? (
