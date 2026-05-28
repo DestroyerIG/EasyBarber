@@ -125,6 +125,16 @@ Checklist:
 - `barbershops.whatsapp_instance_name` configurado para o tenant.
 - Plano/status permite `whatsapp_automation`.
 
+## Lembretes não enviados
+
+Checklist:
+
+- Processo do backend acordado quando o cron deveria rodar (hospedagem que hiberna precisa de keep-alive, ex.: UptimeRobot).
+- `BUSINESS_TIMEZONE` correto (servidor em UTC; sem o fuso o alvo do lembrete sai errado).
+- Agendamento com status `confirmado` e `reminderSent=false`.
+- Janela: o cron busca agendamentos ~2h à frente, a cada 10 minutos.
+- WhatsApp conectado e envio funcionando para o tenant.
+
 ## Rate Limit
 
 Limites principais:

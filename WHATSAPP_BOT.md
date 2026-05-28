@@ -6,14 +6,14 @@ Guia técnico do módulo WhatsApp.
 
 Implementação atual:
 
-- Backend EasyBarber consome Evolution API v1 por HTTP.
+- Backend EasyBarber consome Evolution API v2 por HTTP.
 - Evolution API roda como serviço externo.
 - Frontend chama apenas endpoints internos do backend.
 
 Fluxo:
 
 ```text
-Frontend -> Backend EasyBarber -> Evolution API v1
+Frontend -> Backend EasyBarber -> Evolution API v2
 ```
 
 ## Pré-requisitos
@@ -21,7 +21,7 @@ Frontend -> Backend EasyBarber -> Evolution API v1
 - Backend rodando.
 - Banco com migrations até `migration_v19_business_days_and_intervals.sql`.
 - Plano com feature `whatsapp_automation` liberada.
-- Evolution API v1 acessível por URL pública.
+- Evolution API v2 acessível por URL pública.
 - Webhook configurado para o backend.
 
 ## Variáveis
@@ -31,12 +31,15 @@ WHATSAPP_PROVIDER=evolution
 EVOLUTION_API_URL=https://sua-evolution.com
 EVOLUTION_API_KEY=sua_chave
 EVOLUTION_INSTANCE_NAME=easybarber
-EVOLUTION_WEBHOOK_URL=https://sua-api.com/api/v1/whatsapp/webhook
+BACKEND_WEBHOOK_BASE_URL=https://sua-api.com/api/v1/whatsapp/webhook
+EVOLUTION_WEBHOOK_URL=
 EVOLUTION_API_TIMEOUT_MS=10000
 WHATSAPP_WEBHOOK_BODY_LIMIT=6mb
 WHATSAPP_SESSION_TIMEOUT_MS=1800000
 WHATSAPP_INSTANCE_BARBERSHOP_MAP=
 ```
+
+`BACKEND_WEBHOOK_BASE_URL` é o nome preferido para a URL pública do webhook. `EVOLUTION_WEBHOOK_URL` é mantido como alias legado e só é usado como fallback quando o novo nome está vazio. Sem barra final.
 
 `WHATSAPP_INSTANCE_BARBERSHOP_MAP` aceita JSON ou `key=value`, mas é fallback legado. A fonte de verdade multi-tenant é `barbershops.whatsapp_instance_name`.
 
@@ -129,6 +132,25 @@ O bot usa as preferências salvas em `/barbershop/settings` para gerar horários
 - `allowWalkins`: quando ativo, o bot informa que encaixes são aceitos ao não encontrar slots.
 
 Se a data escolhida cair em um dia fechado, o bot responde: `Hoje não estamos atendendo. Escolha outro dia.`
+
+## Lembretes Automáticos
+
+Um cron in-process (`src/services/cronService.ts`) envia lembretes de agendamento via WhatsApp:
+
+- Executa a cada 10 minutos (`*/10 * * * *`).
+- Busca agendamentos com status `confirmado`, `reminderSent=false`, que começam ~2h à frente.
+- Usa o template `reminderMessage` do `whatsappBotConfig` da barbearia ou um padrão.
+- Marca `reminderSent=true` após envio bem-sucedido.
+
+Agendamentos gravam `date`/`time` no relógio local da barbearia (BR), não UTC. Como o servidor (Render) roda em UTC, o alvo é calculado no fuso de negócio:
+
+```env
+BUSINESS_TIMEZONE=America/Sao_Paulo
+```
+
+Fallback de fuso: `APP_TIMEZONE`, depois `America/Sao_Paulo`. Em hospedagem que hiberna (ex.: Render free), mantenha o processo acordado (ex.: UptimeRobot) para o cron disparar.
+
+O mesmo serviço roda um segundo cron (`15 * * * *`) que marca assinaturas one-time vencidas como inadimplentes.
 
 ## Simulador
 

@@ -11,7 +11,7 @@ O projeto é dividido em:
 - PostgreSQL como banco principal.
 - Supabase Auth como provedor obrigatório de identidade.
 - Stripe e Asaas para billing.
-- Evolution API v1 externa para WhatsApp.
+- Evolution API v2 externa para WhatsApp.
 
 ## Funcionalidades
 
@@ -21,10 +21,12 @@ O projeto é dividido em:
 - Gestão de agendamentos, clientes, serviços e barbeiros.
 - Configuração operacional com dias de funcionamento, horários e intervalos de agenda.
 - Financeiro com receitas, despesas e relatórios.
-- Automação WhatsApp via Evolution API v1.
+- Automação WhatsApp via Evolution API v2.
+- Lembretes automáticos de agendamento via cron (2h antes, fuso da barbearia).
 - Billing híbrido: Stripe para cartão/assinatura e Asaas para Pix.
 - Controle de acesso por plano e status de assinatura.
 - Admin de plataforma com métricas, tenants, assinaturas, bloqueios e logs.
+- Páginas públicas de Termos de Uso (`/termos`) e Política de Privacidade (`/privacidade`).
 
 ## Stack
 
@@ -63,7 +65,7 @@ Route -> Middleware -> Controller -> Service -> Repository -> PostgreSQL
 WhatsApp:
 
 ```text
-Frontend -> Backend EasyBarber -> Evolution API v1 externa
+Frontend -> Backend EasyBarber -> Evolution API v2 externa
 ```
 
 Billing:
@@ -225,7 +227,7 @@ Veja API_DOCS.md para endpoints e contratos.
 
 ## WhatsApp
 
-- Provider atual: Evolution API v1 externa.
+- Provider atual: Evolution API v2 externa.
 - Webhook principal: `/api/v1/whatsapp/webhook`.
 - Tenant por instância: `barbershops.whatsapp_instance_name`.
 

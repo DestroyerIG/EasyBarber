@@ -69,7 +69,8 @@ Variáveis opcionais por módulo:
 
 - Stripe: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` e price IDs.
 - Asaas Pix: `ASAAS_API_KEY`, `ASAAS_BASE_URL`, `ASAAS_WEBHOOK_TOKEN`.
-- WhatsApp: `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE_NAME`, `EVOLUTION_WEBHOOK_URL`.
+- WhatsApp: `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE_NAME`, `BACKEND_WEBHOOK_BASE_URL` (alias legado: `EVOLUTION_WEBHOOK_URL`).
+- Lembretes: `BUSINESS_TIMEZONE` (padrão `America/Sao_Paulo`); servidor em UTC precisa do fuso da barbearia.
 - SMTP: opcional; não é usado para confirmação de autenticação no fluxo atual.
 
 `AUTH_PROVIDER_MODE` é obsoleto. Supabase Auth é obrigatório.

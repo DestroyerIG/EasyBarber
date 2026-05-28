@@ -52,7 +52,7 @@ ASAAS_WEBHOOK_TOKEN=<token>
 ```env
 EVOLUTION_API_URL=https://sua-evolution.com
 EVOLUTION_API_KEY=<api-key>
-EVOLUTION_WEBHOOK_URL=https://sua-api.render.com/api/v1/whatsapp/webhook
+BACKEND_WEBHOOK_BASE_URL=https://sua-api.render.com/api/v1/whatsapp/webhook
 ```
 
 ### Opcionais
@@ -61,9 +61,12 @@ EVOLUTION_WEBHOOK_URL=https://sua-api.render.com/api/v1/whatsapp/webhook
 LOG_LEVEL=info
 API_JSON_BODY_LIMIT=1mb
 WHATSAPP_WEBHOOK_BODY_LIMIT=6mb
+BUSINESS_TIMEZONE=America/Sao_Paulo
 VERCEL_PROJECT_PREFIX=barberpro-saas-2-0
 OTEL_ENABLED=false
 ```
+
+`BUSINESS_TIMEZONE` define o fuso usado pelo cron de lembretes. O servidor roda em UTC, mas os agendamentos gravam o relógio local da barbearia; sem essa variável o alvo dos lembretes pode sair errado. Padrão: `America/Sao_Paulo`.
 
 ---
 
