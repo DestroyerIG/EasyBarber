@@ -381,8 +381,8 @@ export const barbershopSettingsRepository = {
          custom_webhook_url
        ) VALUES (
          ${barbershopId}::uuid,
-         ${payload.openingTime},
-         ${payload.closingTime},
+         ${payload.openingTime}::time,
+         ${payload.closingTime}::time,
          ${payload.slotIntervalMinutes},
          ${payload.diasAbertos},
          ${payload.allowWalkins},
