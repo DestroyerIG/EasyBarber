@@ -70,6 +70,8 @@ import { initBotOrchestrator } from './bot/botOrchestrator.js';
 // @ts-ignore
 import { createEvolutionClient } from './services/whatsapp/client/evolutionClient.js';
 
+import { startReminderCron } from './services/cronService.js';
+
 // @ts-ignore
 import { getAsaasApiKeyDiagnostics } from './integrations/asaas/client.js';
 
@@ -587,6 +589,8 @@ const start = async (): Promise<void> => {
         );
       }
     );
+
+    startReminderCron();
   } catch (error) {
     logger.fatal(
       { err: error },
