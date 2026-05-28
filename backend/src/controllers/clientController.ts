@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { clientService } from '../services/clientService.js';
 import { sendSuccess, sendCreated } from '../utils/response.js';
+import { toAppointmentDto } from '../modules/appointments/appointment.serializer.js';
 import { createClientSchema, updateClientSchema } from '../validators/schemas/index.js';
 
 export { createClientSchema, updateClientSchema };
@@ -20,6 +21,11 @@ export const normalizeClientBody = (req: Request, res: Response, next: NextFunct
       && req.body.whatsapp !== ''
     ) {
       req.body.phone = req.body.whatsapp;
+    }
+
+    // Frontend envia birth_date (snake_case); schema espera birthDate (camelCase).
+    if (req.body.birthDate === undefined && req.body.birth_date !== undefined) {
+      req.body.birthDate = req.body.birth_date;
     }
   }
 
@@ -60,7 +66,7 @@ export const updateClient = async (req: Request, res: Response, next: NextFuncti
 export const getClientHistory = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const data = await clientService.getHistory(req.user.barbershopId!, req.params['id'] as string);
-    sendSuccess(res, data);
+    sendSuccess(res, (data as Parameters<typeof toAppointmentDto>[0][]).map(toAppointmentDto));
   } catch (error) {
     next(error);
   }

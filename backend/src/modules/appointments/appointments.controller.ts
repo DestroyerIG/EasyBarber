@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { sendSuccess, sendCreated } from '../../utils/response.js';
 import { appointmentsService } from './appointments.service.js';
+import { toAppointmentDto } from './appointment.serializer.js';
 import type { AppointmentStatus } from '../../types/domain.js';
 
 export const getAppointments = async (
@@ -10,7 +11,7 @@ export const getAppointments = async (
 ): Promise<void> => {
   try {
     const data = await appointmentsService.getAll(req.user.barbershopId!, req.query as never);
-    sendSuccess(res, data);
+    sendSuccess(res, data.map(toAppointmentDto));
   } catch (error) {
     next(error);
   }
@@ -23,7 +24,7 @@ export const createAppointment = async (
 ): Promise<void> => {
   try {
     const data = await appointmentsService.create(req.user.barbershopId!, req.body);
-    sendCreated(res, data);
+    sendCreated(res, toAppointmentDto(data));
   } catch (error) {
     next(error);
   }
@@ -40,7 +41,7 @@ export const updateAppointmentStatus = async (
       req.user.barbershopId!,
       req.body.status as AppointmentStatus
     );
-    sendSuccess(res, data);
+    sendSuccess(res, toAppointmentDto(data));
   } catch (error) {
     next(error);
   }
@@ -57,7 +58,7 @@ export const updateAppointment = async (
       req.user.barbershopId!,
       req.body
     );
-    sendSuccess(res, data);
+    sendSuccess(res, toAppointmentDto(data));
   } catch (error) {
     next(error);
   }
