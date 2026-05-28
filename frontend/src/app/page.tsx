@@ -99,14 +99,14 @@ export default function HomePage() {
             </p>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <Link href="/cadastro" className="btn-primary text-center text-base">
+              <Link href="/cadastro" className="btn-primary inline-flex items-center justify-center px-6 py-3 text-center text-base">
                 Começar agora
               </Link>
               <a
                 href={contactUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="rounded-xl bg-emerald-500 px-6 py-3 text-center text-base font-bold text-emerald-950 transition-colors hover:bg-emerald-400"
+                className="inline-flex items-center justify-center rounded-xl bg-emerald-500 px-6 py-3 text-center text-base font-bold text-emerald-950 transition-colors hover:bg-emerald-400"
               >
                 Entrar em contato
               </a>
@@ -144,7 +144,7 @@ export default function HomePage() {
         <section className="mx-auto max-w-7xl px-4 py-16 lg:px-8">
           <div className="grid gap-4 md:grid-cols-3">
             {benefits.map((benefit) => (
-              <article key={benefit.title} className="rounded-2xl border border-white/10 bg-dark-light p-6">
+              <article key={benefit.title} className="flex h-full flex-col rounded-2xl border border-white/10 bg-dark-light p-6">
                 <h2 className="text-xl font-black">{benefit.title}</h2>
                 <p className="mt-3 text-gray-400">{benefit.description}</p>
               </article>
@@ -163,7 +163,7 @@ export default function HomePage() {
 
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             {features.map((feature) => (
-              <article key={feature.title} className="rounded-2xl border border-white/10 bg-dark-light p-5 transition-all hover:-translate-y-1 hover:border-primary/40">
+              <article key={feature.title} className="flex h-full flex-col rounded-2xl border border-white/10 bg-dark-light p-5 transition-all hover:-translate-y-1 hover:border-primary/40">
                 <feature.icon className="h-8 w-8 text-primary" />
                 <h3 className="mt-4 text-lg font-bold">{feature.title}</h3>
                 <p className="mt-2 text-sm text-gray-400">{feature.description}</p>
@@ -191,11 +191,11 @@ export default function HomePage() {
                 href={contactUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="rounded-xl bg-emerald-500 px-6 py-3 text-center text-base font-bold text-emerald-950 transition-colors hover:bg-emerald-400"
+                className="inline-flex items-center justify-center rounded-xl bg-emerald-500 px-6 py-3 text-center text-base font-bold text-emerald-950 transition-colors hover:bg-emerald-400"
               >
                 Entrar em contato
               </a>
-              <Link href="/login" className="rounded-xl border border-white/25 px-6 py-3 text-center text-base font-semibold text-white hover:border-white">
+              <Link href="/login" className="inline-flex items-center justify-center rounded-xl border border-white/25 px-6 py-3 text-center text-base font-semibold text-white hover:border-white">
                 Fazer login
               </Link>
             </div>

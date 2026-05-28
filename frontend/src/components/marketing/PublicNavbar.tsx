@@ -13,12 +13,8 @@ const navItems = [
   { href: '#contato', label: 'Contato' },
 ];
 
-const defaultContactUrl =
-  'https://wa.me/5583991347023?text=Ol%C3%A1%2C%20quero%20conhecer%20o%20EasyBarber';
-
 export function PublicNavbar() {
   const [open, setOpen] = useState(false);
-  const contactUrl = process.env.NEXT_PUBLIC_WHATSAPP_CONTACT_URL || defaultContactUrl;
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-black/70 backdrop-blur-xl">
@@ -42,20 +38,12 @@ export function PublicNavbar() {
         </nav>
 
         <div className="hidden items-center gap-3 lg:flex">
-          <Link href="/login" className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-white transition-colors hover:border-white">
+          <Link href="/login" className="inline-flex items-center justify-center rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-white transition-colors hover:border-white">
             Login
           </Link>
-          <Link href="/cadastro" className="btn-primary px-5 py-2 text-sm">
+          <Link href="/cadastro" className="btn-primary inline-flex items-center justify-center px-5 py-2 text-sm">
             Cadastrar-se
           </Link>
-          <a
-            href={contactUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 transition-colors hover:bg-emerald-400"
-          >
-            Entrar em contato
-          </a>
         </div>
 
         <button
@@ -89,14 +77,6 @@ export function PublicNavbar() {
               <Link href="/cadastro" onClick={() => setOpen(false)} className="btn-primary text-center text-sm">
                 Cadastrar-se
               </Link>
-              <a
-                href={contactUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-lg bg-emerald-500 px-4 py-2 text-center text-sm font-semibold text-emerald-950"
-              >
-                Entrar em contato
-              </a>
             </div>
           </div>
         </div>
