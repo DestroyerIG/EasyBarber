@@ -37,6 +37,7 @@ import type { WhatsAppSession } from './whatsappSessionService.js';
 import { getBotConfig, getMenuOptions } from './whatsappConfigService.js';
 import { STEPS } from './whatsappConstants.js';
 import type { BotConfig } from './whatsappConstants.js';
+import { formatTimeHm } from './utils/timeUtils.js';
 import {
   handleCancelAppointment,
   handleConfirmCancel,
@@ -1407,7 +1408,7 @@ const handleChooseDateStep = async (
          AND status != 'cancelado'
     `
   );
-  const bookedTimes = bookedRows.map((row) => row.time.substring(0, 5));
+  const bookedTimes = bookedRows.map((row) => formatTimeHm(row.time));
   const serviceDuration = (sessionData.serviceDuration as number) || (businessSettings.slotIntervalMinutes ?? 30);
 
   const availableSlots = generateAvailableTimeSlots(
@@ -1507,7 +1508,7 @@ const handleChooseTimeStep = async (
            AND status != 'cancelado'
       `
     );
-    const bookedTimes = new Set(bookedRows.map((r) => r.time.substring(0, 5)));
+    const bookedTimes = new Set(bookedRows.map((r) => formatTimeHm(r.time)));
     const newSlots = availableSlots.filter((s) => !bookedTimes.has(s));
 
     if (!newSlots.length) {

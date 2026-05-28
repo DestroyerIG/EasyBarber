@@ -13,6 +13,7 @@ import { STEPS, RATING_TEXTS, BotConfig } from './whatsappConstants.js';
 import { updateSession } from './whatsappSessionService.js';
 import { formatMessage } from './whatsappMessageService.js';
 import { goBackToMainMenu } from './whatsappFlowService.js';
+import { formatTimeHm } from './utils/timeUtils.js';
 
 // ==================== UTILITÁRIO DE DATA (FIX Bug 5) ====================
 
@@ -81,7 +82,7 @@ export const handleCancelAppointment = async (
     let message = formatMessage(config.cancel_list_message) + '\n\n';
     appointments.forEach((appointment, index) => {
       const date = new Date(appointment.date).toLocaleDateString('pt-BR');
-      message += `${index + 1}️⃣ ${date} às ${appointment.time.substring(0, 5)}\n`;
+      message += `${index + 1}️⃣ ${date} às ${formatTimeHm(appointment.time)}\n`;
     });
     message += '\n⚠️ Clique no número do agendamento para cancelar ou digite 0️⃣ para voltar ao menu de atendimento';
 
@@ -156,7 +157,7 @@ export const handleRescheduleAppointment = async (
     let message = formatMessage(config.reschedule_list_message) + '\n\n';
     appointments.forEach((appointment, index) => {
       const date = new Date(appointment.date).toLocaleDateString('pt-BR');
-      message += `${index + 1}️⃣ ${date} às ${appointment.time.substring(0, 5)}\n`;
+      message += `${index + 1}️⃣ ${date} às ${formatTimeHm(appointment.time)}\n`;
     });
     message += '\n👉 Clique no número para reagendar ou digite 0️⃣ para voltar ao menu de atendimento';
 
