@@ -404,6 +404,20 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
               {loading ? 'Processando...' : isLogin ? 'Entrar' : 'Criar conta'}
             </button>
 
+            {!isLogin && (
+              <p className="text-center text-xs leading-relaxed text-gray-400">
+                Ao criar conta, você concorda com os{' '}
+                <Link href="/termos" target="_blank" className="text-primary hover:underline">
+                  Termos de Uso
+                </Link>{' '}
+                e a{' '}
+                <Link href="/privacidade" target="_blank" className="text-primary hover:underline">
+                  Política de Privacidade
+                </Link>
+                .
+              </p>
+            )}
+
             {/* Aviso de verificação — aparece só em casos de erro/timeout/conflito */}
             {verificationNotice && (
               <div className="rounded-xl border border-primary/30 bg-primary/10 p-4 text-sm text-primary">
