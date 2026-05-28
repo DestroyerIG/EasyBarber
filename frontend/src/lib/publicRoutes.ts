@@ -7,5 +7,7 @@ const isPathMatch = (pathname: string, paths: readonly string[]) => {
 export const publicAuthPaths = [...PUBLIC_AUTH_PATHS];
 
 export const isPublicAuthPath = (pathname: string) => {
-  return isPathMatch(pathname, PUBLIC_AUTH_PATHS);
+  // Landing ('/') é marketing público: sem sessão esperada, evita /auth/me e
+  // /auth/refresh dispararem 401 para visitantes anônimos. Match exato.
+  return pathname === '/' || isPathMatch(pathname, PUBLIC_AUTH_PATHS);
 };
