@@ -37,7 +37,7 @@ const normalizeParams = (params: QueryParams) => {
   const next: Record<string, string | number | boolean> = {};
 
   Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') {
+    if (value !== undefined && value !== null && value !== '' && value !== false) {
       next[key] = value;
     }
   });
