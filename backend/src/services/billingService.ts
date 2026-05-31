@@ -422,26 +422,31 @@ export const billingService = {
         throw new NotFoundError('Barbearia');
       }
 
-      const checkoutPlan = resolveCheckoutPlanFromBarbershop(barbershop);
+      const fallbackPlan = resolveCheckoutPlanFromBarbershop(barbershop);
       const requestedPlan = String(plan || '').trim().toLowerCase();
 
       if (requestedPlan && !VALID_PLANS.has(requestedPlan)) {
         throw new AppError('Plano inválido para checkout', 400, 'INVALID_PLAN');
       }
 
-      if (requestedPlan && requestedPlan !== checkoutPlan) {
+      // Honra o plano escolhido pelo usuário no checkout. Só recorre ao
+      // desired_plan/plan salvo quando nenhum plano válido é enviado na requisição.
+      const checkoutPlan =
+        requestedPlan && VALID_PLANS.has(requestedPlan) ? requestedPlan : fallbackPlan;
+
+      // Mantém o desired_plan sincronizado com a escolha do checkout para que o
+      // status de billing e a tela de pagamento reflitam o plano correto.
+      if (checkoutPlan !== fallbackPlan) {
+        await subscriptionRepository.setDesiredPlan(barbershopId, checkoutPlan);
         logger.info(
           {
             barbershopId,
-            requestedPlan,
-            desiredPlan: checkoutPlan,
+            requestedPlan: checkoutPlan,
+            previousDesiredPlan: fallbackPlan,
             subscriptionStatus: barbershop.subscription_status,
-            paymentRequired: true,
-            checkoutCreated: false,
-            paymentProvider: null,
-            reason: 'requested_plan_ignored_using_desired_plan',
+            reason: 'desired_plan_updated_from_checkout',
           },
-          'Checkout solicitado com plano diferente do desired_plan salvo'
+          'desired_plan atualizado a partir do plano selecionado no checkout'
         );
       }
 

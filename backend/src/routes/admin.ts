@@ -17,6 +17,9 @@ import {
   unblockUser,
   getAdminSubscriptions,
   resyncSubscription,
+  overridePlan,
+  overrideStatus,
+  cancelSubscriptionAdmin,
   getAdminAuditLogs,
   adminMetricsQuerySchema,
   adminTenantListQuerySchema,
@@ -25,6 +28,12 @@ import {
   adminActionParamsSchema,
   adminActionBodySchema,
 } from '../controllers/adminController.js';
+// @ts-ignore
+import {
+  adminOverridePlanBodySchema,
+  adminOverrideStatusBodySchema,
+  adminCancelSubscriptionBodySchema,
+} from '../validators/schemas/index.js';
 // @ts-ignore
 import {
   listCoupons,
@@ -50,6 +59,9 @@ router.patch('/users/:id/unblock', validate({ params: adminActionParamsSchema, b
 
 router.get('/subscriptions', validate({ query: adminSubscriptionListQuerySchema }), getAdminSubscriptions);
 router.post('/subscriptions/:id/resync', validate({ params: adminActionParamsSchema, body: adminActionBodySchema }), resyncSubscription);
+router.patch('/subscriptions/:id/plan', validate({ params: adminActionParamsSchema, body: adminOverridePlanBodySchema }), overridePlan);
+router.patch('/subscriptions/:id/status', validate({ params: adminActionParamsSchema, body: adminOverrideStatusBodySchema }), overrideStatus);
+router.post('/subscriptions/:id/cancel', validate({ params: adminActionParamsSchema, body: adminCancelSubscriptionBodySchema }), cancelSubscriptionAdmin);
 
 router.get('/logs', validate({ query: adminAuditLogQuerySchema }), getAdminAuditLogs);
 

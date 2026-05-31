@@ -9,6 +9,8 @@ import { auditRepository } from '../repositories/auditRepository.js';
 import { auditLogService } from './auditLogService.js';
 import { adminMetricsService } from './adminMetricsService.js';
 import { subscriptionService } from './subscriptionService.js';
+import { billingService } from './billingService.js';
+import { subscriptionRepository } from '../repositories/subscriptionRepository.js';
 import type { Request } from 'express';
 
 interface AuthUser {
@@ -424,5 +426,110 @@ export const adminService = {
 
       throw error;
     }
+  },
+
+  async overridePlan(
+    authUser: AuthUser | null,
+    tenantId: string,
+    body: { confirmation?: string; plan: string; reason?: string },
+    req: Request
+  ): Promise<unknown> {
+    ensureConfirmed(body.confirmation);
+
+    const VALID_PLANS = new Set(['basico', 'profissional', 'premium']);
+    if (!VALID_PLANS.has(body.plan)) {
+      throw new ValidationError('Plano inválido', [`plan deve ser um de: ${[...VALID_PLANS].join(', ')}`]);
+    }
+
+    const context = await subscriptionRepository.getBarbershopBillingContext(tenantId);
+    if (!context) throw new NotFoundError('Barbearia');
+
+    await subscriptionRepository.updateSubscriptionState(tenantId, { plan: body.plan });
+    await subscriptionRepository.setDesiredPlan(tenantId, body.plan);
+
+    await auditLogService.logAdminAction({
+      req,
+      actionType: 'SUBSCRIPTION_PLAN_OVERRIDE',
+      ...actorPayload(authUser),
+      targetBarbershopId: tenantId,
+      resourceType: 'subscription',
+      resourceId: tenantId,
+      details: {
+        previousPlan: context.plan,
+        newPlan: body.plan,
+        reason: body.reason || null,
+      },
+    });
+
+    logger.info({ tenantId, previousPlan: context.plan, newPlan: body.plan }, 'Admin: plano sobrescrito manualmente');
+    return { tenantId, plan: body.plan };
+  },
+
+  async overrideStatus(
+    authUser: AuthUser | null,
+    tenantId: string,
+    body: { confirmation?: string; status: string; reason?: string },
+    req: Request
+  ): Promise<unknown> {
+    ensureConfirmed(body.confirmation);
+
+    const VALID_STATUSES = new Set(['active', 'trialing', 'pending', 'past_due', 'unpaid', 'canceled', 'incomplete']);
+    if (!VALID_STATUSES.has(body.status)) {
+      throw new ValidationError('Status inválido', [`status deve ser um de: ${[...VALID_STATUSES].join(', ')}`]);
+    }
+
+    const context = await subscriptionRepository.getBarbershopBillingContext(tenantId);
+    if (!context) throw new NotFoundError('Barbearia');
+
+    await subscriptionRepository.updateSubscriptionState(tenantId, {
+      subscriptionStatus: body.status as 'active' | 'trialing' | 'pending' | 'past_due' | 'unpaid' | 'canceled' | 'incomplete',
+    });
+
+    await auditLogService.logAdminAction({
+      req,
+      actionType: 'SUBSCRIPTION_STATUS_OVERRIDE',
+      ...actorPayload(authUser),
+      targetBarbershopId: tenantId,
+      resourceType: 'subscription',
+      resourceId: tenantId,
+      details: {
+        previousStatus: context.subscription_status,
+        newStatus: body.status,
+        reason: body.reason || null,
+      },
+    });
+
+    logger.info({ tenantId, previousStatus: context.subscription_status, newStatus: body.status }, 'Admin: status sobrescrito manualmente');
+    return { tenantId, subscriptionStatus: body.status };
+  },
+
+  async cancelSubscription(
+    authUser: AuthUser | null,
+    tenantId: string,
+    body: ResyncBody,
+    req: Request
+  ): Promise<unknown> {
+    ensureConfirmed(body.confirmation);
+
+    const context = await subscriptionRepository.getBarbershopBillingContext(tenantId);
+    if (!context) throw new NotFoundError('Barbearia');
+
+    const result = await billingService.cancelSubscription(tenantId);
+
+    await auditLogService.logAdminAction({
+      req,
+      actionType: 'SUBSCRIPTION_CANCELED',
+      ...actorPayload(authUser),
+      targetBarbershopId: tenantId,
+      resourceType: 'subscription',
+      resourceId: tenantId,
+      details: {
+        previousStatus: context.subscription_status,
+        plan: context.plan,
+      },
+    });
+
+    logger.info({ tenantId, previousStatus: context.subscription_status }, 'Admin: assinatura cancelada manualmente');
+    return result;
   },
 };

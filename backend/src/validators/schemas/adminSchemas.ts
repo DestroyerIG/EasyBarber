@@ -51,9 +51,21 @@ export const adminAuditLogQuerySchema = paginationQuerySchema.extend({
 export const adminActionParamsSchema = idSchema;
 export const adminActionBodySchema = actionBodySchema;
 
+export const adminOverridePlanBodySchema = actionBodySchema.extend({
+  plan: z.enum(['basico', 'profissional', 'premium']),
+});
+
+export const adminOverrideStatusBodySchema = actionBodySchema.extend({
+  status: z.enum(['active', 'trialing', 'pending', 'past_due', 'unpaid', 'canceled', 'incomplete']),
+});
+
+export const adminCancelSubscriptionBodySchema = actionBodySchema;
+
 export type AdminMetricsQuery = z.infer<typeof adminMetricsQuerySchema>;
 export type AdminTenantListQuery = z.infer<typeof adminTenantListQuerySchema>;
 export type AdminSubscriptionListQuery = z.infer<typeof adminSubscriptionListQuerySchema>;
 export type AdminAuditLogQuery = z.infer<typeof adminAuditLogQuerySchema>;
 export type AdminActionParams = z.infer<typeof adminActionParamsSchema>;
 export type AdminActionBody = z.infer<typeof adminActionBodySchema>;
+export type AdminOverridePlanBody = z.infer<typeof adminOverridePlanBodySchema>;
+export type AdminOverrideStatusBody = z.infer<typeof adminOverrideStatusBodySchema>;

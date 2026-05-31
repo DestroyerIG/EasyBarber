@@ -109,6 +109,33 @@ export const resyncSubscription = async (req: Request, res: Response, next: Next
   }
 };
 
+export const overridePlan = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const data = await adminService.overridePlan(req.user, req.params['id'] as string, req.body, req);
+    sendSuccess(res, data);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const overrideStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const data = await adminService.overrideStatus(req.user, req.params['id'] as string, req.body, req);
+    sendSuccess(res, data);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const cancelSubscriptionAdmin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const data = await adminService.cancelSubscription(req.user, req.params['id'] as string, req.body, req);
+    sendSuccess(res, data);
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getAdminAuditLogs = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const result = await adminService.listAuditLogs(req.query) as { data: unknown[]; meta: import('../utils/response.js').PaginationMeta };

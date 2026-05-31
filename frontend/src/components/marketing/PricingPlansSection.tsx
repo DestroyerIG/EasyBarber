@@ -259,15 +259,36 @@ export function PricingPlansSection({
     setPixAppliedCoupon(null);
 
     try {
+      // 1. Valida o cupom (mostra o desconto ao usuário).
       const result = await billingApi.validateCoupon(pixCheckoutPlanId, code);
       setPixAppliedCoupon(result);
+
+      // 2. Regenera a cobrança Pix imediatamente para que o QR Code (e o valor
+      //    escaneado no banco) já reflita o desconto, sem exigir um segundo clique.
+      const hasCpfCnpj = await ensureCpfCnpjForPix(pixCheckoutPlanId);
+      if (!hasCpfCnpj) return;
+
+      const session = await billingApi.createCheckoutSession(pixCheckoutPlanId, 'pix', code);
+
+      if ('type' in session && session.type === 'FREE_ACTIVATION') {
+        showToast('Cupom aplicado: plano ativado gratuitamente!', 'success');
+        router.push('/dashboard');
+        return;
+      }
+
+      if ('provider' in session && session.provider === 'asaas') {
+        setPixCheckout(session);
+        persistPixCheckout(session, pixCheckoutPlanId);
+        showToast('Cupom aplicado. QR Code atualizado com desconto.', 'success');
+      }
     } catch (error: unknown) {
       const errorCode = getApiErrorCode(error);
       const msg =
         errorCode === 'INVALID_COUPON'
           ? 'Cupom inválido ou expirado.'
-          : getApiErrorMessage(error, 'Falha ao validar cupom.');
+          : getApiErrorMessage(error, 'Falha ao aplicar cupom.');
       setPixCouponError(msg);
+      setPixAppliedCoupon(null);
     } finally {
       setPixValidatingCoupon(false);
     }

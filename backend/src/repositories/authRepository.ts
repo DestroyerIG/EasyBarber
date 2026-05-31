@@ -573,8 +573,8 @@ export const authRepository = {
       barbershopName,
       ownerName,
       whatsapp,
-      cpfCnpj: _cpfCnpj,
-      desiredPlan: _desiredPlan,
+      cpfCnpj,
+      desiredPlan,
       passwordHash,
     }: {
       email: string;
@@ -587,14 +587,18 @@ export const authRepository = {
       passwordHash: string;
     }
   ): Promise<Record<string, unknown> | null> {
+    const normalizedCpfCnpj = normalizeCpfCnpj(cpfCnpj);
+
     try {
       const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         INSERT INTO pending_registrations (
           email, supabase_user_id, barbershop_name, owner_name, whatsapp,
+          cpf_cnpj, desired_plan,
           password_hash, auth_provider, status, verification_sent_at
         )
         VALUES (
           ${email}, ${uuidOrNull(supabaseUserId)}, ${barbershopName}, ${ownerName}, ${whatsapp},
+          ${normalizedCpfCnpj}, ${desiredPlan},
           ${passwordHash}, 'supabase', 'pending', NOW()
         )
         ON CONFLICT (email) DO UPDATE SET
@@ -602,6 +606,8 @@ export const authRepository = {
           barbershop_name      = EXCLUDED.barbershop_name,
           owner_name           = EXCLUDED.owner_name,
           whatsapp             = EXCLUDED.whatsapp,
+          cpf_cnpj             = COALESCE(EXCLUDED.cpf_cnpj, pending_registrations.cpf_cnpj),
+          desired_plan         = COALESCE(EXCLUDED.desired_plan, pending_registrations.desired_plan),
           password_hash        = EXCLUDED.password_hash,
           auth_provider        = 'supabase',
           status               = 'pending',
@@ -609,8 +615,8 @@ export const authRepository = {
           confirmed_at         = NULL
         RETURNING
           id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
-          NULL::VARCHAR AS cpf_cnpj,
-          NULL::VARCHAR AS desired_plan,
+          cpf_cnpj,
+          desired_plan,
           password_hash, auth_provider, status,
           verification_sent_at, confirmed_at
       `);
@@ -687,8 +693,8 @@ export const authRepository = {
       const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT
           id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
-          NULL::VARCHAR AS cpf_cnpj,
-          NULL::VARCHAR AS desired_plan,
+          cpf_cnpj,
+          desired_plan,
           password_hash, auth_provider, status,
           verification_sent_at, confirmed_at
         FROM pending_registrations
@@ -723,8 +729,8 @@ export const authRepository = {
       const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT
           id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
-          NULL::VARCHAR AS cpf_cnpj,
-          NULL::VARCHAR AS desired_plan,
+          cpf_cnpj,
+          desired_plan,
           password_hash, auth_provider, status,
           verification_sent_at, confirmed_at
         FROM pending_registrations
@@ -774,8 +780,8 @@ export const authRepository = {
       const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT
           id, email, supabase_user_id, barbershop_name, owner_name, whatsapp,
-          NULL::VARCHAR AS cpf_cnpj,
-          NULL::VARCHAR AS desired_plan,
+          cpf_cnpj,
+          desired_plan,
           password_hash, auth_provider, status,
           verification_sent_at, confirmed_at
         FROM pending_registrations

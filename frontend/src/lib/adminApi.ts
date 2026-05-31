@@ -115,6 +115,27 @@ export const adminApi = {
     return response.data;
   },
 
+  async overrideSubscriptionPlan(tenantId: string, plan: string, reason?: string) {
+    const response = await api.patch(`/admin/subscriptions/${tenantId}/plan`, {
+      ...actionPayload(reason),
+      plan,
+    });
+    return response.data;
+  },
+
+  async overrideSubscriptionStatus(tenantId: string, status: string, reason?: string) {
+    const response = await api.patch(`/admin/subscriptions/${tenantId}/status`, {
+      ...actionPayload(reason),
+      status,
+    });
+    return response.data;
+  },
+
+  async cancelSubscriptionAdmin(tenantId: string, reason?: string) {
+    const response = await api.post(`/admin/subscriptions/${tenantId}/cancel`, actionPayload(reason));
+    return response.data;
+  },
+
   async getAuditLogs(params: QueryParams = {}): Promise<PaginatedAdminResponse<AdminAuditLog>> {
     const response = await api.get('/admin/logs', {
       params: normalizeParams(params),

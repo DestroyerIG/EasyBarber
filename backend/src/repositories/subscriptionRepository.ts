@@ -132,6 +132,22 @@ export const subscriptionRepository = {
     }
   },
 
+  async setDesiredPlan(barbershopId: string, desiredPlan: string, _client: unknown = null): Promise<Record<string, unknown> | null> {
+    if (!barbershopId || !desiredPlan) {
+      return null;
+    }
+
+    const result = await prisma.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
+      UPDATE barbershops
+         SET desired_plan = ${desiredPlan}::text,
+             subscription_updated_at = CURRENT_TIMESTAMP
+       WHERE id = ${barbershopId}::uuid
+      RETURNING id, desired_plan
+    `);
+
+    return result[0] || null;
+  },
+
   async findByProviderCustomerId(provider: string, providerCustomerId: string, _client: unknown = null): Promise<Record<string, unknown> | null> {
     const result = await prisma.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
       SELECT id, name, owner_name, email, whatsapp, plan,
