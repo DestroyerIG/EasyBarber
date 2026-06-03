@@ -413,7 +413,7 @@ export function PricingPlansSection({
   };
 
   const isCurrentPlan = (planId: PlanId) => {
-    return currentPlan === planId && (subscriptionStatus === 'active' || subscriptionStatus === 'trialing');
+    return currentPlan === planId && subscriptionStatus === 'active';
   };
 
   const openCpfCnpjModal = (planId: PlanId, currentValue = '') => {

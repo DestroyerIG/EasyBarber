@@ -544,10 +544,12 @@ const buildMinimalPixPaymentPayload = ({
   customerId,
   amount,
   dueDate,
+  externalReference,
 }: {
   customerId: string;
   amount: number;
   dueDate?: unknown;
+  externalReference?: string | null;
 }): Record<string, unknown> => {
   const customer = typeof customerId === 'string' ? customerId.trim() : String(customerId || '').trim();
 
@@ -555,11 +557,12 @@ const buildMinimalPixPaymentPayload = ({
     throw new AppError('Customer Asaas inválido para cobrança Pix', 400, 'INVALID_ASAAS_CUSTOMER');
   }
 
-  const payload: MinimalPixPaymentPayload = {
+  const payload: MinimalPixPaymentPayload & { externalReference?: string } = {
     customer,
     billingType: 'PIX',
     value: normalizeCurrencyAmount(amount),
     dueDate: resolvePixDueDate(dueDate),
+    ...(externalReference ? { externalReference } : {}),
   };
 
   return removeAsaasEmptyFields(payload as unknown as Record<string, unknown>) as Record<string, unknown>;
@@ -1269,6 +1272,7 @@ export const asaasService = {
       customerId,
       amount: resolvedAmount,
       dueDate,
+      externalReference: externalReference ?? null,
     });
     const fieldTypes = buildFieldTypes(payload);
     const serverCurrentDate = new Date();
@@ -1379,6 +1383,7 @@ export const asaasService = {
       amount: resolvedAmount,
       dueDate: resolvedDueDate,
       idempotencyKey,
+      externalReference: buildExternalReference({ barbershopId: barbershop.id!, plan }),
     });
 
     const pixQrCode = payment?.id ? await resolvePixQrCode(payment.id) : null;
