@@ -58,28 +58,28 @@ export function PublicFooter() {
       <div className="border-t border-white/10">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-2 px-4 py-4 text-xs text-gray-500 lg:flex-row lg:px-8">
           <p>© {new Date().getFullYear()} EasyBarber. Todos os direitos reservados.</p>
-          <a
-            href={EASYCONNECT_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-2 transition-opacity hover:opacity-80"
-            aria-label="Powered by EasyConnect"
-          >
-            <span className="text-xs text-gray-500">Powered by</span>
-            <span className="inline-flex items-center rounded-md bg-white px-2 py-0.5">
-              <Image
-                src="/easyconnect-logo.svg"
-                alt="EasyConnect"
-                width={90}
-                height={26}
-                className="h-[26px] w-auto object-contain"
-                unoptimized
-              />
-            </span>
-          </a>
           <div className="flex items-center gap-4">
             <Link href="/termos" className="hover:text-gray-300">Termos</Link>
             <Link href="/privacidade" className="hover:text-gray-300">Privacidade</Link>
+            <a
+              href={EASYCONNECT_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 transition-opacity hover:opacity-80"
+              aria-label="Powered by EasyConnect"
+            >
+              <span className="text-xs text-gray-500">Powered by</span>
+              <span className="inline-flex items-center rounded-md bg-white px-2 py-0.5">
+                <Image
+                  src="/easyconnect-logo.svg"
+                  alt="EasyConnect"
+                  width={90}
+                  height={26}
+                  className="h-[26px] w-auto object-contain"
+                  unoptimized
+                />
+              </span>
+            </a>
           </div>
         </div>
       </div>
