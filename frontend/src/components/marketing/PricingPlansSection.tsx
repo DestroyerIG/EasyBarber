@@ -112,7 +112,7 @@ interface PricingPlansSectionProps {
 export function PricingPlansSection({
   sectionId = 'planos',
   title = 'Planos para cada fase da sua barbearia',
-  subtitle = 'Na primeira assinatura, qualquer plano inclui 7 dias grátis para você testar com previsibilidade comercial e operação organizada.',
+  subtitle = 'Teste 14 dias grátis com acesso completo ao plano Profissional — sem cartão, sem compromisso. Assine quando quiser para continuar.',
   currentPlan,
   subscriptionStatus,
   showHeader = true,
@@ -134,6 +134,9 @@ export function PricingPlansSection({
   const [pixValidatingCoupon, setPixValidatingCoupon] = useState(false);
   const [pixCouponError, setPixCouponError] = useState<string | null>(null);
   const [pixRegenerating, setPixRegenerating] = useState(false);
+  const [pixPreCheckoutPlanId, setPixPreCheckoutPlanId] = useState<PlanId | null>(null);
+  const [isPixPreCheckoutOpen, setIsPixPreCheckoutOpen] = useState(false);
+  const [generatingPixCharge, setGeneratingPixCharge] = useState(false);
   const { user } = useAuth();
   const { showToast } = useToast();
   const router = useRouter();
@@ -323,6 +326,92 @@ export function PricingPlansSection({
     }
   };
 
+  const closePixPreCheckout = () => {
+    if (generatingPixCharge) return;
+    setIsPixPreCheckoutOpen(false);
+    setPixPreCheckoutPlanId(null);
+    setPixCouponCode('');
+    setPixAppliedCoupon(null);
+    setPixCouponError(null);
+  };
+
+  const handleApplyPreCheckoutCoupon = async () => {
+    const code = pixCouponCode.trim();
+    if (!code || !pixPreCheckoutPlanId) return;
+
+    setPixValidatingCoupon(true);
+    setPixCouponError(null);
+    setPixAppliedCoupon(null);
+
+    try {
+      const result = await billingApi.validateCoupon(pixPreCheckoutPlanId, code);
+      setPixAppliedCoupon(result);
+    } catch (error: unknown) {
+      const errorCode = getApiErrorCode(error);
+      const msg =
+        errorCode === 'INVALID_COUPON'
+          ? 'Cupom inválido ou expirado.'
+          : getApiErrorMessage(error, 'Falha ao validar cupom.');
+      setPixCouponError(msg);
+      setPixAppliedCoupon(null);
+    } finally {
+      setPixValidatingCoupon(false);
+    }
+  };
+
+  const handleGeneratePixCharge = async () => {
+    if (!pixPreCheckoutPlanId) return;
+
+    setGeneratingPixCharge(true);
+
+    try {
+      const couponCode = pixAppliedCoupon ? pixCouponCode.trim() : undefined;
+      const session = await billingApi.createCheckoutSession(pixPreCheckoutPlanId, 'pix', couponCode);
+
+      if ('type' in session && session.type === 'FREE_ACTIVATION') {
+        showToast('Cupom aplicado: plano ativado gratuitamente!', 'success');
+        router.push('/dashboard');
+        return;
+      }
+
+      if (!('provider' in session) || session.provider !== 'asaas') {
+        showToast('Checkout Pix indisponível no momento. Tente novamente.', 'error');
+        return;
+      }
+
+      const planId = pixPreCheckoutPlanId;
+      setPixCheckout(session);
+      setPixCheckoutPlanId(planId);
+      persistPixCheckout(session, planId);
+      setIsPixPreCheckoutOpen(false);
+      setPixPreCheckoutPlanId(null);
+      setPixAppliedCoupon(null);
+      setPixCouponCode('');
+      setPixCouponError(null);
+      setIsPixModalOpen(true);
+      showToast(
+        couponCode
+          ? 'Cobrança Pix criada com desconto. Escaneie o QR Code.'
+          : 'Cobrança Pix criada. Escaneie o QR Code para concluir o pagamento.',
+        'success'
+      );
+    } catch (error: unknown) {
+      const errorCode = getApiErrorCode(error);
+
+      if (errorCode === 'CPF_CNPJ_REQUIRED') {
+        openCpfCnpjModal(pixPreCheckoutPlanId, barbershopCpfCnpj);
+        setIsPixPreCheckoutOpen(false);
+        showToast('Para continuar no Pix, informe o CPF/CNPJ da barbearia.', 'info');
+        return;
+      }
+
+      const message = getApiErrorMessage(error, 'Não foi possível gerar a cobrança Pix.');
+      showToast(message, 'error');
+    } finally {
+      setGeneratingPixCharge(false);
+    }
+  };
+
   const isCurrentPlan = (planId: PlanId) => {
     return currentPlan === planId && (subscriptionStatus === 'active' || subscriptionStatus === 'trialing');
   };
@@ -442,6 +531,13 @@ export function PricingPlansSection({
         if (!hasCpfCnpj) {
           return;
         }
+
+        setPixPreCheckoutPlanId(planId);
+        setPixCouponCode('');
+        setPixAppliedCoupon(null);
+        setPixCouponError(null);
+        setIsPixPreCheckoutOpen(true);
+        return;
       }
 
       const session = await billingApi.createCheckoutSession(planId, paymentMethod);
@@ -456,38 +552,13 @@ export function PricingPlansSection({
         return;
       }
 
-      if (paymentMethod === 'card') {
-        if (session.provider !== 'stripe') {
-          showToast('Checkout com cartão indisponível no momento. Tente novamente.', 'error');
-          return;
-        }
-
-        window.location.href = session.checkoutUrl;
+      if (session.provider !== 'stripe') {
+        showToast('Checkout com cartão indisponível no momento. Tente novamente.', 'error');
         return;
       }
 
-      if (session.provider !== 'asaas') {
-        showToast('Checkout Pix indisponível no momento. Tente novamente.', 'error');
-        return;
-      }
-
-      setPixCheckout(session);
-      setPixCheckoutPlanId(planId);
-      persistPixCheckout(session, planId);
-      setPixAppliedCoupon(null);
-      setPixCouponCode('');
-      setPixCouponError(null);
-      setIsPixModalOpen(true);
-      showToast('Cobrança Pix criada. Escaneie o QR Code para concluir o pagamento.', 'success');
+      window.location.href = session.checkoutUrl;
     } catch (error: unknown) {
-      const errorCode = getApiErrorCode(error);
-
-      if (paymentMethod === 'pix' && errorCode === 'CPF_CNPJ_REQUIRED') {
-        openCpfCnpjModal(planId, barbershopCpfCnpj);
-        showToast('Para continuar no Pix, informe o CPF/CNPJ da barbearia.', 'info');
-        return;
-      }
-
       const message = getApiErrorMessage(error, 'Não foi possível iniciar o checkout no momento.');
       showToast(message, 'error');
     } finally {
@@ -561,7 +632,7 @@ export function PricingPlansSection({
                   <span className="text-sm font-medium text-gray-400">/mês</span>
                 </p>
                 <p className="mt-2 inline-flex items-center rounded-full border border-emerald-400/35 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium leading-snug text-emerald-200 sm:text-xs">
-                  {`Teste gratuito por ${plan.trialDays} dias no cartão. No Pix, a ativação ocorre após a confirmação.`}
+                  14 dias grátis no cadastro · sem cartão obrigatório
                 </p>
               </div>
 
@@ -575,44 +646,152 @@ export function PricingPlansSection({
               </ul>
 
               <div className="mt-7 space-y-2">
-                <button
-                  type="button"
-                  onClick={() => handlePlanSelect(plan.id, 'card')}
-                  disabled={planBusy || current}
-                  className={[
-                    'w-full rounded-xl px-4 py-3 text-sm font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-75',
-                    current
-                      ? 'bg-emerald-500/20 text-emerald-300'
-                      : recommended
-                      ? 'bg-primary text-black hover:bg-orange-500'
-                      : 'bg-white text-black hover:bg-gray-200',
-                  ].join(' ')}
-                >
-                  {cardBusy ? 'Redirecionando...' : current ? 'Plano atual' : 'Assinar com Cartão'}
-                </button>
+                {!user ? (
+                  <>
+                    <a
+                      href="/cadastro"
+                      className={[
+                        'block w-full rounded-xl px-4 py-3 text-center text-sm font-bold transition-colors',
+                        recommended
+                          ? 'bg-primary text-black hover:bg-orange-500'
+                          : 'bg-white text-black hover:bg-gray-200',
+                      ].join(' ')}
+                    >
+                      Começar grátis
+                    </a>
+                    <p className="text-center text-[11px] text-gray-500">
+                      14 dias grátis · sem cartão no cadastro
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handlePlanSelect(plan.id, 'card')}
+                      disabled={planBusy || current}
+                      className={[
+                        'w-full rounded-xl px-4 py-3 text-sm font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-75',
+                        current
+                          ? 'bg-emerald-500/20 text-emerald-300'
+                          : recommended
+                          ? 'bg-primary text-black hover:bg-orange-500'
+                          : 'bg-white text-black hover:bg-gray-200',
+                      ].join(' ')}
+                    >
+                      {cardBusy ? 'Redirecionando...' : current ? 'Plano atual' : 'Assinar com Cartão'}
+                    </button>
 
-                <button
-                  type="button"
-                  onClick={() => handlePlanSelect(plan.id, 'pix')}
-                  disabled={planBusy || current}
-                  className={[
-                    'w-full rounded-xl border px-4 py-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-75',
-                    current
-                      ? 'border-emerald-300/40 bg-emerald-500/10 text-emerald-200'
-                      : 'border-cyan-300/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20',
-                  ].join(' ')}
-                >
-                  {pixBusy ? 'Gerando Pix...' : current ? 'Plano atual' : 'Pagar com Pix'}
-                </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePlanSelect(plan.id, 'pix')}
+                      disabled={planBusy || current}
+                      className={[
+                        'w-full rounded-xl border px-4 py-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-75',
+                        current
+                          ? 'border-emerald-300/40 bg-emerald-500/10 text-emerald-200'
+                          : 'border-cyan-300/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20',
+                      ].join(' ')}
+                    >
+                      {pixBusy ? 'Gerando Pix...' : current ? 'Plano atual' : 'Pagar com Pix'}
+                    </button>
 
-                <p className="text-center text-[11px] text-gray-500">
-                  Cartão abre checkout Stripe. Pix gera QR Code na tela para pagamento imediato.
-                </p>
+                    <p className="text-center text-[11px] text-gray-500">
+                      Cartão abre checkout Stripe. Pix gera QR Code na tela para pagamento imediato.
+                    </p>
+                  </>
+                )}
               </div>
             </article>
           );
         })}
       </div>
+
+      {/* ── Modal pré-checkout Pix: cupom opcional + gerar cobrança ── */}
+      <Modal
+        isOpen={isPixPreCheckoutOpen}
+        onClose={closePixPreCheckout}
+        title={pixPreCheckoutPlanId ? `Pagar com Pix · ${PLAN_MAP[pixPreCheckoutPlanId].name}` : 'Pagar com Pix'}
+        icon={QrCode}
+      >
+        <div className="space-y-5">
+          {pixPreCheckoutPlanId && (
+            <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+              <p className="font-semibold text-white">{PLAN_MAP[pixPreCheckoutPlanId].name}</p>
+              <p className="mt-0.5 text-xs text-gray-400">
+                {formatCurrency(PLAN_MAP[pixPreCheckoutPlanId].price)}/mês · pagamento único via Pix
+              </p>
+            </div>
+          )}
+
+          <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">Cupom de desconto (opcional)</p>
+
+            {pixAppliedCoupon ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-emerald-300 text-sm">
+                  <CheckCircle2 size={14} />
+                  <span>Cupom validado: <strong>{pixCouponCode.toUpperCase()}</strong></span>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 space-y-1 text-sm">
+                  <div className="flex justify-between text-gray-400">
+                    <span>Valor original</span>
+                    <span>{formatCurrency(pixAppliedCoupon.originalAmount)}</span>
+                  </div>
+                  <div className="flex justify-between text-rose-300">
+                    <span>Desconto</span>
+                    <span>-{formatCurrency(pixAppliedCoupon.discount)}</span>
+                  </div>
+                  <div className="flex justify-between text-white font-bold border-t border-white/10 pt-1 mt-1">
+                    <span>Total final</span>
+                    <span>{formatCurrency(pixAppliedCoupon.finalAmount)}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setPixAppliedCoupon(null); setPixCouponCode(''); setPixCouponError(null); }}
+                  disabled={generatingPixCharge}
+                  className="text-xs text-gray-400 transition hover:text-white disabled:opacity-50"
+                >
+                  Remover cupom
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    value={pixCouponCode}
+                    onChange={(e) => { setPixCouponCode(e.target.value.toUpperCase()); setPixCouponError(null); }}
+                    onKeyDown={(e) => e.key === 'Enter' && handleApplyPreCheckoutCoupon()}
+                    placeholder="Código do cupom"
+                    disabled={pixValidatingCoupon || generatingPixCharge}
+                    className="flex-1 rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary disabled:opacity-60"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleApplyPreCheckoutCoupon}
+                    disabled={pixValidatingCoupon || generatingPixCharge || !pixCouponCode.trim()}
+                    className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-black transition hover:bg-orange-500 disabled:opacity-60"
+                  >
+                    {pixValidatingCoupon ? 'Validando...' : 'Aplicar'}
+                  </button>
+                </div>
+                {pixCouponError && (
+                  <p className="text-xs text-rose-300">{pixCouponError}</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={handleGeneratePixCharge}
+            disabled={generatingPixCharge || pixValidatingCoupon}
+            className="w-full rounded-xl bg-cyan-400 px-4 py-3 text-sm font-bold text-black transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {generatingPixCharge ? 'Gerando cobrança...' : 'Gerar cobrança Pix'}
+          </button>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={Boolean(pixCheckout) && isPixModalOpen}

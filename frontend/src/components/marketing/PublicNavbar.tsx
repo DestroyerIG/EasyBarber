@@ -42,7 +42,7 @@ export function PublicNavbar() {
             Login
           </Link>
           <Link href="/cadastro" className="btn-primary inline-flex items-center justify-center px-5 py-2 text-sm">
-            Cadastrar-se
+            Começar grátis
           </Link>
         </div>
 
@@ -75,7 +75,7 @@ export function PublicNavbar() {
                 Login
               </Link>
               <Link href="/cadastro" onClick={() => setOpen(false)} className="btn-primary text-center text-sm">
-                Cadastrar-se
+                Começar grátis
               </Link>
             </div>
           </div>

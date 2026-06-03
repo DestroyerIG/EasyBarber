@@ -36,7 +36,7 @@ interface RegisterData {
   whatsapp: string;
   cpfCnpj: string;
   password: string;
-  desiredPlan: PlanId;
+  desiredPlan?: PlanId;
 }
 
 interface RegisterResult {

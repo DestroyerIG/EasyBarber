@@ -170,6 +170,7 @@ const COMMON_PASSWORDS = new Set([
 ]);
 
 const DEFAULT_PLAN = 'basico';
+const TRIAL_PLAN = 'profissional';
 const PASSWORD_HASH_PLACEHOLDER_PREFIX = 'supabase:';
 
 const PLATFORM_ADMIN_EMAILS = new Set(['contato@easyconnectcg.com.br']);
@@ -399,8 +400,8 @@ const registerWithSupabasePrimaryFlow = async ({
   emailRedirectTo,
 }: RegisterParams): Promise<RegisterResponse> => {
   const normalizedEmail = normalizeEmail(email);
-  const plan = DEFAULT_PLAN;
-  const onboardingDesiredPlan = desiredPlan || plan;
+  const plan = TRIAL_PLAN;
+  const onboardingDesiredPlan = desiredPlan || DEFAULT_PLAN;
   const registerStartedAt = Date.now();
   let currentStage = 'checking_existing_user';
 
@@ -692,7 +693,7 @@ const reconcileSupabaseConfirmedUser = async ({
           email: pendingReg.email as string,
           whatsapp: pendingReg.whatsapp as string,
           cpfCnpj: (pendingReg.cpf_cnpj as string) || null,
-          plan: DEFAULT_PLAN,
+          plan: TRIAL_PLAN,
           desiredPlan: (pendingReg.desired_plan as string) || DEFAULT_PLAN,
         });
         barbershopId = (createdBarbershop as Record<string, unknown>).id as string;
@@ -710,7 +711,7 @@ const reconcileSupabaseConfirmedUser = async ({
           email: normalizedEmail,
           whatsapp: '',
           cpfCnpj: null,
-          plan: DEFAULT_PLAN,
+          plan: TRIAL_PLAN,
           desiredPlan: DEFAULT_PLAN,
         });
         barbershopId = (createdBarbershop as Record<string, unknown>).id as string;

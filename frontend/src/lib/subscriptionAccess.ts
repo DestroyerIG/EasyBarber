@@ -85,7 +85,7 @@ const STATUS_MESSAGES: Record<SubscriptionStatus, string> = {
   pending: 'Pagamento pendente. Assim que a cobrança for confirmada, a funcionalidade será liberada.',
   past_due: 'Sua assinatura está com pagamento pendente. Regularize para retomar esta funcionalidade.',
   unpaid: 'Sua assinatura está inadimplente. Regularize o pagamento para retomar esta funcionalidade.',
-  incomplete: 'Finalize sua assinatura para liberar esta funcionalidade.',
+  incomplete: 'Seu período gratuito expirou. Assine um plano para continuar usando esta funcionalidade.',
   canceled: 'Sua assinatura foi cancelada. Reative um plano para usar esta funcionalidade.',
 };
 

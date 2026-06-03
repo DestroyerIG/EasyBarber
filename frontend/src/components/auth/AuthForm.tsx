@@ -7,8 +7,6 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
 import { PasswordInput } from '@/components/ui';
-import { isPlanId, PLAN_MAP, SAAS_PLANS, type PlanId } from '@/lib/plans';
-import { formatCurrency } from '@/lib/formatters';
 import api from '@/lib/api';
 import { getApiErrorCode, getApiErrorMessage } from '@/utils/handleApiError';
 import { formatCpfCnpj, isValidCpfCnpj, normalizeCpfCnpjDigits } from '@/utils/cpfCnpj';
@@ -22,13 +20,6 @@ interface AuthFormProps {
   selectedPlan?: string | null;
 }
 
-const resolveInitialPlan = (selectedPlan?: string | null): PlanId => {
-  if (selectedPlan && isPlanId(selectedPlan)) {
-    return selectedPlan;
-  }
-  return 'basico';
-};
-
 const isTimeoutError = (error: unknown): boolean => {
   if (!error || typeof error !== 'object') return false;
   const err = error as Record<string, unknown>;
@@ -41,7 +32,6 @@ const isTimeoutError = (error: unknown): boolean => {
 export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
   const [loading, setLoading] = useState(false);
   const [resendingVerification, setResendingVerification] = useState(false);
-  const [desiredPlan, setDesiredPlan] = useState<PlanId>(() => resolveInitialPlan(selectedPlan));
   const [showConfirmedNotice, setShowConfirmedNotice] = useState(false);
   const [verificationNotice, setVerificationNotice] = useState<string | null>(null);
   const [verificationEmail, setVerificationEmail] = useState('');
@@ -61,10 +51,6 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
   const router = useRouter();
 
   const isLogin = mode === 'login';
-
-  useEffect(() => {
-    setDesiredPlan(resolveInitialPlan(selectedPlan));
-  }, [selectedPlan]);
 
   useEffect(() => {
     if (!isLogin || typeof window === 'undefined') {
@@ -93,13 +79,6 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
     }
 
     setFormData((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const handlePlanChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selectedValue = e.target.value;
-    if (isPlanId(selectedValue)) {
-      setDesiredPlan(selectedValue);
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -135,7 +114,6 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
           whatsapp: formData.whatsapp,
           cpfCnpj: normalizedCpfCnpj,
           password: formData.password,
-          desiredPlan,
         });
 
         // ✅ Redireciona para tela de verificação após cadastro bem-sucedido
@@ -257,8 +235,8 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
           </p>
 
           {!isLogin && (
-            <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-2 text-sm text-primary">
-              Plano desejado: <strong>{PLAN_MAP[desiredPlan].name}</strong>
+            <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-300">
+              14 dias grátis · acesso completo ao Profissional
             </div>
           )}
         </section>
@@ -335,29 +313,6 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
                   )}
                 </div>
 
-                <div>
-                  <label
-                    htmlFor="desiredPlan"
-                    className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400"
-                  >
-                    Plano de assinatura
-                  </label>
-                  <select
-                    id="desiredPlan"
-                    name="desiredPlan"
-                    value={desiredPlan}
-                    onChange={handlePlanChange}
-                    className="input mt-1"
-                    aria-label="Plano de assinatura desejado"
-                  >
-                    {SAAS_PLANS.map((plan) => (
-                      <option key={plan.id} value={plan.id}>
-                        {plan.name} - {formatCurrency(plan.price)}/mês
-                      </option>
-                    ))}
-                  </select>
-                  <p className="mt-2 text-xs text-gray-400">{PLAN_MAP[desiredPlan].description}</p>
-                </div>
               </>
             )}
 
@@ -443,10 +398,9 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
               </div>
             )}
 
-            {!isLogin && desiredPlan !== 'basico' && (
+            {!isLogin && (
               <p className="text-xs text-gray-400">
-                Após verificar o e-mail e acessar sua conta, finalize a assinatura{' '}
-                {PLAN_MAP[desiredPlan].name} no dashboard.
+                Após verificar o e-mail você terá 14 dias de acesso gratuito ao plano Profissional. Assine quando quiser para continuar.
               </p>
             )}
           </form>

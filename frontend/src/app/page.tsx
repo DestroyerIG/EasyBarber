@@ -100,7 +100,7 @@ export default function HomePage() {
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Link href="/cadastro" className="btn-primary inline-flex items-center justify-center px-6 py-3 text-center text-base">
-                Começar agora
+                Começar grátis · 14 dias
               </Link>
               <a
                 href={contactUrl}
@@ -113,9 +113,10 @@ export default function HomePage() {
             </div>
 
             <div className="mt-5 flex flex-wrap gap-4 text-sm text-gray-400">
+              <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-emerald-300">14 dias grátis</span>
+              <span className="rounded-full border border-white/15 px-3 py-1">Sem cartão no cadastro</span>
               <span className="rounded-full border border-white/15 px-3 py-1">Setup rápido</span>
               <span className="rounded-full border border-white/15 px-3 py-1">Sem fidelidade rígida</span>
-              <span className="rounded-full border border-white/15 px-3 py-1">Fluxo comercial completo</span>
             </div>
           </div>
 

@@ -112,5 +112,23 @@ export const startReminderCron = (): void => {
     }
   });
 
+  cron.schedule('0 3 * * *', async () => {
+    try {
+      const expired = await prisma.$executeRaw`
+        UPDATE barbershops
+        SET subscription_status = 'incomplete'
+        WHERE subscription_status = 'trialing'
+          AND subscription_current_period_end < NOW()
+          AND provider_subscription_id IS NULL
+          AND stripe_subscription_id IS NULL
+      `;
+      if (expired > 0) {
+        logger.info({ expiredCount: expired }, 'Trials gratuitos expirados');
+      }
+    } catch (error) {
+      logger.error({ err: error }, 'Erro ao expirar trials gratuitos');
+    }
+  });
+
   logger.info('Cron de lembretes iniciado');
 };

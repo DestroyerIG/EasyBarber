@@ -498,8 +498,8 @@ export const authRepository = {
 
     try {
       const result = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
-        INSERT INTO barbershops (name, owner_name, email, whatsapp, plan, desired_plan, cpf_cnpj, subscription_status)
-        VALUES (${name}, ${ownerName}, ${email}, ${whatsapp}, ${plan}, ${desiredPlan}, ${normalizedCpfCnpj}, 'incomplete')
+        INSERT INTO barbershops (name, owner_name, email, whatsapp, plan, desired_plan, cpf_cnpj, subscription_status, subscription_current_period_end)
+        VALUES (${name}, ${ownerName}, ${email}, ${whatsapp}, ${plan}, ${desiredPlan}, ${normalizedCpfCnpj}, 'trialing', NOW() + INTERVAL '14 days')
         RETURNING id
       `);
       return result[0] ?? null;
