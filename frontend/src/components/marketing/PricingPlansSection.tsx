@@ -158,10 +158,13 @@ export function PricingPlansSection({
 
     try {
       const parsed = JSON.parse(raw) as PixCheckoutStoragePayload;
-      if (parsed?.provider === 'asaas' && parsed?.paymentId) {
+      const PENDING_STATUSES = new Set(['pending', 'incomplete']);
+      if (parsed?.provider === 'asaas' && parsed?.paymentId && PENDING_STATUSES.has(parsed?.status)) {
         const { planId, ...checkoutPayload } = parsed;
         setPixCheckout(checkoutPayload);
         setPixCheckoutPlanId(resolveStoredPlanId(planId));
+      } else {
+        window.sessionStorage.removeItem(PIX_STORAGE_KEY);
       }
     } catch {
       window.sessionStorage.removeItem(PIX_STORAGE_KEY);
@@ -184,6 +187,18 @@ export function PricingPlansSection({
     };
 
     window.sessionStorage.setItem(PIX_STORAGE_KEY, JSON.stringify(payload));
+  };
+
+  const clearPixCheckoutState = () => {
+    persistPixCheckout(null, null);
+    setPixCheckout(null);
+    setPixCheckoutPlanId(null);
+    setIsPixModalOpen(false);
+    setIsPixPreCheckoutOpen(false);
+    setPixPreCheckoutPlanId(null);
+    setPixAppliedCoupon(null);
+    setPixCouponCode('');
+    setPixCouponError(null);
   };
 
   const getStatusToastVariant = (status: SubscriptionStatus): 'success' | 'info' | 'error' => {
@@ -236,12 +251,12 @@ export function PricingPlansSection({
         expiresAt: updated.expiresAt || pixCheckout.expiresAt,
       };
 
-      setPixCheckout(nextCheckout);
-      persistPixCheckout(nextCheckout, pixCheckoutPlanId);
-
       if (updated.status === 'active') {
+        clearPixCheckoutState();
         showToast('Pagamento confirmado. Assinatura ativada.', 'success');
       } else {
+        setPixCheckout(nextCheckout);
+        persistPixCheckout(nextCheckout, pixCheckoutPlanId);
         const statusLabel = STATUS_LABEL[updated.status] || updated.status;
         showToast(`Status atualizado: ${statusLabel}.`, getStatusToastVariant(updated.status));
       }
@@ -274,6 +289,7 @@ export function PricingPlansSection({
       const session = await billingApi.createCheckoutSession(pixCheckoutPlanId, 'pix', code);
 
       if ('type' in session && session.type === 'FREE_ACTIVATION') {
+        clearPixCheckoutState();
         showToast('Cupom aplicado: plano ativado gratuitamente!', 'success');
         router.push('/dashboard');
         return;
@@ -369,6 +385,7 @@ export function PricingPlansSection({
       const session = await billingApi.createCheckoutSession(pixPreCheckoutPlanId, 'pix', couponCode);
 
       if ('type' in session && session.type === 'FREE_ACTIVATION') {
+        clearPixCheckoutState();
         showToast('Cupom aplicado: plano ativado gratuitamente!', 'success');
         router.push('/dashboard');
         return;
@@ -543,6 +560,7 @@ export function PricingPlansSection({
       const session = await billingApi.createCheckoutSession(planId, paymentMethod);
 
       if ('type' in session && session.type === 'FREE_ACTIVATION') {
+        clearPixCheckoutState();
         showToast('Plano ativado com sucesso! Aproveite o sistema.', 'success');
         router.push('/dashboard');
         return;
