@@ -16,6 +16,11 @@ module.exports = {
         'dark-light': '#1a1a1a',
         'dark-lighter': '#252525',
       },
+      fontWeight: {
+        // Space Grotesk max=700, Plus Jakarta Sans max=800. Clamp black to 800
+        // so Plus Jakarta Sans renders the true heaviest weight without browser synthesis.
+        black: '800',
+      },
       animation: {
         'fade-in': 'fadeIn 0.2s ease-out',
         'slide-up': 'slideUp 0.3s ease-out',

@@ -459,7 +459,7 @@ export const WhatsAppModule = () => {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         {/* Sidebar */}
         <div className="space-y-6">
-          <div className={`card border ${statusConfig.border} p-6 rounded-2xl relative overflow-hidden transition-all duration-500`}>
+          <div className={`card border ${statusConfig.border} p-4 sm:p-6 rounded-2xl relative overflow-hidden transition-all duration-500`}>
             <div className={`absolute top-0 right-0 w-2 h-full ${statusConfig.barColor} opacity-20`} />
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
               <Zap size={14} className="text-primary" /> Status da Conexão

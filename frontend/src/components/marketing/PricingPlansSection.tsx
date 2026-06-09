@@ -587,8 +587,8 @@ export function PricingPlansSection({
   return (
     <section id={sectionId} className={className}>
       {showHeader && (
-        <div className="mx-auto mb-10 max-w-3xl text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Planos</p>
+        <div className="mx-auto mb-6 sm:mb-10 max-w-3xl text-center">
+          <p className="section-eyebrow">Planos</p>
           <h2 className="mt-3 text-3xl font-black leading-tight sm:text-4xl">{title}</h2>
           <p className="mt-4 text-gray-400">{subtitle}</p>
           <p className="mt-3 text-sm text-gray-500">

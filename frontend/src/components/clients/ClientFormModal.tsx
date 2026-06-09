@@ -72,7 +72,7 @@ export function ClientFormModal({ isOpen, onClose, onSubmit, editingClient }: Cl
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
-          <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">Nome Completo</label>
+          <label className="field-label">Nome Completo</label>
           <input
             type="text"
             value={formData.name}
@@ -82,7 +82,7 @@ export function ClientFormModal({ isOpen, onClose, onSubmit, editingClient }: Cl
           />
         </div>
         <div className="space-y-2">
-          <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">Telefone / WhatsApp</label>
+          <label className="field-label">Telefone / WhatsApp</label>
           <input
             type="text"
             value={formData.phone}
@@ -92,7 +92,7 @@ export function ClientFormModal({ isOpen, onClose, onSubmit, editingClient }: Cl
           />
         </div>
         <div className="space-y-2">
-          <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">E-mail</label>
+          <label className="field-label">E-mail</label>
           <input
             type="email"
             value={formData.email}
@@ -102,7 +102,7 @@ export function ClientFormModal({ isOpen, onClose, onSubmit, editingClient }: Cl
           />
         </div>
         <div className="space-y-2">
-          <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">Data de Nascimento</label>
+          <label className="field-label">Data de Nascimento</label>
           <input
             type="date"
             value={formData.birthDate}
@@ -113,7 +113,7 @@ export function ClientFormModal({ isOpen, onClose, onSubmit, editingClient }: Cl
       </div>
 
       <div className="space-y-2">
-        <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">Endereço</label>
+        <label className="field-label">Endereço</label>
         <div className="relative">
           <MapPin size={18} className="absolute left-3 top-3 text-gray-600" />
           <input
@@ -127,7 +127,7 @@ export function ClientFormModal({ isOpen, onClose, onSubmit, editingClient }: Cl
       </div>
 
       <div className="space-y-2">
-        <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">Notas e Observações</label>
+        <label className="field-label">Notas e Observações</label>
         <textarea
           value={formData.notes}
           onChange={e => setFormData({ ...formData, notes: e.target.value })}

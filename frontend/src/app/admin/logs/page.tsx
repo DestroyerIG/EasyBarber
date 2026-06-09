@@ -147,7 +147,7 @@ export default function AdminLogsPage() {
           <button
             disabled={meta.page <= 1}
             onClick={() => setPage((current) => Math.max(1, current - 1))}
-            className="rounded-lg border border-white/10 px-3 py-1.5 disabled:opacity-40"
+            className="btn-ghost"
           >
             Anterior
           </button>
@@ -155,7 +155,7 @@ export default function AdminLogsPage() {
           <button
             disabled={meta.page >= meta.totalPages}
             onClick={() => setPage((current) => current + 1)}
-            className="rounded-lg border border-white/10 px-3 py-1.5 disabled:opacity-40"
+            className="btn-ghost"
           >
             Próxima
           </button>

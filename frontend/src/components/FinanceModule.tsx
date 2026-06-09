@@ -218,9 +218,9 @@ export const FinanceModule = ({
         title="Módulo Financeiro"
         description="Controle total de ganhos, gastos e saúde do seu negócio."
         action={
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-2">
             {exportAccess.allowed && (
-              <button onClick={exportToPDF} className="btn-secondary flex items-center gap-2 py-2.5 px-6">
+              <button onClick={exportToPDF} className="btn-secondary flex items-center gap-2 py-2.5 px-4 sm:px-6">
                 <FileText size={20} className="text-primary" />
                 PDF
               </button>
@@ -234,34 +234,34 @@ export const FinanceModule = ({
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="card p-6 rounded-2xl relative overflow-hidden group">
+        <div className="card p-4 sm:p-6 rounded-2xl relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-all">
             <TrendingUp size={80} />
           </div>
           <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Ganhos do Mês</p>
-          <h3 className="text-3xl font-black text-white">{formatCurrency(summary?.month.earnings || 0)}</h3>
+          <h3 className="text-2xl sm:text-3xl font-black text-white">{formatCurrency(summary?.month.earnings || 0)}</h3>
           <div className="mt-4 flex items-center gap-2 text-green-500 text-sm font-bold">
             <ArrowUpRight size={16} />
             <span>Receita de atendimentos</span>
           </div>
         </div>
-        <div className="card p-6 rounded-2xl relative overflow-hidden group">
+        <div className="card p-4 sm:p-6 rounded-2xl relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-all">
             <TrendingDown size={80} />
           </div>
           <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Gastos do Mês</p>
-          <h3 className="text-3xl font-black text-white">{formatCurrency(summary?.month.expenses || 0)}</h3>
+          <h3 className="text-2xl sm:text-3xl font-black text-white">{formatCurrency(summary?.month.expenses || 0)}</h3>
           <div className="mt-4 flex items-center gap-2 text-red-500 text-sm font-bold">
             <ArrowDownRight size={16} />
             <span>Registro manual de despesas</span>
           </div>
         </div>
-        <div className="bg-primary/5 border border-primary/20 p-6 rounded-2xl relative overflow-hidden group">
+        <div className="bg-primary/5 border border-primary/20 p-4 sm:p-6 rounded-2xl relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-all">
             <DollarSign size={80} className="text-primary" />
           </div>
           <p className="text-xs font-bold text-primary/60 uppercase tracking-widest mb-1">Lucro Líquido</p>
-          <h3 className="text-3xl font-black text-primary">{formatCurrency(summary?.month.profit || 0)}</h3>
+          <h3 className="text-2xl sm:text-3xl font-black text-primary">{formatCurrency(summary?.month.profit || 0)}</h3>
           <div className="mt-4 flex items-center gap-2 text-primary text-sm font-bold">
             <Activity size={16} />
             <span>Saldo real disponível</span>
@@ -270,16 +270,16 @@ export const FinanceModule = ({
       </div>
 
       {/* Tab Nav */}
-      <div className="flex p-1 bg-dark-light border border-gray-800 rounded-xl w-fit">
+      <div className="flex w-full p-1 sm:w-fit bg-dark-light border border-gray-800 rounded-xl">
         {(['dashboard', 'gastos'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-6 py-2 rounded-lg font-bold text-sm transition-all ${
+            className={`flex-1 sm:flex-none px-3 sm:px-6 py-2 rounded-lg font-bold text-sm transition-all ${
               activeTab === tab ? 'tab-active' : 'tab-inactive'
             }`}
           >
-            {tab === 'dashboard' ? 'Visão Geral' : 'Detalhamento de Gastos'}
+            {tab === 'dashboard' ? 'Visão Geral' : 'Gastos'}
           </button>
         ))}
       </div>
@@ -297,8 +297,8 @@ export const FinanceModule = ({
             </FeatureGate>
           </div>
           <div className="space-y-6">
-            <div className="card p-6 rounded-2xl">
-              <h3 className="text-sm font-bold text-white uppercase tracking-widest mb-6 flex items-center gap-2">
+            <div className="card p-4 sm:p-6 rounded-2xl">
+              <h3 className="text-sm font-bold text-white uppercase tracking-widest mb-4 sm:mb-6 flex items-center gap-2">
                 <Calendar size={18} className="text-primary" />
                 Resumo de Hoje
               </h3>

@@ -311,8 +311,8 @@ function PagamentoContent() {
         </button>
       </div>
 
-      <section className="mx-auto mt-10 grid w-full max-w-5xl gap-8 lg:grid-cols-[1.05fr_0.95fr]">
-        <div className="rounded-2xl border border-white/10 bg-dark-light p-7">
+      <section className="mx-auto mt-6 sm:mt-10 grid w-full max-w-5xl gap-6 sm:gap-8 lg:grid-cols-[1.05fr_0.95fr]">
+        <div className="rounded-2xl border border-white/10 bg-dark-light p-5 sm:p-7">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300/80">E-mail confirmado</p>
           <h1 className="mt-3 text-3xl font-black text-white">
             Finalize o pagamento para ativar sua conta
@@ -353,7 +353,7 @@ function PagamentoContent() {
           </ul>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-dark-light p-7">
+        <div className="rounded-2xl border border-white/10 bg-dark-light p-5 sm:p-7">
           <h2 className="text-xl font-black text-white">Escolha a forma de pagamento</h2>
           <p className="mt-2 text-sm text-gray-400">
             Status atual: <span className="font-semibold text-amber-200">{billingStatus?.subscriptionStatus || 'incomplete'}</span>

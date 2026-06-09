@@ -167,8 +167,8 @@ export function ResetPasswordView() {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(255,122,0,0.2),_rgba(0,0,0,0.92)_45%)] px-4 py-10">
-      <div className="mx-auto w-full max-w-xl rounded-2xl border border-white/10 bg-black/70 p-8 shadow-2xl shadow-black/40 backdrop-blur">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">EasyBarber</p>
+      <div className="mx-auto w-full max-w-xl rounded-2xl border border-white/10 bg-black/70 p-6 sm:p-8 shadow-2xl shadow-black/40 backdrop-blur">
+        <p className="section-eyebrow">EasyBarber</p>
         <h1 className="mt-3 text-3xl font-black text-white">Redefinir senha</h1>
 
         <p className="mt-4 text-sm text-gray-300">{message}</p>

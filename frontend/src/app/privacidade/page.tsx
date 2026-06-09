@@ -84,8 +84,8 @@ export default function PrivacidadePage() {
     <div className="min-h-screen bg-black text-white">
       <PublicNavbar />
 
-      <main id="main-content" className="mx-auto max-w-4xl px-4 py-16 lg:px-8">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Documentos legais</p>
+      <main id="main-content" className="mx-auto max-w-4xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8 lg:py-16">
+        <p className="section-eyebrow">Documentos legais</p>
         <h1 className="mt-3 text-3xl font-black sm:text-4xl">Política de Privacidade</h1>
         <p className="mt-3 text-sm text-gray-500">Última atualização: {LAST_UPDATE}</p>
 

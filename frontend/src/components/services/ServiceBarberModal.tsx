@@ -100,7 +100,7 @@ export const ServiceBarberModal = ({
         {activeTab === 'servicos' ? (
           <>
             <div className="space-y-2">
-              <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">Nome do Serviço</label>
+              <label className="field-label">Nome do Serviço</label>
               <input
                 required
                 type="text"
@@ -112,7 +112,7 @@ export const ServiceBarberModal = ({
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">Preço (R$)</label>
+                <label className="field-label">Preço (R$)</label>
                 <input
                   required
                   type="number"
@@ -124,7 +124,7 @@ export const ServiceBarberModal = ({
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">Duração (Min)</label>
+                <label className="field-label">Duração (Min)</label>
                 <input
                   required
                   type="number"
@@ -139,7 +139,7 @@ export const ServiceBarberModal = ({
         ) : (
           <>
             <div className="space-y-2">
-              <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">Nome do Barbeiro</label>
+              <label className="field-label">Nome do Barbeiro</label>
               <input
                 required
                 type="text"
@@ -150,7 +150,7 @@ export const ServiceBarberModal = ({
               />
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">URL da Foto (Opcional)</label>
+              <label className="field-label">URL da Foto (Opcional)</label>
               <div className="relative">
                 <Camera size={18} className="absolute left-3 top-3.5 text-gray-600" />
                 <input

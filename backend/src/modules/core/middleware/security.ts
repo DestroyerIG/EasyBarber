@@ -16,17 +16,22 @@ export function applySecurityMiddleware(app: Application): void {
           fontSrc: ["'self'"],
           objectSrc: ["'none'"],
           frameSrc: ["'none'"],
+          baseUri: ["'self'"],
+          formAction: ["'self'"],
         },
       },
       hsts: {
-        maxAge: 31536000,
+        maxAge: 63072000,
         includeSubDomains: true,
         preload: true,
       },
       referrerPolicy: {
         policy: 'strict-origin-when-cross-origin',
       },
+      crossOriginOpenerPolicy: { policy: 'same-origin' },
+      crossOriginResourcePolicy: { policy: 'same-origin' },
       crossOriginEmbedderPolicy: false,
+      permittedCrossDomainPolicies: { permittedPolicies: 'none' },
     })
   );
 

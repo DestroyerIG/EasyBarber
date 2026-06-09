@@ -42,7 +42,7 @@ export const ConnectionPanel = ({ waStatus, statusLoading, actionLoading, onConn
     </div>
     <div className="p-8">
       {statusLoading && (
-        <div className="flex flex-col items-center space-y-6 py-8">
+        <div className="empty-state">
           <Loader2 size={48} className="text-gray-600 animate-spin" />
           <p className="text-gray-500 text-sm">Verificando status do WhatsApp...</p>
         </div>
@@ -88,7 +88,7 @@ export const ConnectionPanel = ({ waStatus, statusLoading, actionLoading, onConn
       )}
 
       {!statusLoading && waStatus.status === 'pairing' && !waStatus.qrCode && (
-        <div className="flex flex-col items-center space-y-6 py-8">
+        <div className="empty-state">
           <div className="w-24 h-24 bg-amber-500/10 rounded-full flex items-center justify-center border-2 border-amber-500/30">
             <QrCode size={48} className="text-amber-500" />
           </div>
@@ -108,7 +108,7 @@ export const ConnectionPanel = ({ waStatus, statusLoading, actionLoading, onConn
       )}
 
       {!statusLoading && waStatus.status === 'connected' && (
-        <div className="flex flex-col items-center space-y-6 py-8">
+        <div className="empty-state">
           <div className="w-24 h-24 bg-green-500/10 rounded-full flex items-center justify-center border-2 border-green-500/30 animate-pulse">
             <CheckCircle size={48} className="text-green-500" />
           </div>
@@ -129,7 +129,7 @@ export const ConnectionPanel = ({ waStatus, statusLoading, actionLoading, onConn
       )}
 
       {!statusLoading && (waStatus.status === 'provider_unavailable' || waStatus.status === 'unavailable') && (
-        <div className="flex flex-col items-center space-y-6 py-8">
+        <div className="empty-state">
           <div className="w-24 h-24 bg-slate-500/10 rounded-full flex items-center justify-center border-2 border-slate-500/30">
             <WifiOff size={48} className="text-slate-400" />
           </div>
@@ -141,7 +141,7 @@ export const ConnectionPanel = ({ waStatus, statusLoading, actionLoading, onConn
       )}
 
       {!statusLoading && waStatus.status === 'instance_not_found' && (
-        <div className="flex flex-col items-center space-y-6 py-8">
+        <div className="empty-state">
           <div className="w-24 h-24 bg-yellow-500/10 rounded-full flex items-center justify-center border-2 border-yellow-500/30">
             <AlertTriangle size={48} className="text-yellow-500" />
           </div>
@@ -163,7 +163,7 @@ export const ConnectionPanel = ({ waStatus, statusLoading, actionLoading, onConn
       )}
 
       {!statusLoading && waStatus.status === 'error' && (
-        <div className="flex flex-col items-center space-y-6 py-8">
+        <div className="empty-state">
           <div className="w-24 h-24 bg-orange-500/10 rounded-full flex items-center justify-center border-2 border-orange-500/30">
             <AlertTriangle size={48} className="text-orange-500" />
           </div>
@@ -183,7 +183,7 @@ export const ConnectionPanel = ({ waStatus, statusLoading, actionLoading, onConn
       )}
 
       {!statusLoading && waStatus.status === 'disconnected' && (
-        <div className="flex flex-col items-center space-y-6 py-8">
+        <div className="empty-state">
           <div className="w-24 h-24 bg-red-500/10 rounded-full flex items-center justify-center border-2 border-red-500/30">
             <WifiOff size={48} className="text-red-500" />
           </div>

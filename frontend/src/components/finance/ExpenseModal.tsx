@@ -64,7 +64,7 @@ export function ExpenseModal({ isOpen, onClose, onSubmit, editingExpense }: Expe
       }
     >
       <div className="space-y-2">
-        <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">Descrição</label>
+        <label className="field-label">Descrição</label>
         <input
           type="text"
           value={formData.description}
@@ -76,7 +76,7 @@ export function ExpenseModal({ isOpen, onClose, onSubmit, editingExpense }: Expe
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">Categoria</label>
+          <label className="field-label">Categoria</label>
           <select
             value={formData.category}
             onChange={e => setFormData({ ...formData, category: e.target.value })}
@@ -89,7 +89,7 @@ export function ExpenseModal({ isOpen, onClose, onSubmit, editingExpense }: Expe
           </select>
         </div>
         <div className="space-y-2">
-          <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">Valor (R$)</label>
+          <label className="field-label">Valor (R$)</label>
           <input
             type="number"
             step="0.01"
@@ -102,7 +102,7 @@ export function ExpenseModal({ isOpen, onClose, onSubmit, editingExpense }: Expe
       </div>
 
       <div className="space-y-2">
-        <label className="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">Data</label>
+        <label className="field-label">Data</label>
         <input
           type="date"
           value={formData.date}

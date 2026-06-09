@@ -70,7 +70,7 @@ export default function SupabaseDebugPage() {
   return (
     <main className="min-h-screen bg-neutral-950 px-4 py-10 text-white">
       <section className="mx-auto max-w-3xl">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">EasyBarber</p>
+        <p className="section-eyebrow">EasyBarber</p>
         <h1 className="mt-3 text-3xl font-black">Debug Supabase</h1>
 
         <div className="mt-8 overflow-hidden rounded-lg border border-white/10">

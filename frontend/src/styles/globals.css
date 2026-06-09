@@ -2,6 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Base ───────────────────────────────────────────────────────────────────── */
+
 @layer base {
   * {
     margin: 0;
@@ -14,92 +16,117 @@
     font-family: var(--font-sans), sans-serif;
   }
 
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
+  h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display), sans-serif;
   }
 
-  /* Focus visible for keyboard navigation (a11y) */
   :focus-visible {
     @apply outline-2 outline-offset-2 outline-primary;
   }
 
-  /* Scrollbar */
-  ::-webkit-scrollbar {
-    width: 8px;
-  }
+  ::-webkit-scrollbar              { width: 8px; }
+  ::-webkit-scrollbar-track        { @apply bg-dark-light; }
+  ::-webkit-scrollbar-thumb        { @apply bg-primary rounded; }
+  ::-webkit-scrollbar-thumb:hover  { @apply bg-orange-400; }
 
-  ::-webkit-scrollbar-track {
-    @apply bg-dark-light;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    @apply bg-primary rounded;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-orange-400;
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
+/* ─── Components ─────────────────────────────────────────────────────────────── */
+
 @layer components {
-  /* Reusable card */
-  .card {
-    @apply bg-dark-light border border-white/5 rounded-xl p-6 transition-all hover:border-primary/20;
+
+  /* ── Buttons ─────────────────────────────────────────────────────────────── */
+
+  /* Base shared by all button variants */
+  .btn {
+    @apply inline-flex items-center justify-center font-bold transition-all
+           disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
-  /* Reusable input */
-  .input {
-    @apply w-full px-4 py-3 bg-black/50 border border-gray-700 rounded-lg text-white
-           placeholder-gray-500 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50
-           transition-all;
-  }
-
-  /* Reusable button primary */
   .btn-primary {
-    @apply px-6 py-3 bg-primary hover:bg-orange-600 text-black font-bold rounded-xl
-           transition-all hover:scale-[1.02] hover:shadow-lg hover:shadow-primary/20
-           disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
+    @apply btn px-6 py-3 rounded-xl bg-primary text-black
+           hover:bg-orange-600 hover:scale-[1.02] hover:shadow-lg hover:shadow-primary/20
+           disabled:hover:scale-100;
   }
 
-  /* Reusable button secondary */
   .btn-secondary {
-    @apply px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white
-           rounded-lg transition-all border border-white/5;
+    @apply btn px-4 py-2 rounded-lg bg-white/5 border border-white/5
+           text-gray-400 hover:bg-white/10 hover:text-white;
   }
 
-  /* Skeleton loading */
-  .skeleton {
-    @apply bg-gradient-to-r from-dark-light via-dark-lighter to-dark-light bg-[length:200%_100%]
-           animate-shimmer rounded-lg;
+  .btn-ghost {
+    @apply btn px-3 py-1.5 rounded-lg border border-white/10
+           text-gray-400 hover:bg-white/5 hover:text-white
+           disabled:opacity-40;
   }
 
-  /* Badge */
+  /* ── Form ────────────────────────────────────────────────────────────────── */
+
+  .input {
+    @apply w-full px-4 py-3 rounded-lg bg-black/50 border border-gray-700 text-white
+           placeholder-gray-500 transition-all
+           focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50;
+  }
+
+  /* Label above input fields */
+  .field-label {
+    @apply text-xs font-bold uppercase tracking-widest text-gray-400 pl-1;
+  }
+
+  /* ── Typography ──────────────────────────────────────────────────────────── */
+
+  /* Small uppercase label above section headings */
+  .section-eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.24em] text-primary/70;
+  }
+
+  /* ── Card ────────────────────────────────────────────────────────────────── */
+
+  .card {
+    @apply bg-dark-light border border-white/5 rounded-xl p-6 transition-all
+           hover:border-primary/20;
+  }
+
+  /* ── Badge ───────────────────────────────────────────────────────────────── */
+
   .badge {
     @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border;
   }
 
-  /* Modal backdrop */
+  /* ── Modal ───────────────────────────────────────────────────────────────── */
+
   .modal-backdrop {
-    @apply fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4
-           animate-fade-in;
+    @apply fixed inset-0 z-50 flex items-center justify-center p-4
+           bg-black/70 backdrop-blur-sm animate-fade-in;
   }
 
-  /* Modal content */
   .modal-content {
-    @apply bg-dark-light border border-white/10 rounded-2xl w-full max-w-lg max-h-[90vh]
-           overflow-y-auto animate-slide-up shadow-2xl;
+    @apply w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl
+           bg-dark-light border border-white/10 shadow-2xl animate-slide-up;
   }
 
-  /* Tab button active/inactive */
-  .tab-active {
-    @apply bg-primary text-black font-semibold;
+  /* ── Tabs ────────────────────────────────────────────────────────────────── */
+
+  .tab-active   { @apply bg-primary text-black font-semibold; }
+  .tab-inactive { @apply text-gray-400 hover:text-white hover:bg-white/5; }
+
+  /* ── States ──────────────────────────────────────────────────────────────── */
+
+  .skeleton {
+    @apply bg-gradient-to-r from-dark-light via-dark-lighter to-dark-light
+           bg-[length:200%_100%] animate-shimmer rounded-lg;
   }
-  .tab-inactive {
-    @apply text-gray-400 hover:text-white hover:bg-white/5;
+
+  /* Centered empty/loading state container */
+  .empty-state {
+    @apply flex flex-col items-center space-y-6 py-8;
   }
 }

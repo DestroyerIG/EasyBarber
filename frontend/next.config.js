@@ -26,6 +26,10 @@ const nextConfig = {
       process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL,
       'https://beiovtfhdpybinkxtqlb.supabase.co'
     );
+    // wss:// para Supabase Realtime
+    const supabaseWssOrigin = supabaseOrigin.replace(/^https:/, 'wss:');
+
+    const isProd = process.env.NODE_ENV === 'production';
 
     return [
       {
@@ -56,17 +60,31 @@ const nextConfig = {
             value: 'max-age=63072000; includeSubDomains; preload',
           },
           {
+            key: 'Cross-Origin-Opener-Policy',
+            value: 'same-origin',
+          },
+          {
+            key: 'Cross-Origin-Resource-Policy',
+            value: 'same-origin',
+          },
+          {
+            key: 'X-Permitted-Cross-Domain-Policies',
+            value: 'none',
+          },
+          {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
+              // unsafe-eval apenas em dev (Next.js HMR)
+              `script-src 'self' 'unsafe-inline'${isProd ? '' : " 'unsafe-eval'"}`,
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https:",
               "font-src 'self'",
-              `connect-src 'self' ${apiOrigin} ${PRODUCTION_BACKEND_ORIGIN} ${supabaseOrigin}`,
+              `connect-src 'self' ${apiOrigin} ${PRODUCTION_BACKEND_ORIGIN} ${supabaseOrigin} ${supabaseWssOrigin}`,
               "frame-ancestors 'none'",
               "base-uri 'self'",
               "form-action 'self'",
+              "object-src 'none'",
             ].join('; '),
           },
         ],

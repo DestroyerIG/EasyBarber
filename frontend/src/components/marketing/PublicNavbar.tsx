@@ -52,13 +52,14 @@ export function PublicNavbar() {
           className="rounded-lg border border-white/20 p-2 text-white lg:hidden"
           aria-label={open ? 'Fechar menu' : 'Abrir menu'}
           aria-expanded={open}
+          aria-controls="mobile-menu"
         >
           {open ? <X size={20} /> : <Menu size={20} />}
         </button>
       </div>
 
       {open && (
-        <div className="border-t border-white/10 bg-black/95 lg:hidden">
+        <div id="mobile-menu" className="border-t border-white/10 bg-black/95 lg:hidden">
           <div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-4">
             {navItems.map((item) => (
               <a

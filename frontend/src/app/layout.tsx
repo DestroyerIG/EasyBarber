@@ -30,6 +30,11 @@ export const metadata = {
     description: 'Controle total da operação da sua barbearia com agendamentos, equipe, clientes e financeiro em um só lugar.',
     type: 'website',
   },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'EasyBarber - Gestão para Barbearias',
+    description: 'Controle total da operação da sua barbearia com agendamentos, equipe, clientes e financeiro em um só lugar.',
+  },
   icons: {
     icon: easyBarberLogo.src,
     shortcut: easyBarberLogo.src,
@@ -44,28 +49,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-BR">
-      <head>
-        {/*
-          Script inline para aplicar o tema ANTES da renderização,
-          evitando o flash de tema errado (FOUC) no carregamento.
-        */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              try {
-                var t = localStorage.getItem('easybarber-theme') || localStorage.getItem('barberpro-theme');
-                if (t === 'light') {
-                  document.documentElement.classList.remove('dark');
-                } else {
-                  document.documentElement.classList.add('dark');
-                }
-              } catch(e) {
-                document.documentElement.classList.add('dark');
-              }
-            `,
-          }}
-        />
-      </head>
+      <head />
       <body className={`${plusJakartaSans.variable} ${spaceGrotesk.variable} bg-dark text-white`}>
         <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-2 focus:left-2 focus:bg-primary focus:text-black focus:px-4 focus:py-2 focus:rounded-lg focus:font-bold">
           Pular para o conteúdo

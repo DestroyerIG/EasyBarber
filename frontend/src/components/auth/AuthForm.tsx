@@ -223,7 +223,7 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
             </span>
             <p className="text-xs uppercase tracking-[0.24em] text-primary/70">EasyBarber</p>
           </div>
-          <h1 className="mt-3 text-4xl font-black leading-tight sm:text-5xl">
+          <h1 className="mt-3 text-3xl font-black leading-tight sm:text-4xl lg:text-5xl">
             {isLogin
               ? 'Acesse sua operação e mantenha o controle da barbearia.'
               : 'Abra sua conta e transforme sua barbearia em um negócio previsível.'}
@@ -241,7 +241,7 @@ export function AuthForm({ mode, selectedPlan }: AuthFormProps) {
           )}
         </section>
 
-        <section className="w-full max-w-md rounded-2xl border border-white/10 bg-black/70 p-8 shadow-2xl shadow-black/40 backdrop-blur">
+        <section className="w-full max-w-md rounded-2xl border border-white/10 bg-black/70 p-6 sm:p-8 shadow-2xl shadow-black/40 backdrop-blur">
           <div className="mb-6">
             <h2 className="text-2xl font-black">{isLogin ? 'Login' : 'Criar conta'}</h2>
             <p className="mt-1 text-sm text-gray-400">

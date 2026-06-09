@@ -12,15 +12,15 @@ export function PublicFooter() {
 
   return (
     <footer className="border-t border-white/10 bg-black/80">
-      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 lg:grid-cols-4 lg:px-8">
-        <div className="lg:col-span-2">
+      <div className="mx-auto grid max-w-7xl gap-8 px-4 py-10 sm:grid-cols-2 sm:px-6 sm:py-12 lg:grid-cols-4 lg:gap-10 lg:px-8 lg:py-14">
+        <div className="sm:col-span-2 lg:col-span-2">
           <div className="inline-flex items-center gap-3">
             <span className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-primary/30 bg-black/40">
               <Image src={easyBarberLogo} alt="Logo EasyBarber" width={40} height={40} className="h-full w-full object-contain" priority />
             </span>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">EasyBarber</p>
+            <p className="section-eyebrow">EasyBarber</p>
           </div>
-          <h3 className="mt-3 text-2xl font-black">Sistema para barbearias com foco em performance comercial.</h3>
+          <p className="mt-3 text-2xl font-black text-white">Sistema para barbearias com foco em performance comercial.</p>
           <p className="mt-3 max-w-lg text-sm text-gray-400">
             Centralize agendamentos, clientes, financeiro e equipe em uma plataforma confiável,
             moderna e pronta para escalar seu negócio.
@@ -28,7 +28,7 @@ export function PublicFooter() {
         </div>
 
         <div>
-          <h4 className="text-sm font-bold uppercase tracking-wider text-gray-200">Links úteis</h4>
+          <h2 className="text-sm font-bold uppercase tracking-wider text-gray-200">Links úteis</h2>
           <ul className="mt-4 space-y-2 text-sm text-gray-400">
             <li><a href="#inicio" className="hover:text-white">Início</a></li>
             <li><a href="#recursos" className="hover:text-white">Recursos</a></li>
@@ -38,7 +38,7 @@ export function PublicFooter() {
         </div>
 
         <div>
-          <h4 className="text-sm font-bold uppercase tracking-wider text-gray-200">Contato</h4>
+          <h2 className="text-sm font-bold uppercase tracking-wider text-gray-200">Contato</h2>
           <ul className="mt-4 space-y-2 text-sm text-gray-400">
             <li>
               <a href={contactUrl} target="_blank" rel="noreferrer" className="hover:text-white">
@@ -56,7 +56,7 @@ export function PublicFooter() {
       </div>
 
       <div className="border-t border-white/10">
-        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-2 px-4 py-4 text-xs text-gray-500 lg:flex-row lg:px-8">
+        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-2 px-4 py-4 text-xs text-gray-500 sm:px-6 lg:flex-row lg:px-8">
           <p>© {new Date().getFullYear()} EasyBarber. Todos os direitos reservados.</p>
           <div className="flex items-center gap-4">
             <Link href="/termos" className="hover:text-gray-300">Termos</Link>
