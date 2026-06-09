@@ -61,12 +61,14 @@ END $$;
 -- Tenant can read and update only their own barbershop row.
 -- INSERT/DELETE managed exclusively by backend.
 
-CREATE POLICY IF NOT EXISTS "tenant_select_barbershop"
+DROP POLICY IF EXISTS "tenant_select_barbershop" ON public.barbershops;
+CREATE POLICY "tenant_select_barbershop"
   ON public.barbershops FOR SELECT
   TO authenticated
   USING (id = public.current_barbershop_id());
 
-CREATE POLICY IF NOT EXISTS "tenant_update_barbershop"
+DROP POLICY IF EXISTS "tenant_update_barbershop" ON public.barbershops;
+CREATE POLICY "tenant_update_barbershop"
   ON public.barbershops FOR UPDATE
   TO authenticated
   USING  (id = public.current_barbershop_id())
@@ -76,12 +78,14 @@ CREATE POLICY IF NOT EXISTS "tenant_update_barbershop"
 -- Tenant can read all users of their barbershop.
 -- UPDATE restricted to the caller's own row only.
 
-CREATE POLICY IF NOT EXISTS "tenant_select_users"
+DROP POLICY IF EXISTS "tenant_select_users" ON public.users;
+CREATE POLICY "tenant_select_users"
   ON public.users FOR SELECT
   TO authenticated
   USING (barbershop_id = public.current_barbershop_id());
 
-CREATE POLICY IF NOT EXISTS "tenant_update_own_user"
+DROP POLICY IF EXISTS "tenant_update_own_user" ON public.users;
+CREATE POLICY "tenant_update_own_user"
   ON public.users FOR UPDATE
   TO authenticated
   USING  (supabase_user_id = auth.uid())
@@ -91,7 +95,8 @@ CREATE POLICY IF NOT EXISTS "tenant_update_own_user"
 
 -- ─── barbers ─────────────────────────────────────────────────────────────────
 
-CREATE POLICY IF NOT EXISTS "tenant_all_barbers"
+DROP POLICY IF EXISTS "tenant_all_barbers" ON public.barbers;
+CREATE POLICY "tenant_all_barbers"
   ON public.barbers FOR ALL
   TO authenticated
   USING  (barbershop_id = public.current_barbershop_id())
@@ -99,7 +104,8 @@ CREATE POLICY IF NOT EXISTS "tenant_all_barbers"
 
 -- ─── services ────────────────────────────────────────────────────────────────
 
-CREATE POLICY IF NOT EXISTS "tenant_all_services"
+DROP POLICY IF EXISTS "tenant_all_services" ON public.services;
+CREATE POLICY "tenant_all_services"
   ON public.services FOR ALL
   TO authenticated
   USING  (barbershop_id = public.current_barbershop_id())
@@ -107,7 +113,8 @@ CREATE POLICY IF NOT EXISTS "tenant_all_services"
 
 -- ─── clients ─────────────────────────────────────────────────────────────────
 
-CREATE POLICY IF NOT EXISTS "tenant_all_clients"
+DROP POLICY IF EXISTS "tenant_all_clients" ON public.clients;
+CREATE POLICY "tenant_all_clients"
   ON public.clients FOR ALL
   TO authenticated
   USING  (barbershop_id = public.current_barbershop_id())
@@ -115,7 +122,8 @@ CREATE POLICY IF NOT EXISTS "tenant_all_clients"
 
 -- ─── appointments ────────────────────────────────────────────────────────────
 
-CREATE POLICY IF NOT EXISTS "tenant_all_appointments"
+DROP POLICY IF EXISTS "tenant_all_appointments" ON public.appointments;
+CREATE POLICY "tenant_all_appointments"
   ON public.appointments FOR ALL
   TO authenticated
   USING  (barbershop_id = public.current_barbershop_id())
@@ -123,7 +131,8 @@ CREATE POLICY IF NOT EXISTS "tenant_all_appointments"
 
 -- ─── earnings ────────────────────────────────────────────────────────────────
 
-CREATE POLICY IF NOT EXISTS "tenant_all_earnings"
+DROP POLICY IF EXISTS "tenant_all_earnings" ON public.earnings;
+CREATE POLICY "tenant_all_earnings"
   ON public.earnings FOR ALL
   TO authenticated
   USING  (barbershop_id = public.current_barbershop_id())
@@ -131,7 +140,8 @@ CREATE POLICY IF NOT EXISTS "tenant_all_earnings"
 
 -- ─── expenses ────────────────────────────────────────────────────────────────
 
-CREATE POLICY IF NOT EXISTS "tenant_all_expenses"
+DROP POLICY IF EXISTS "tenant_all_expenses" ON public.expenses;
+CREATE POLICY "tenant_all_expenses"
   ON public.expenses FOR ALL
   TO authenticated
   USING  (barbershop_id = public.current_barbershop_id())
@@ -140,7 +150,8 @@ CREATE POLICY IF NOT EXISTS "tenant_all_expenses"
 -- ─── subscription_events ─────────────────────────────────────────────────────
 -- Read-only; written by billing webhooks via service role.
 
-CREATE POLICY IF NOT EXISTS "tenant_select_subscription_events"
+DROP POLICY IF EXISTS "tenant_select_subscription_events" ON public.subscription_events;
+CREATE POLICY "tenant_select_subscription_events"
   ON public.subscription_events FOR SELECT
   TO authenticated
   USING (barbershop_id = public.current_barbershop_id());
@@ -148,7 +159,8 @@ CREATE POLICY IF NOT EXISTS "tenant_select_subscription_events"
 -- ─── billing_webhook_events ──────────────────────────────────────────────────
 -- Read-only; written by billing webhooks via service role.
 
-CREATE POLICY IF NOT EXISTS "tenant_select_billing_webhook_events"
+DROP POLICY IF EXISTS "tenant_select_billing_webhook_events" ON public.billing_webhook_events;
+CREATE POLICY "tenant_select_billing_webhook_events"
   ON public.billing_webhook_events FOR SELECT
   TO authenticated
   USING (barbershop_id = public.current_barbershop_id());
@@ -156,7 +168,8 @@ CREATE POLICY IF NOT EXISTS "tenant_select_billing_webhook_events"
 -- ─── billing_payments ────────────────────────────────────────────────────────
 -- Read-only; written by billing webhooks via service role.
 
-CREATE POLICY IF NOT EXISTS "tenant_select_billing_payments"
+DROP POLICY IF EXISTS "tenant_select_billing_payments" ON public.billing_payments;
+CREATE POLICY "tenant_select_billing_payments"
   ON public.billing_payments FOR SELECT
   TO authenticated
   USING (barbershop_id = public.current_barbershop_id());
@@ -165,7 +178,8 @@ CREATE POLICY IF NOT EXISTS "tenant_select_billing_payments"
 -- No barbershop_id; authenticated users may read active coupons for checkout validation.
 -- Write operations managed by admin via service role.
 
-CREATE POLICY IF NOT EXISTS "authenticated_select_active_coupons"
+DROP POLICY IF EXISTS "authenticated_select_active_coupons" ON public.coupons;
+CREATE POLICY "authenticated_select_active_coupons"
   ON public.coupons FOR SELECT
   TO authenticated
   USING (active = true);
@@ -173,7 +187,8 @@ CREATE POLICY IF NOT EXISTS "authenticated_select_active_coupons"
 -- ─── audit_logs ──────────────────────────────────────────────────────────────
 -- Read-only; tenant sees logs where their barbershop is actor or target.
 
-CREATE POLICY IF NOT EXISTS "tenant_select_audit_logs"
+DROP POLICY IF EXISTS "tenant_select_audit_logs" ON public.audit_logs;
+CREATE POLICY "tenant_select_audit_logs"
   ON public.audit_logs FOR SELECT
   TO authenticated
   USING (
@@ -184,14 +199,16 @@ CREATE POLICY IF NOT EXISTS "tenant_select_audit_logs"
 -- ─── whatsapp_sessions ───────────────────────────────────────────────────────
 -- Read-only for tenant; bot writes via service role.
 
-CREATE POLICY IF NOT EXISTS "tenant_select_whatsapp_sessions"
+DROP POLICY IF EXISTS "tenant_select_whatsapp_sessions" ON public.whatsapp_sessions;
+CREATE POLICY "tenant_select_whatsapp_sessions"
   ON public.whatsapp_sessions FOR SELECT
   TO authenticated
   USING (barbershop_id = public.current_barbershop_id());
 
 -- ─── whatsapp_bot_config ─────────────────────────────────────────────────────
 
-CREATE POLICY IF NOT EXISTS "tenant_all_whatsapp_bot_config"
+DROP POLICY IF EXISTS "tenant_all_whatsapp_bot_config" ON public.whatsapp_bot_config;
+CREATE POLICY "tenant_all_whatsapp_bot_config"
   ON public.whatsapp_bot_config FOR ALL
   TO authenticated
   USING  (barbershop_id = public.current_barbershop_id())
@@ -200,14 +217,16 @@ CREATE POLICY IF NOT EXISTS "tenant_all_whatsapp_bot_config"
 -- ─── whatsapp_ratings ────────────────────────────────────────────────────────
 -- Read-only for tenant; written by WhatsApp bot via service role.
 
-CREATE POLICY IF NOT EXISTS "tenant_select_whatsapp_ratings"
+DROP POLICY IF EXISTS "tenant_select_whatsapp_ratings" ON public.whatsapp_ratings;
+CREATE POLICY "tenant_select_whatsapp_ratings"
   ON public.whatsapp_ratings FOR SELECT
   TO authenticated
   USING (barbershop_id = public.current_barbershop_id());
 
 -- ─── barbershop_settings ─────────────────────────────────────────────────────
 
-CREATE POLICY IF NOT EXISTS "tenant_all_barbershop_settings"
+DROP POLICY IF EXISTS "tenant_all_barbershop_settings" ON public.barbershop_settings;
+CREATE POLICY "tenant_all_barbershop_settings"
   ON public.barbershop_settings FOR ALL
   TO authenticated
   USING  (barbershop_id = public.current_barbershop_id())
@@ -215,7 +234,8 @@ CREATE POLICY IF NOT EXISTS "tenant_all_barbershop_settings"
 
 -- ─── whatsapp_menu_options ───────────────────────────────────────────────────
 
-CREATE POLICY IF NOT EXISTS "tenant_all_whatsapp_menu_options"
+DROP POLICY IF EXISTS "tenant_all_whatsapp_menu_options" ON public.whatsapp_menu_options;
+CREATE POLICY "tenant_all_whatsapp_menu_options"
   ON public.whatsapp_menu_options FOR ALL
   TO authenticated
   USING  (barbershop_id = public.current_barbershop_id())
