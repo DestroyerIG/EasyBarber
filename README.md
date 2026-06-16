@@ -1,142 +1,158 @@
-# EasyBarber SaaS 2.0
+# 💈 EasyBarber SaaS 2.0
 
-Plataforma SaaS para gestão de barbearias com agenda, clientes, serviços/barbeiros, financeiro, automações de WhatsApp, assinaturas e painel administrativo de plataforma.
+![Node.js](https://img.shields.io/badge/Node.js-20+-green?style=flat-square&logo=node.js)
+![Next.js](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js)
+![TypeScript](https://img.shields.io/badge/TypeScript-Strict-blue?style=flat-square&logo=typescript)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Prisma%205-336791?style=flat-square&logo=postgresql)
+![Status](https://img.shields.io/badge/Status-Em%20Desenvolvimento-yellow?style=flat-square)
 
-## Visão Geral
+> **Plataforma SaaS multi-tenant para gestão de barbearias — agenda inteligente, financeiro,
+> automações de WhatsApp, billing híbrido e painel administrativo de plataforma.**
 
-O projeto é dividido em:
+---
 
-- `backend`: API Node.js/Express.
-- `frontend`: aplicação Next.js com App Router.
-- PostgreSQL como banco principal.
-- Supabase Auth como provedor obrigatório de identidade.
-- Stripe e Asaas para billing.
-- Evolution API v2 externa para WhatsApp.
+## 🎯 Funcionalidades
 
-## Funcionalidades
+- Cadastro, confirmação de e-mail e login via **Supabase Auth**
+- Sessão com cookies httpOnly e refresh token
+- Dashboard tenant com métricas em tempo real
+- Gestão de agendamentos, clientes, serviços e barbeiros
+- Configuração operacional: dias de funcionamento, horários e intervalos
+- Financeiro com receitas, despesas e relatórios
+- Automação WhatsApp via **Evolution API v2**
+- Lembretes automáticos de agendamento via cron (2h antes, fuso da barbearia)
+- Billing híbrido: **Stripe** (cartão/assinatura) + **Asaas** (Pix)
+- Controle de acesso por plano e status de assinatura
+- Admin de plataforma: métricas, tenants, assinaturas, bloqueios e logs
+- Páginas públicas de Termos de Uso (`/termos`) e Política de Privacidade (`/privacidade`)
 
-- Cadastro, confirmação de e-mail e login via Supabase Auth.
-- Sessão com cookies httpOnly e refresh token.
-- Dashboard tenant.
-- Gestão de agendamentos, clientes, serviços e barbeiros.
-- Configuração operacional com dias de funcionamento, horários e intervalos de agenda.
-- Financeiro com receitas, despesas e relatórios.
-- Automação WhatsApp via Evolution API v2.
-- Lembretes automáticos de agendamento via cron (2h antes, fuso da barbearia).
-- Billing híbrido: Stripe para cartão/assinatura e Asaas para Pix.
-- Controle de acesso por plano e status de assinatura.
-- Admin de plataforma com métricas, tenants, assinaturas, bloqueios e logs.
-- Páginas públicas de Termos de Uso (`/termos`) e Política de Privacidade (`/privacidade`).
+---
 
-## Stack
+## 🛠️ Stack
 
-Backend:
+### Backend
 
-- Node.js 20+
-- TypeScript (strict)
-- Express 4
-- PostgreSQL via Prisma 5
-- Zod
-- JWT
-- Supabase JS
-- Pino
-- Stripe
-- Asaas via HTTP
-- Vitest/Supertest
+| Tecnologia | Versão | Uso |
+|-----------|--------|-----|
+| Node.js | 20+ | Runtime |
+| TypeScript | Strict | Linguagem |
+| Express | 4 | Framework HTTP |
+| Prisma | 5 | ORM / Migrations |
+| PostgreSQL | — | Banco principal |
+| Supabase Auth | — | Identidade |
+| Zod | — | Validação de schemas |
+| Pino | — | Logging estruturado |
+| Stripe | — | Assinatura/cartão |
+| Asaas | HTTP | Pix |
+| Vitest + Supertest | — | Testes |
 
-Frontend:
+### Frontend
 
-- Next.js 15
-- React 18
-- TypeScript
-- Tailwind CSS
-- Axios
-- Recharts
-- lucide-react
+| Tecnologia | Versão | Uso |
+|-----------|--------|-----|
+| Next.js | 15 | Framework (App Router) |
+| React | 18 | UI |
+| TypeScript | — | Linguagem |
+| Tailwind CSS | — | Estilização |
+| Recharts | — | Gráficos |
+| lucide-react | — | Ícones |
+| Axios | — | HTTP client |
 
-## Arquitetura
+---
 
-Backend:
+## 🏗️ Arquitetura
 
-```text
-Route -> Middleware -> Controller -> Service -> Repository -> PostgreSQL
+### Fluxo Backend
+```
+Route → Middleware → Controller → Service → Repository → PostgreSQL
 ```
 
-WhatsApp:
-
-```text
-Frontend -> Backend EasyBarber -> Evolution API v2 externa
+### Fluxo WhatsApp
+```
+Frontend → Backend EasyBarber → Evolution API v2 externa
 ```
 
-Billing:
-
-```text
-Frontend -> Backend -> Stripe/Asaas -> Webhook -> Backend -> PostgreSQL
+### Fluxo Billing
+```
+Frontend → Backend → Stripe/Asaas → Webhook → Backend → PostgreSQL
 ```
 
-O frontend nunca chama Evolution API, Stripe secret ou Asaas diretamente.
+> O frontend nunca chama Evolution API, Stripe secret ou Asaas diretamente.
 
-## Estrutura
+---
 
-```text
-backend/
-  prisma/
-    schema.prisma  # fonte de verdade do banco
-    migrations/    # migrations Prisma (baseline + incrementais)
-  src/
-    config/        # Prisma client, Stripe client, plan permissions
-    controllers/
-    integrations/  # Asaas
-    middleware/
-    modules/       # módulos TS completos (appointments, billing, etc.)
-    repositories/  # 100% Prisma
-    routes/
-    services/
-    types/         # interfaces de domínio + Zod schemas
-    validators/
-    __tests__/
+## 🗂️ Estrutura do Projeto
 
-frontend/
-  src/
-    app/
-    components/
-    contexts/
-    hooks/
-    lib/
-    styles/
-    types/
+```
+Barberpro-saas-2.0/
+│
+├── 📁 backend/
+│   ├── prisma/
+│   │   ├── schema.prisma         # Fonte de verdade do banco
+│   │   └── migrations/           # Migrations Prisma (baseline + incrementais)
+│   └── src/
+│       ├── config/               # Prisma client, Stripe client, plan permissions
+│       ├── controllers/
+│       ├── integrations/         # Asaas
+│       ├── middleware/
+│       ├── modules/              # Módulos TS completos (appointments, billing, etc.)
+│       ├── repositories/         # 100% Prisma
+│       ├── routes/
+│       ├── services/
+│       ├── types/                # Interfaces de domínio + Zod schemas
+│       ├── validators/
+│       └── __tests__/
+│
+├── 📁 frontend/
+│   └── src/
+│       ├── app/
+│       ├── components/
+│       ├── contexts/
+│       ├── hooks/
+│       ├── lib/
+│       ├── styles/
+│       └── types/
+│
+└── README.md
 ```
 
-Veja PROJECT_STRUCTURE.md para detalhes.
+> Veja `PROJECT_STRUCTURE.md` para detalhes completos.
 
-## Começar Rápido
+---
+
+## 🚀 Começar Rápido
 
 ```bash
+# Instale todas as dependências
 npm run install:all
+
+# Configure as variáveis de ambiente
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env.local
 ```
 
-Configure Supabase e banco, depois:
+Configure Supabase e banco, depois inicie os serviços:
 
 ```bash
+# Backend
 cd backend && npm run dev
-```
 
-```bash
+# Frontend (novo terminal)
 cd frontend && npm run dev
 ```
 
-URLs:
+| Serviço | URL |
+|---------|-----|
+| Frontend | http://localhost:3000 |
+| Backend | http://localhost:5000 |
+| Health Check | http://localhost:5000/health |
+| API Base | http://localhost:5000/api/v1 |
 
-- Frontend: http://localhost:3000
-- Backend: http://localhost:5000
-- Health: http://localhost:5000/health
-- API: http://localhost:5000/api/v1
+---
 
-## Variáveis Principais
+## ⚙️ Variáveis de Ambiente
 
-Backend mínimo:
+### Backend (mínimo)
 
 ```env
 DATABASE_URL=postgresql://postgres:senha@localhost:5432/barberpro
@@ -149,7 +165,7 @@ SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 AUTH_SUPABASE_REDIRECT_TO=http://localhost:3000/auth/confirm
 ```
 
-Frontend mínimo:
+### Frontend (mínimo)
 
 ```env
 BACKEND_API_URL=http://localhost:5000/api/v1
@@ -159,96 +175,139 @@ NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
 ```
 
-`AUTH_PROVIDER_MODE` é obsoleto. SMTP é opcional e não participa da confirmação de autenticação no fluxo atual.
+---
 
-## Banco
-
-Banco novo exige aplicar o schema Prisma:
+## 🗄️ Banco de Dados
 
 ```bash
 cd backend
-npm run db:migrate:deploy   # produção
-# ou
-npm run db:migrate          # desenvolvimento
+
+# Produção
+npm run db:migrate:deploy
+
+# Desenvolvimento
+npm run db:migrate
 ```
 
-Schema em `prisma/schema.prisma`. Consulte DEPLOY.md para fluxo completo de banco em produção.
+Schema em `prisma/schema.prisma`. Consulte `DEPLOY.md` para o fluxo completo em produção.
 
-## Scripts
+---
 
-Raiz:
+## 📜 Scripts
 
-- `npm run install:all`
-- `npm run dev:backend`
-- `npm run dev:frontend`
-- `npm run seed:auth-admin`
-- `npm run seed:system-users`
+### Raiz
 
-Backend:
+| Script | Descrição |
+|--------|-----------|
+| `npm run install:all` | Instala dependências de backend e frontend |
+| `npm run dev:backend` | Inicia backend em modo desenvolvimento |
+| `npm run dev:frontend` | Inicia frontend em modo desenvolvimento |
+| `npm run seed:auth-admin` | Seed do admin de plataforma |
+| `npm run seed:system-users` | Seed dos usuários de sistema |
 
-- `npm run dev`
-- `npm start`
-- `npm test`
-- `npm run migrate:legacy-auth`
+### Backend
 
-Frontend:
+| Script | Descrição |
+|--------|-----------|
+| `npm run dev` | Desenvolvimento com hot-reload |
+| `npm start` | Produção |
+| `npm test` | Executa testes |
 
-- `npm run dev`
-- `npm run build`
-- `npm start`
-- `npm run lint`
+### Frontend
 
-## API
+| Script | Descrição |
+|--------|-----------|
+| `npm run dev` | Desenvolvimento |
+| `npm run build` | Build de produção |
+| `npm start` | Serve o build |
+| `npm run lint` | Lint do código |
 
-Base URL:
+---
 
-- `http://localhost:5000/api/v1`
+## 🔌 API
 
-Principais grupos:
+Base URL: `http://localhost:5000/api/v1`
 
-- `/auth`
-- `/dashboard`
-- `/appointments`
-- `/clients`
-- `/finance`
-- `/barbershop`
-- `/whatsapp`
-- `/subscriptions`
-- `/billing`
-- `/admin`
+| Grupo | Responsabilidade |
+|-------|-----------------|
+| `/auth` | Autenticação e sessão |
+| `/dashboard` | Métricas do tenant |
+| `/appointments` | Agendamentos |
+| `/clients` | Clientes |
+| `/finance` | Financeiro |
+| `/barbershop` | Configuração da barbearia |
+| `/whatsapp` | Automações e webhook |
+| `/subscriptions` | Assinaturas |
+| `/billing` | Billing e pagamentos |
+| `/admin` | Painel de plataforma |
 
-Veja API_DOCS.md para endpoints e contratos.
+> Veja `API_DOCS.md` para endpoints e contratos completos.
 
-## Billing
+---
 
-- Stripe: assinatura recorrente/cartão, portal e webhooks.
-- Asaas: Pix com QR Code e webhook.
-- Status não ativos restringem acesso a billing/status conforme PLANOS.md.
+## 💳 Billing
 
-## WhatsApp
+- **Stripe** — assinatura recorrente, cartão, portal do cliente e webhooks
+- **Asaas** — Pix com QR Code e webhook
+- Status não ativos restringem acesso conforme `PLANOS.md`
 
-- Provider atual: Evolution API v2 externa.
-- Webhook principal: `/api/v1/whatsapp/webhook`.
-- Tenant por instância: `barbershops.whatsapp_instance_name`.
+---
 
-Veja WHATSAPP_BOT.md.
+## 💬 WhatsApp
 
-## Docker
+- Provider atual: **Evolution API v2** externa
+- Webhook principal: `/api/v1/whatsapp/webhook`
+- Tenant por instância: `barbershops.whatsapp_instance_name`
+
+> Veja `WHATSAPP_BOT.md` para configuração completa.
+
+---
+
+## 🐳 Docker
 
 ```bash
 docker compose up --build
 ```
 
-Atenção: o compose atual aplica automaticamente até `migration_v15.sql`; aplique v16-v19 manualmente para schema completo.
+> O compose atual aplica automaticamente até `migration_v15.sql`. Aplique v16+ manualmente para schema completo.
 
-## Documentação
+---
 
-- START_HERE.md: caminho de leitura.
-- QUICK_START.md: setup rápido.
-- INSTALL.md: instalação completa.
-- POSTGRESQL_SETUP.md: banco e migrations.
-- API_DOCS.md: API REST.
-- PLANOS.md: planos e gates.
-- WHATSAPP_BOT.md: WhatsApp/Evolution.
-- DEPLOY.md: produção.
-- TROUBLESHOOTING.md: diagnóstico.
+## 📚 Documentação
+
+| Arquivo | Conteúdo |
+|---------|----------|
+| `START_HERE.md` | Caminho de leitura recomendado |
+| `QUICK_START.md` | Setup rápido |
+| `INSTALL.md` | Instalação completa |
+| `POSTGRESQL_SETUP.md` | Banco e migrations |
+| `API_DOCS.md` | API REST |
+| `PLANOS.md` | Planos e gates de acesso |
+| `WHATSAPP_BOT.md` | WhatsApp / Evolution API |
+| `DEPLOY.md` | Fluxo de produção |
+| `TROUBLESHOOTING.md` | Diagnóstico de problemas |
+
+---
+
+## 👨‍💻 Autores
+
+**Ítallo Gonçalves**
+Estudante de Engenharia de Software
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Ítallo%20Gonçalves-blue?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/itallo-gonçalves-3406a119a/)
+[![GitHub](https://img.shields.io/badge/GitHub-DestroyerIG-black?style=flat-square&logo=github)](https://github.com/DestroyerIG)
+[![Email](https://img.shields.io/badge/Email-igitallogabriel13@gmail.com-red?style=flat-square&logo=gmail)](mailto:igitallogabriel13@gmail.com)
+
+**Pedro Lucas Barros Silva**
+Colaborador
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Pedro%20Lucas-blue?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/pedro-lucas-barros-silva-9a28571a3/)
+[![GitHub](https://img.shields.io/badge/GitHub-BarrosPL-black?style=flat-square&logo=github)](https://github.com/BarrosPL)
+[![Email](https://img.shields.io/badge/Email-barros.pedro@academico.ifpb.edu.br-red?style=flat-square&logo=gmail)](mailto:barros.pedro@academico.ifpb.edu.br)
+
+---
+
+<p align="center">
+  Desenvolvido com 💈 precisão, 🟢 Node.js e foco em produto.<br/>
+  <i>"Boas ferramentas não apenas organizam — elas transformam negócios."</i>
+</p>
