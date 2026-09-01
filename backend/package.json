@@ -31,7 +31,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "dependencies": {
     "@opentelemetry/auto-instrumentations-node": "^0.74.0",
     "@opentelemetry/sdk-node": "^0.216.0",

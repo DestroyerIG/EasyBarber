@@ -5,6 +5,7 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-Strict-blue?style=flat-square&logo=typescript)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Prisma%205-336791?style=flat-square&logo=postgresql)
 ![Status](https://img.shields.io/badge/Status-Em%20Desenvolvimento-yellow?style=flat-square)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=flat-square)](./LICENSE)
 
 > **Plataforma SaaS multi-tenant para gestão de barbearias — agenda inteligente, financeiro,
 > automações de WhatsApp, billing híbrido e painel administrativo de plataforma.**
@@ -286,6 +287,12 @@ docker compose up --build
 | `WHATSAPP_BOT.md` | WhatsApp / Evolution API |
 | `DEPLOY.md` | Fluxo de produção |
 | `TROUBLESHOOTING.md` | Diagnóstico de problemas |
+
+---
+
+## 📄 Licença
+
+Este projeto está licenciado sob a [Apache License 2.0](./LICENSE).
 
 ---
 
